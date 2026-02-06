@@ -8,16 +8,27 @@ Exocortex gives AI coding agents persistent memory across sessions. It stores me
 
 ## Quick Start
 
+Requires **Node.js >= 20** and **pnpm**.
+
 ```bash
+git clone https://github.com/shawnhack/exocortex.git
+cd exocortex
 pnpm install
-pnpm build
+pnpm build        # first build downloads the embedding model (~80MB)
+```
 
-# Start server + dashboard
-npx tsx packages/cli/src/index.ts serve --port 3210
+Start the server and dashboard:
 
-# Or use the CLI directly
-npx tsx packages/cli/src/index.ts add "Remember this" --tags "test,demo" --importance 0.8
-npx tsx packages/cli/src/index.ts search "remember" --verbose
+```bash
+pnpm exec exo serve
+# → http://localhost:3210
+```
+
+Or use the CLI directly:
+
+```bash
+pnpm exec exo add "Remember this" --tags "test,demo" --importance 0.8
+pnpm exec exo search "remember" --verbose
 ```
 
 ### Connect an AI agent
@@ -157,7 +168,7 @@ An optional stop hook can remind the agent to store a session summary before exi
 ## CLI
 
 ```bash
-exo <command> [options]
+pnpm exec exo <command> [options]
 ```
 
 | Command | Description |
@@ -467,7 +478,7 @@ pnpm install
 pnpm build
 
 # Run all tests
-pnpm test    # 178 tests across 14 files
+pnpm test
 
 # Type-check
 pnpm lint
