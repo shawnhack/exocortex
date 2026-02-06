@@ -1,0 +1,29 @@
+{
+  "name": "exocortex",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal unified memory system — SQLite-backed, local-first, hybrid RAG retrieval.",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "tsx watch packages/cli/src/index.ts serve",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "onnxruntime-node",
+      "protobufjs",
+      "sharp"
+    ]
+  }
+}

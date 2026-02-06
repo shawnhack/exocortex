@@ -1,0 +1,867 @@
+#!/usr/bin/env node
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import fs from "node:fs";
+import path from "node:path";
+import { getDb, initializeSchema, MemoryStore, MemorySearch, EntityStore, getEmbeddingProvider, getArchiveCandidates, archiveStaleMemories, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary } from "@exocortex/core";
+import type { ContentType } from "@exocortex/core";
+
+const startTime = Date.now();
+
+// --- Utility functions ---
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+function packByTokenBudget<T>(
+  items: T[],
+  maxTokens: number,
+  formatFn: (item: T) => string
+): { packed: T[]; formatted: string[]; totalTokens: number } {
+  const packed: T[] = [];
+  const formatted: string[] = [];
+  let totalTokens = 0;
+
+  for (const item of items) {
+    const text = formatFn(item);
+    const tokens = estimateTokens(text);
+
+    if (packed.length > 0 && totalTokens + tokens > maxTokens) break;
+
+    // Always include at least one result
+    packed.push(item);
+    formatted.push(text);
+    totalTokens += tokens;
+  }
+
+  return { packed, formatted, totalTokens };
+}
+
+function smartPreview(content: string, query: string, maxLen = 120): string {
+  const sentences = content.split(/(?<=[.!?])\s+/).filter((s) => s.length > 0);
+  if (sentences.length === 0) return content.substring(0, maxLen);
+
+  const queryWords = new Set(
+    query.toLowerCase().split(/\s+/).filter((w) => w.length > 2)
+  );
+
+  if (queryWords.size === 0) {
+    const first = sentences[0];
+    return first.length > maxLen ? first.substring(0, maxLen - 3) + "..." : first;
+  }
+
+  let bestScore = -1;
+  let bestSentence = sentences[0];
+
+  for (const sentence of sentences) {
+    const words = sentence.toLowerCase().split(/\s+/);
+    const overlap = words.filter((w) => queryWords.has(w)).length;
+    if (overlap > bestScore) {
+      bestScore = overlap;
+      bestSentence = sentence;
+    }
+  }
+
+  return bestSentence.length > maxLen
+    ? bestSentence.substring(0, maxLen - 3) + "..."
+    : bestSentence;
+}
+
+const server = new McpServer({
+  name: "exocortex",
+  version: "0.1.0",
+});
+
+// Eagerly initialize DB + schema + embedding model at startup
+// so first tool call doesn't pay the cost
+const db = getDb();
+initializeSchema(db);
+getEmbeddingProvider().catch(() => {
+  // Model warmup failed — will retry on first tool call
+});
+
+// memory_store
+server.tool(
+  "memory_store",
+  "Store a new memory in Exocortex. Use this to save important information, facts, preferences, decisions, or context that should be remembered for future conversations.",
+  {
+    content: z.string().describe("The content to remember"),
+    tags: z.array(z.string()).optional().describe("Tags for categorization"),
+    importance: z.number().min(0).max(1).optional().describe("Importance 0-1 (default 0.5, use 0.8+ for critical info)"),
+    content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("Content type (default 'text')"),
+    metadata: z.record(z.string(), z.any()).optional().describe("Arbitrary JSON metadata (e.g. { model: 'claude-opus-4-6' })"),
+  },
+  async (args) => {
+    const store = new MemoryStore(db);
+
+    const result = await store.create({
+      content: args.content,
+      content_type: args.content_type ?? "text",
+      source: "mcp",
+      importance: args.importance ?? 0.5,
+      tags: args.tags,
+      metadata: args.metadata,
+    });
+
+    const meta: string[] = [`id: ${result.memory.id}`];
+    if (args.tags?.length) meta.push(`tags: ${args.tags.join(", ")}`);
+    if (args.importance) meta.push(`importance: ${args.importance}`);
+    if (result.superseded_id) {
+      const pct = Math.round((result.dedup_similarity ?? 0) * 100);
+      meta.push(`superseded ${result.superseded_id} — ${pct}% similar`);
+    }
+
+    return { content: [{ type: "text", text: `Stored memory (${meta.join(" | ")})` }] };
+  }
+);
+
+// memory_search
+server.tool(
+  "memory_search",
+  "Search Exocortex memories using hybrid retrieval (semantic + keyword + recency + frequency). Use this to recall stored information or find relevant context.",
+  {
+    query: z.string().describe("Natural language search query"),
+    limit: z.number().min(1).max(50).optional().describe("Max results (default 10)"),
+    tags: z.array(z.string()).optional().describe("Filter by tags"),
+    after: z.string().optional().describe("Only after this date (YYYY-MM-DD)"),
+    before: z.string().optional().describe("Only before this date (YYYY-MM-DD)"),
+    content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("Filter by content type"),
+    min_score: z.number().min(0).optional().describe("Minimum score threshold. RRF scoring range is ~0.001-0.03; legacy range is ~0.15-0.80. Default auto-detected from scoring mode."),
+    compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
+    max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
+  },
+  async (args) => {
+    const search = new MemorySearch(db);
+    const store = new MemoryStore(db);
+
+    const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 10);
+
+    const results = await search.search({
+      query: args.query,
+      limit: fetchLimit,
+      tags: args.tags,
+      after: args.after,
+      before: args.before,
+      content_type: args.content_type,
+      min_score: args.min_score,
+    });
+
+    if (results.length === 0) {
+      return { content: [{ type: "text", text: "No memories found matching the query." }] };
+    }
+
+    const scoringMode = getRRFConfig(db).enabled ? "rrf" : "legacy";
+
+    if (args.compact) {
+      const formatCompact = (r: typeof results[number]) => {
+        const m = r.memory;
+        const preview = smartPreview(m.content, args.query);
+        const tagStr = m.tags?.length ? ` | tags: ${m.tags.join(", ")}` : "";
+        return `[${m.id}] ${preview} (score: ${r.score.toFixed(3)}${tagStr})`;
+      };
+
+      if (args.max_tokens) {
+        const { formatted, totalTokens } = packByTokenBudget(results, args.max_tokens, formatCompact);
+        return {
+          content: [{ type: "text", text: `Found ${formatted.length} memories (~${totalTokens} tokens, compact, ${scoringMode}):\n\n${formatted.join("\n")}` }],
+        };
+      }
+
+      const lines = results.map(formatCompact);
+      return {
+        content: [{ type: "text", text: `Found ${results.length} memories (compact, ${scoringMode}):\n\n${lines.join("\n")}` }],
+      };
+    }
+
+    const formatFull = (r: typeof results[number]) => {
+      const m = r.memory;
+      const meta: string[] = [];
+      if (m.tags?.length) meta.push(`tags: ${m.tags.join(", ")}`);
+      meta.push(`score: ${r.score.toFixed(3)}`);
+      meta.push(`created: ${m.created_at}`);
+      if (m.importance !== 0.5) meta.push(`importance: ${m.importance}`);
+      return `[${m.id}] ${m.content}\n  (${meta.join(" | ")})`;
+    };
+
+    if (args.max_tokens) {
+      const { packed, formatted, totalTokens } = packByTokenBudget(results, args.max_tokens, formatFull);
+      for (const r of packed) {
+        await store.recordAccess(r.memory.id, args.query);
+      }
+      return {
+        content: [{ type: "text", text: `Found ${formatted.length} memories (~${totalTokens} tokens, ${scoringMode}):\n\n${formatted.join("\n\n")}` }],
+      };
+    }
+
+    for (const r of results) {
+      await store.recordAccess(r.memory.id, args.query);
+    }
+
+    const lines = results.map(formatFull);
+
+    return {
+      content: [{ type: "text", text: `Found ${results.length} memories (${scoringMode}):\n\n${lines.join("\n\n")}` }],
+    };
+  }
+);
+
+// memory_forget
+server.tool(
+  "memory_forget",
+  "Delete a memory from Exocortex by ID. Use when information is outdated or incorrect.",
+  {
+    id: z.string().describe("The memory ID to delete (ULID)"),
+  },
+  async (args) => {
+    const store = new MemoryStore(db);
+
+    const existing = await store.getById(args.id);
+    if (!existing) {
+      return { content: [{ type: "text", text: `Memory ${args.id} not found.` }] };
+    }
+
+    await store.delete(args.id);
+    const preview = existing.content.substring(0, 80) + (existing.content.length > 80 ? "..." : "");
+    return { content: [{ type: "text", text: `Deleted memory ${args.id}: "${preview}"` }] };
+  }
+);
+
+// memory_context
+server.tool(
+  "memory_context",
+  "Load contextual memories for a topic. Use at the start of a conversation to get relevant background about a subject, project, or person.",
+  {
+    topic: z.string().describe("Topic to load context for"),
+    limit: z.number().min(1).max(30).optional().describe("Max memories (default 15)"),
+    compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
+    max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
+  },
+  async (args) => {
+    const search = new MemorySearch(db);
+    const store = new MemoryStore(db);
+
+    const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 15);
+
+    const results = await search.search({
+      query: args.topic,
+      limit: fetchLimit,
+    });
+
+    if (results.length === 0) {
+      return { content: [{ type: "text", text: `No context found for "${args.topic}".` }] };
+    }
+
+    if (args.compact) {
+      const formatCompact = (r: typeof results[number]) => {
+        const m = r.memory;
+        const preview = smartPreview(m.content, args.topic);
+        const tagStr = m.tags?.length ? ` [${m.tags.join(", ")}]` : "";
+        return `- [${m.id}] ${preview}${tagStr} (${m.created_at})`;
+      };
+
+      if (args.max_tokens) {
+        const { formatted, totalTokens } = packByTokenBudget(results, args.max_tokens, formatCompact);
+        return {
+          content: [{ type: "text", text: `Context for "${args.topic}" (~${totalTokens} tokens, ${formatted.length} memories, compact):\n\n${formatted.join("\n")}` }],
+        };
+      }
+
+      const lines = results.map(formatCompact);
+      return {
+        content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories, compact):\n\n${lines.join("\n")}` }],
+      };
+    }
+
+    const formatFull = (r: typeof results[number]) => {
+      const m = r.memory;
+      const tagStr = m.tags?.length ? ` [${m.tags.join(", ")}]` : "";
+      return `- ${m.content}${tagStr} (${m.created_at})`;
+    };
+
+    if (args.max_tokens) {
+      const { packed, formatted, totalTokens } = packByTokenBudget(results, args.max_tokens, formatFull);
+      for (const r of packed) {
+        await store.recordAccess(r.memory.id, `context:${args.topic}`);
+      }
+      return {
+        content: [{ type: "text", text: `Context for "${args.topic}" (~${totalTokens} tokens, ${formatted.length} memories):\n\n${formatted.join("\n")}` }],
+      };
+    }
+
+    for (const r of results) {
+      await store.recordAccess(r.memory.id, `context:${args.topic}`);
+    }
+
+    const lines = results.map(formatFull);
+
+    return {
+      content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories):\n\n${lines.join("\n")}` }],
+    };
+  }
+);
+
+// memory_get
+server.tool(
+  "memory_get",
+  "Fetch full content for specific memory IDs. Use after compact search to retrieve details for relevant results.",
+  {
+    ids: z.array(z.string()).min(1).max(10).describe("Memory IDs to fetch (max 10)"),
+  },
+  async (args) => {
+    const store = new MemoryStore(db);
+    const results: string[] = [];
+
+    for (const id of args.ids) {
+      const memory = await store.getById(id);
+      if (!memory) {
+        results.push(`[${id}] Not found`);
+        continue;
+      }
+
+      await store.recordAccess(id);
+
+      const meta: string[] = [];
+      if (memory.tags?.length) meta.push(`tags: ${memory.tags.join(", ")}`);
+      meta.push(`created: ${memory.created_at}`);
+      if (memory.importance !== 0.5) meta.push(`importance: ${memory.importance}`);
+      results.push(`[${memory.id}] ${memory.content}\n  (${meta.join(" | ")})`);
+    }
+
+    return { content: [{ type: "text", text: results.join("\n\n") }] };
+  }
+);
+
+// memory_entities
+server.tool(
+  "memory_entities",
+  "List entities (people, projects, technologies, etc.) tracked in Exocortex with linked memory counts.",
+  {
+    type: z.enum(["person", "project", "technology", "organization", "concept"]).optional().describe("Filter by entity type"),
+    query: z.string().optional().describe("Search entity names"),
+  },
+  async (args) => {
+    let sql = `
+      SELECT e.id, e.name, e.type, e.aliases,
+             COUNT(me.memory_id) as memory_count
+      FROM entities e
+      LEFT JOIN memory_entities me ON e.id = me.entity_id
+    `;
+    const conditions: string[] = [];
+    const params: string[] = [];
+
+    if (args.type) {
+      conditions.push("e.type = ?");
+      params.push(args.type);
+    }
+    if (args.query) {
+      conditions.push("(e.name LIKE ? OR e.aliases LIKE ?)");
+      params.push(`%${args.query}%`, `%${args.query}%`);
+    }
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(" AND ")}`;
+    }
+    sql += " GROUP BY e.id HAVING COUNT(me.memory_id) > 0 ORDER BY memory_count DESC, e.name ASC LIMIT 50";
+
+    const rows = db.prepare(sql).all(...params) as unknown as Array<{
+      id: string;
+      name: string;
+      type: string;
+      aliases: string;
+      memory_count: number;
+    }>;
+
+    if (rows.length === 0) {
+      const msg = args.type
+        ? `No entities of type "${args.type}" found.`
+        : "No entities found yet.";
+      return { content: [{ type: "text", text: msg }] };
+    }
+
+    const entityStore = new EntityStore(db);
+
+    const lines = rows.map((r) => {
+      const aliases = JSON.parse(r.aliases) as string[];
+      const aliasStr = aliases.length > 0 ? ` (aka: ${aliases.join(", ")})` : "";
+      let line = `- ${r.name}${aliasStr} [${r.type}] — ${r.memory_count} memories`;
+
+      // Include relationships
+      const related = entityStore.getRelatedEntities(r.id);
+      if (related.length > 0) {
+        const relStrs = related.slice(0, 5).map((rel) => {
+          if (rel.direction === "outgoing") {
+            return `${rel.relationship} → ${rel.entity.name}`;
+          }
+          return `${rel.relationship} ← ${rel.entity.name}`;
+        });
+        line += `\n    Relationships: ${relStrs.join(", ")}`;
+        if (related.length > 5) {
+          line += ` (+${related.length - 5} more)`;
+        }
+      }
+
+      return line;
+    });
+
+    return {
+      content: [{ type: "text", text: `Entities (${rows.length}):\n\n${lines.join("\n")}` }],
+    };
+  }
+);
+
+// memory_update
+server.tool(
+  "memory_update",
+  "Update an existing memory's content, tags, importance, or content type. Use when information needs correction or enrichment.",
+  {
+    id: z.string().describe("The memory ID to update (ULID)"),
+    content: z.string().optional().describe("New content (will re-embed)"),
+    content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("New content type"),
+    importance: z.number().min(0).max(1).optional().describe("New importance score"),
+    tags: z.array(z.string()).optional().describe("Replace all tags with these"),
+    metadata: z.record(z.string(), z.any()).optional().describe("Merge metadata keys (set value to null to delete a key)"),
+  },
+  async (args) => {
+    const { id, ...updates } = args;
+
+    if (!updates.content && !updates.content_type && updates.importance === undefined && !updates.tags && !updates.metadata) {
+      return { content: [{ type: "text", text: "No update fields provided. Specify at least one of: content, content_type, importance, tags, metadata." }] };
+    }
+
+    const store = new MemoryStore(db);
+    const updated = await store.update(id, updates);
+
+    if (!updated) {
+      return { content: [{ type: "text", text: `Memory ${id} not found.` }] };
+    }
+
+    const preview = updated.content.substring(0, 80) + (updated.content.length > 80 ? "..." : "");
+    const meta: string[] = [];
+    if (updated.tags?.length) meta.push(`tags: ${updated.tags.join(", ")}`);
+    meta.push(`importance: ${updated.importance}`);
+    return { content: [{ type: "text", text: `Updated memory ${id}: "${preview}" (${meta.join(" | ")})` }] };
+  }
+);
+
+// memory_browse
+server.tool(
+  "memory_browse",
+  "Browse memories without semantic search. Filter by tags, content type, or date range. Returns most recent first.",
+  {
+    tags: z.array(z.string()).optional().describe("Filter by tags (any match)"),
+    content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("Filter by content type"),
+    after: z.string().optional().describe("Only after this date (YYYY-MM-DD)"),
+    before: z.string().optional().describe("Only before this date (YYYY-MM-DD)"),
+    limit: z.number().min(1).max(50).optional().describe("Max results (default 20)"),
+    compact: z.boolean().optional().describe("Return compact results (ID + preview) to save tokens"),
+  },
+  async (args) => {
+    const limit = args.limit ?? 20;
+    const conditions: string[] = ["m.is_active = 1"];
+    const params: (string | number)[] = [];
+
+    if (args.content_type) {
+      conditions.push("m.content_type = ?");
+      params.push(args.content_type);
+    }
+    if (args.after) {
+      conditions.push("m.created_at >= ?");
+      params.push(args.after);
+    }
+    if (args.before) {
+      conditions.push("m.created_at <= ?");
+      params.push(args.before);
+    }
+
+    let tagJoin = "";
+    if (args.tags && args.tags.length > 0) {
+      const placeholders = args.tags.map(() => "?").join(", ");
+      tagJoin = ` INNER JOIN memory_tags mt ON m.id = mt.memory_id AND mt.tag IN (${placeholders})`;
+      params.unshift(...args.tags.map((t) => t.toLowerCase().trim()));
+    }
+
+    const sql = `
+      SELECT DISTINCT m.id, m.content, m.content_type, m.importance, m.created_at
+      FROM memories m${tagJoin}
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY m.created_at DESC
+      LIMIT ?
+    `;
+    params.push(limit);
+
+    const rows = db.prepare(sql).all(...params) as unknown as Array<{
+      id: string;
+      content: string;
+      content_type: string;
+      importance: number;
+      created_at: string;
+    }>;
+
+    if (rows.length === 0) {
+      return { content: [{ type: "text", text: "No memories found matching the filters." }] };
+    }
+
+    // Batch-fetch tags for all results
+    const ids = rows.map((r) => r.id);
+    const tagPlaceholders = ids.map(() => "?").join(", ");
+    const tagRows = db
+      .prepare(`SELECT memory_id, tag FROM memory_tags WHERE memory_id IN (${tagPlaceholders})`)
+      .all(...ids) as unknown as Array<{ memory_id: string; tag: string }>;
+
+    const tagMap = new Map<string, string[]>();
+    for (const tr of tagRows) {
+      const existing = tagMap.get(tr.memory_id) ?? [];
+      existing.push(tr.tag);
+      tagMap.set(tr.memory_id, existing);
+    }
+
+    if (args.compact) {
+      const lines = rows.map((r) => {
+        const preview = r.content.substring(0, 120) + (r.content.length > 120 ? "..." : "");
+        const tags = tagMap.get(r.id);
+        const tagStr = tags?.length ? ` [${tags.join(", ")}]` : "";
+        return `[${r.id}] ${preview}${tagStr}`;
+      });
+      return {
+        content: [{ type: "text", text: `Browsing ${rows.length} memories (compact):\n\n${lines.join("\n")}` }],
+      };
+    }
+
+    const lines = rows.map((r) => {
+      const tags = tagMap.get(r.id);
+      const meta: string[] = [];
+      if (tags?.length) meta.push(`tags: ${tags.join(", ")}`);
+      meta.push(`type: ${r.content_type}`);
+      meta.push(`created: ${r.created_at}`);
+      if (r.importance !== 0.5) meta.push(`importance: ${r.importance}`);
+      return `[${r.id}] ${r.content}\n  (${meta.join(" | ")})`;
+    });
+
+    return {
+      content: [{ type: "text", text: `Browsing ${rows.length} memories:\n\n${lines.join("\n\n")}` }],
+    };
+  }
+);
+
+// memory_decay_preview
+server.tool(
+  "memory_decay_preview",
+  "Preview which memories would be archived by the decay process. Dry-run only, no changes made.",
+  {},
+  async () => {
+    const candidates = getArchiveCandidates(db);
+
+    if (candidates.length === 0) {
+      return { content: [{ type: "text", text: "No archive candidates found. All memories are healthy." }] };
+    }
+
+    const lines = candidates.map((c) => {
+      const preview = c.content.substring(0, 80) + (c.content.length > 80 ? "..." : "");
+      return `- [${c.id}] ${preview} (reason: ${c.reason}, importance: ${c.importance}, accesses: ${c.access_count}, created: ${c.created_at})`;
+    });
+
+    return {
+      content: [{ type: "text", text: `Archive candidates (${candidates.length}, dry-run):\n\n${lines.join("\n")}` }],
+    };
+  }
+);
+
+// memory_consolidate
+server.tool(
+  "memory_consolidate",
+  "Find clusters of similar memories and consolidate them into summaries. Reduces redundancy.",
+  {
+    dry_run: z.boolean().optional().describe("Preview clusters without consolidating (default false)"),
+    min_similarity: z.number().min(0).max(1).optional().describe("Minimum cosine similarity for clustering (default 0.75)"),
+    min_cluster_size: z.number().min(2).optional().describe("Minimum cluster size (default 3)"),
+  },
+  async (args) => {
+    const clusters = findClusters(db, {
+      minSimilarity: args.min_similarity,
+      minClusterSize: args.min_cluster_size,
+    });
+
+    if (clusters.length === 0) {
+      return { content: [{ type: "text", text: "No clusters found eligible for consolidation." }] };
+    }
+
+    if (args.dry_run !== false) {
+      // Default to dry_run unless explicitly set to false
+      const lines = clusters.map((c, i) => {
+        return `${i + 1}. "${c.topic}" — ${c.memberIds.length} memories, avg similarity: ${c.avgSimilarity.toFixed(2)}`;
+      });
+      return {
+        content: [{
+          type: "text",
+          text: `Found ${clusters.length} clusters (dry run):\n\n${lines.join("\n")}\n\nRun with dry_run: false to consolidate.`,
+        }],
+      };
+    }
+
+    // Actually consolidate
+    let embeddingProvider;
+    try {
+      embeddingProvider = await getEmbeddingProvider();
+    } catch {
+      // Proceed without embedding
+    }
+
+    const results: string[] = [];
+    for (const cluster of clusters) {
+      const summary = generateBasicSummary(db, cluster.memberIds);
+      const summaryId = await consolidateCluster(db, cluster, summary, embeddingProvider);
+      results.push(`Consolidated ${cluster.memberIds.length} memories → ${summaryId} ("${cluster.topic}")`);
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: `Consolidated ${clusters.length} clusters:\n\n${results.join("\n")}`,
+      }],
+    };
+  }
+);
+
+// memory_maintenance
+server.tool(
+  "memory_maintenance",
+  "Run maintenance: adjust importance scores based on access patterns and archive stale memories.",
+  {},
+  async () => {
+    const importanceResult = adjustImportance(db);
+    const archiveResult = archiveStaleMemories(db);
+
+    const parts: string[] = [];
+
+    parts.push(`Importance adjustments: ${importanceResult.boosted} boosted, ${importanceResult.decayed} decayed`);
+    if (importanceResult.details.length > 0) {
+      const details = importanceResult.details.slice(0, 10).map(
+        (d) => `  ${d.id}: ${d.action} ${d.old_importance} → ${d.new_importance}`
+      );
+      parts.push(details.join("\n"));
+      if (importanceResult.details.length > 10) {
+        parts.push(`  ... and ${importanceResult.details.length - 10} more`);
+      }
+    }
+
+    parts.push(`\nArchival: ${archiveResult.archived} memories archived`);
+    if (archiveResult.candidates.length > 0) {
+      const details = archiveResult.candidates.slice(0, 10).map((c) => {
+        const preview = c.content.substring(0, 60) + (c.content.length > 60 ? "..." : "");
+        return `  ${c.id}: "${preview}" (${c.reason})`;
+      });
+      parts.push(details.join("\n"));
+      if (archiveResult.candidates.length > 10) {
+        parts.push(`  ... and ${archiveResult.candidates.length - 10} more`);
+      }
+    }
+
+    // Check for consolidation candidates
+    try {
+      const clusters = findClusters(db);
+      if (clusters.length > 0) {
+        parts.push(`\nConsolidation: Found ${clusters.length} cluster(s) eligible for consolidation (run memory_consolidate to merge)`);
+      }
+    } catch {
+      // Non-critical
+    }
+
+    return { content: [{ type: "text", text: `Maintenance complete:\n\n${parts.join("\n")}` }] };
+  }
+);
+
+// memory_ping
+server.tool(
+  "memory_ping",
+  "Health check — returns memory counts, entity/tag stats, date range, and server uptime.",
+  {},
+  async () => {
+    const store = new MemoryStore(db);
+    const stats = await store.getStats();
+    const uptimeMs = Date.now() - startTime;
+    const uptimeSec = Math.floor(uptimeMs / 1000);
+    const uptimeMin = Math.floor(uptimeSec / 60);
+    const uptimeHr = Math.floor(uptimeMin / 60);
+
+    let uptimeStr: string;
+    if (uptimeHr > 0) {
+      uptimeStr = `${uptimeHr}h ${uptimeMin % 60}m`;
+    } else if (uptimeMin > 0) {
+      uptimeStr = `${uptimeMin}m ${uptimeSec % 60}s`;
+    } else {
+      uptimeStr = `${uptimeSec}s`;
+    }
+
+    const lines = [
+      `Status: OK`,
+      `Memories: ${stats.active_memories} active / ${stats.total_memories} total`,
+      `Entities: ${stats.total_entities}`,
+      `Tags: ${stats.total_tags}`,
+      `Oldest: ${stats.oldest_memory ?? "none"}`,
+      `Newest: ${stats.newest_memory ?? "none"}`,
+      `Uptime: ${uptimeStr}`,
+    ];
+
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  }
+);
+
+// memory_ingest
+server.tool(
+  "memory_ingest",
+  "Index external markdown files into Exocortex as memories. Splits by ## headers into separate memories. Supports glob patterns like *.md.",
+  {
+    path: z.union([z.string(), z.array(z.string())]).describe("File path(s) — supports glob patterns with * or ? in the filename"),
+    tags: z.array(z.string()).optional().describe("Tags to apply to all ingested memories"),
+    importance: z.number().min(0).max(1).optional().describe("Importance score (default 0.5)"),
+    content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("Content type (default 'note')"),
+  },
+  async (args) => {
+    const inputPaths = Array.isArray(args.path) ? args.path : [args.path];
+
+    // Expand glob patterns
+    const resolvedPaths: string[] = [];
+    for (const p of inputPaths) {
+      if (p.includes("*") || p.includes("?")) {
+        // Basic glob: expand in the directory containing the pattern
+        const dir = path.dirname(p);
+        const pattern = path.basename(p);
+        const regex = new RegExp(
+          "^" + pattern.replace(/\./g, "\\.").replace(/\*/g, ".*").replace(/\?/g, ".") + "$"
+        );
+        try {
+          const absDir = path.resolve(dir);
+          const entries = fs.readdirSync(absDir);
+          for (const entry of entries) {
+            if (regex.test(entry)) {
+              resolvedPaths.push(path.join(absDir, entry));
+            }
+          }
+        } catch (err) {
+          return {
+            content: [{ type: "text" as const, text: `Error reading directory "${dir}": ${err instanceof Error ? err.message : String(err)}` }],
+          };
+        }
+      } else {
+        resolvedPaths.push(path.resolve(p));
+      }
+    }
+
+    if (resolvedPaths.length === 0) {
+      return { content: [{ type: "text", text: "No files matched the provided path(s)." }] };
+    }
+
+    // Verify files exist
+    const missing = resolvedPaths.filter((p) => !fs.existsSync(p));
+    if (missing.length > 0) {
+      return {
+        content: [{ type: "text", text: `File(s) not found: ${missing.join(", ")}` }],
+      };
+    }
+
+    try {
+      const result = await ingestFiles(db, resolvedPaths, {
+        tags: args.tags,
+        importance: args.importance,
+        content_type: args.content_type as ContentType | undefined,
+      });
+
+      const lines = result.files.map((f) => {
+        const name = path.basename(f.file);
+        const replacedStr = f.replaced > 0 ? `, replaced ${f.replaced} existing` : "";
+        return `- ${name}: ${f.stored} memories stored (${f.sections} sections, ${f.skipped} skipped${replacedStr})`;
+      });
+
+      const replacedStr = result.totalReplaced > 0 ? ` (replaced ${result.totalReplaced} existing)` : "";
+      return {
+        content: [{
+          type: "text",
+          text: `Ingested ${result.totalStored} memories from ${result.files.length} file(s)${replacedStr}:\n\n${lines.join("\n")}`,
+        }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Ingest error: ${err instanceof Error ? err.message : String(err)}` }],
+      };
+    }
+  }
+);
+
+// memory_digest_session
+server.tool(
+  "memory_digest_session",
+  "Digest a Claude Code session transcript into a structured memory summary.",
+  {
+    transcript_path: z.string().describe("Path to the session transcript JSONL file"),
+    tags: z.array(z.string()).optional().describe("Additional tags"),
+  },
+  async (args) => {
+    if (!fs.existsSync(args.transcript_path)) {
+      return { content: [{ type: "text", text: `Transcript not found: ${args.transcript_path}` }] };
+    }
+
+    const result = await digestTranscript(args.transcript_path);
+
+    if (result.actions.length === 0) {
+      return { content: [{ type: "text", text: "No actionable tool uses found in transcript." }] };
+    }
+
+    const store = new MemoryStore(db);
+    const { memory } = await store.create({
+      content: result.summary,
+      content_type: "summary",
+      source: "mcp",
+      importance: 0.5,
+      tags: ["session-digest", ...(result.project ? [result.project] : []), ...(args.tags ?? [])],
+    });
+
+    // Store each extracted fact as an individual memory
+    let factsStored = 0;
+    for (const fact of result.facts) {
+      try {
+        await store.create({
+          content: fact.text,
+          content_type: "text",
+          source: "mcp",
+          importance: 0.6,
+          tags: [
+            "session-fact",
+            fact.type,
+            ...(result.project ? [result.project] : []),
+            ...(args.tags ?? []),
+          ],
+        });
+        factsStored++;
+      } catch {
+        // Non-critical — skip individual fact on failure
+      }
+    }
+
+    const factStr = factsStored > 0 ? ` + ${factsStored} facts extracted` : "";
+    return {
+      content: [{
+        type: "text",
+        text: `Stored session digest (${result.actions.length} actions, project: ${result.project ?? "unknown"})${factStr}.\nID: ${memory.id}`,
+      }],
+    };
+  }
+);
+
+// Start
+async function main() {
+  // On Windows, MCP hosts may redirect stderr to "nul" which can create
+  // a literal file in the CWD under some shell environments (git-bash/MSYS).
+  // Suppress stderr to avoid this.
+  if (process.platform === "win32") {
+    process.stderr.write = () => true;
+  }
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+main().catch(() => {
+  process.exit(1);
+});
