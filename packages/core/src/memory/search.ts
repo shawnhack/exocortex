@@ -67,26 +67,9 @@ export class MemorySearch {
     // Candidate pool: fetch enough rows for scoring, but cap proportionally
     const candidateLimit = Math.min(1000, Math.max(100, (offset + limit) * 10));
 
-    // Get filtered memories with rowid for FTS matching (avoids separate rowid query)
-    const rows = this.db
-      .prepare(
-        `SELECT m.*, m.rowid as _rowid FROM memories m WHERE ${whereClause} ORDER BY created_at DESC LIMIT ${candidateLimit}`
-      )
-      .all(...params) as unknown as (MemoryRow & { _rowid: number })[];
-
-    if (rows.length === 0) return [];
-
-    // Get query embedding
-    let queryEmbedding: Float32Array | null = null;
-    try {
-      const provider = await getEmbeddingProvider();
-      queryEmbedding = await provider.embed(query.query);
-    } catch {
-      // Fall back to FTS-only if embedding fails
-    }
-
-    // Get FTS matches
-    const ftsMatches = new Map<number, number>();
+    // Get FTS matches FIRST (so we can include them in candidate pool)
+    const ftsMatches = new Map<string, number>();
+    const ftsRowids: number[] = [];
     try {
       const ftsRows = this.db
         .prepare(
@@ -102,11 +85,61 @@ export class MemorySearch {
 
         for (const row of ftsRows) {
           // Invert: most negative (best) → 1.0, least negative → 0.0
-          ftsMatches.set(row.rowid, (maxRank - row.rank) / range);
+          // Use String() for consistent key type (node:sqlite returns bigint)
+          ftsMatches.set(String(row.rowid), (maxRank - row.rank) / range);
+          ftsRowids.push(Number(row.rowid));
         }
       }
     } catch {
       // FTS query may fail on unusual input; continue with vector-only
+    }
+
+    // Build candidate pool: FTS matches + recent memories (ensures keyword matches are always included)
+    let rows: (MemoryRow & { _rowid: number })[];
+    
+    if (ftsRowids.length > 0) {
+      // First, get all FTS matches that pass filters
+      const ftsPlaceholders = ftsRowids.map(() => "?").join(", ");
+      const ftsMatchRows = this.db
+        .prepare(
+          `SELECT m.*, m.rowid as _rowid FROM memories m WHERE ${whereClause} AND m.rowid IN (${ftsPlaceholders})`
+        )
+        .all(...params, ...ftsRowids) as unknown as (MemoryRow & { _rowid: number })[];
+      
+      // Collect FTS match IDs to exclude from recent pool
+      const ftsIds = new Set(ftsMatchRows.map(r => r.id));
+      
+      // Then get recent memories (excluding FTS matches to avoid dupes)
+      const recentLimit = Math.max(0, candidateLimit - ftsMatchRows.length);
+      let recentRows: (MemoryRow & { _rowid: number })[] = [];
+      if (recentLimit > 0) {
+        recentRows = this.db
+          .prepare(
+            `SELECT m.*, m.rowid as _rowid FROM memories m WHERE ${whereClause} ORDER BY created_at DESC LIMIT ${recentLimit}`
+          )
+          .all(...params) as unknown as (MemoryRow & { _rowid: number })[];
+        // Filter out duplicates (FTS matches already included)
+        recentRows = recentRows.filter(r => !ftsIds.has(r.id));
+      }
+      
+      rows = [...ftsMatchRows, ...recentRows];
+    } else {
+      rows = this.db
+        .prepare(
+          `SELECT m.*, m.rowid as _rowid FROM memories m WHERE ${whereClause} ORDER BY created_at DESC LIMIT ${candidateLimit}`
+        )
+        .all(...params) as unknown as (MemoryRow & { _rowid: number })[];
+    }
+
+    if (rows.length === 0) return [];
+
+    // Get query embedding
+    let queryEmbedding: Float32Array | null = null;
+    try {
+      const provider = await getEmbeddingProvider();
+      queryEmbedding = await provider.embed(query.query);
+    } catch {
+      // Fall back to FTS-only if embedding fails
     }
 
     // Configurable min_score threshold (query param overrides setting)
@@ -166,7 +199,7 @@ export class MemorySearch {
         vectorScore = Math.max(0, cosineSimilarity(queryEmbedding, memEmbedding));
       }
 
-      const ftsScore = ftsMatches.get(row._rowid) ?? 0;
+      const ftsScore = ftsMatches.get(String(row._rowid)) ?? 0;
       const recency = recencyScore(row.created_at, weights.recencyDecay, row.importance);
       const freq = frequencyScore(row.access_count, maxAccessCount);
 
