@@ -22,6 +22,7 @@ export interface Memory {
   is_active: boolean;
   superseded_by: string | null;
   chunk_index: number | null;
+  keywords?: string;
   metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -103,6 +104,7 @@ export interface MemoryRow {
   is_active: number;
   superseded_by: string | null;
   chunk_index: number | null;
+  keywords: string | null;
   metadata: string | null;
   created_at: string;
   updated_at: string;

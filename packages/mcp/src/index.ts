@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, initializeSchema, MemoryStore, MemorySearch, EntityStore, getEmbeddingProvider, getArchiveCandidates, archiveStaleMemories, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary } from "@exocortex/core";
+import { getDb, initializeSchema, MemoryStore, MemorySearch, EntityStore, getEmbeddingProvider, getArchiveCandidates, archiveStaleMemories, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 
 const startTime = Date.now();
@@ -391,10 +391,11 @@ server.tool(
       const related = entityStore.getRelatedEntities(r.id);
       if (related.length > 0) {
         const relStrs = related.slice(0, 5).map((rel) => {
+          const ctxStr = rel.context ? ` (${rel.context})` : "";
           if (rel.direction === "outgoing") {
-            return `${rel.relationship} → ${rel.entity.name}`;
+            return `${rel.relationship} → ${rel.entity.name}${ctxStr}`;
           }
-          return `${rel.relationship} ← ${rel.entity.name}`;
+          return `${rel.relationship} ← ${rel.entity.name}${ctxStr}`;
         });
         line += `\n    Relationships: ${relStrs.join(", ")}`;
         if (related.length > 5) {
@@ -408,6 +409,73 @@ server.tool(
     return {
       content: [{ type: "text", text: `Entities (${rows.length}):\n\n${lines.join("\n")}` }],
     };
+  }
+);
+
+// memory_graph
+server.tool(
+  "memory_graph",
+  "Analyze the entity relationship graph. Compute centrality metrics to find bridge entities that connect different knowledge domains.",
+  {
+    action: z.enum(["stats", "centrality", "bridges", "communities"]).describe("Analysis type: 'stats' for overview, 'centrality' for top entities by betweenness, 'bridges' for bridge entities, 'communities' for dense subgraphs"),
+    limit: z.number().min(1).max(50).optional().describe("Max results for centrality/bridges (default 10)"),
+  },
+  async (args) => {
+    const limit = args.limit ?? 10;
+
+    if (args.action === "stats") {
+      const stats = computeGraphStats(db);
+      const lines = [
+        `Nodes: ${stats.nodeCount}`,
+        `Edges: ${stats.edgeCount}`,
+        `Components: ${stats.components}`,
+        `Avg degree: ${stats.avgDegree}`,
+      ];
+      return { content: [{ type: "text", text: `Graph stats:\n${lines.join("\n")}` }] };
+    }
+
+    if (args.action === "centrality") {
+      const centrality = computeCentrality(db);
+      if (centrality.length === 0) {
+        return { content: [{ type: "text", text: "No entities found in the graph." }] };
+      }
+      const top = centrality.slice(0, limit);
+      const lines = top.map((c, i) =>
+        `${i + 1}. ${c.entityName} — degree: ${c.degree}, betweenness: ${c.betweenness.toFixed(4)}, memories: ${c.memoryCount}`
+      );
+      return { content: [{ type: "text", text: `Top ${top.length} entities by centrality:\n\n${lines.join("\n")}` }] };
+    }
+
+    if (args.action === "communities") {
+      const communities = detectCommunities(db);
+      if (communities.length === 0) {
+        return { content: [{ type: "text", text: "No communities detected (need at least 2 connected entities)." }] };
+      }
+      const top = communities.slice(0, limit);
+      const lines = top.map((c) => {
+        const members = c.members.map((m) => m.entityName).join(", ");
+        return `${c.id + 1}. [${c.size} members, ${c.internalEdges} edges] ${members}`;
+      });
+      return { content: [{ type: "text", text: `Detected ${communities.length} communities:\n\n${lines.join("\n")}` }] };
+    }
+
+    // bridges
+    const bridges = getTopBridgeEntities(db, limit);
+    if (bridges.length === 0) {
+      return { content: [{ type: "text", text: "No bridge entities found." }] };
+    }
+
+    const entityStore = new EntityStore(db);
+    const lines = bridges.map((b, i) => {
+      const related = entityStore.getRelatedEntities(b.entityId);
+      const domains = related.slice(0, 5).map((r) => {
+        const ctxStr = r.context ? ` (${r.context})` : "";
+        return r.direction === "outgoing" ? `${r.relationship} → ${r.entity.name}${ctxStr}` : `${r.relationship} ← ${r.entity.name}${ctxStr}`;
+      });
+      const domainStr = domains.length > 0 ? `\n    Connected: ${domains.join(", ")}` : "";
+      return `${i + 1}. ${b.entityName} — betweenness: ${b.betweenness.toFixed(4)}, degree: ${b.degree}, memories: ${b.memoryCount}${domainStr}`;
+    });
+    return { content: [{ type: "text", text: `Top ${bridges.length} bridge entities:\n\n${lines.join("\n")}` }] };
   }
 );
 
@@ -600,7 +668,7 @@ server.tool(
       };
     }
 
-    // Actually consolidate
+    // Actually consolidate (basic summary — LLM synthesis handled via Cortex sentinel)
     let embeddingProvider;
     try {
       embeddingProvider = await getEmbeddingProvider();
@@ -668,6 +736,51 @@ server.tool(
       // Non-critical
     }
 
+    // Health diagnostics with corrective suggestions
+    try {
+      const health = runHealthChecks(db);
+      const issues = health.checks.filter((c) => c.status !== "ok");
+      if (issues.length > 0) {
+        parts.push(`\nHealth: ${health.overall.toUpperCase()} (${issues.length} issue(s))`);
+        const suggestions: Record<string, string> = {
+          "Embedding gap": "Re-store or update memories to trigger embedding generation",
+          "Tag sparsity": "Add tags to memories using memory_update, or enable auto_tagging",
+          "Entity orphans": "Clean up unused entities or link them to memories",
+          "Retrieval desert": "Use memory_search more actively to surface stored knowledge",
+          "Importance collapse": "Manually boost key memories with memory_update importance:0.7+",
+          "Consolidation backlog": "Run memory_consolidate dry_run:false to merge similar memories",
+          "Growth stall": "Store new memories — the system works best with regular input",
+          "Stale access": "Query your memories more often to keep the system active",
+        };
+        for (const check of issues) {
+          const icon = check.status === "warn" ? "[!]" : "[!!]";
+          parts.push(`  ${icon} ${check.name}: ${check.message}`);
+          const suggestion = suggestions[check.name];
+          if (suggestion) {
+            parts.push(`      → ${suggestion}`);
+          }
+        }
+      } else {
+        parts.push(`\nHealth: OK — all checks passed`);
+      }
+    } catch {
+      // Non-critical
+    }
+
+    // Search friction signals
+    try {
+      const misses = getSearchMisses(db, 10, 7);
+      if (misses.length > 0) {
+        parts.push(`\nSearch friction (last 7 days):`);
+        for (const m of misses) {
+          const scoreStr = m.avg_max_score !== null ? `, avg max score: ${m.avg_max_score.toFixed(3)}` : "";
+          parts.push(`  "${m.query}" — ${m.count} miss(es)${scoreStr}, last: ${m.last_seen}`);
+        }
+      }
+    } catch {
+      // Non-critical
+    }
+
     return { content: [{ type: "text", text: `Maintenance complete:\n\n${parts.join("\n")}` }] };
   }
 );
@@ -703,6 +816,20 @@ server.tool(
       `Newest: ${stats.newest_memory ?? "none"}`,
       `Uptime: ${uptimeStr}`,
     ];
+
+    // Health diagnostics
+    try {
+      const health = runHealthChecks(db);
+      const statusIcon = { ok: "OK", warn: "WARN", critical: "CRITICAL" };
+      lines.push("");
+      lines.push(`Health: ${statusIcon[health.overall]}`);
+      for (const check of health.checks) {
+        const prefix = check.status === "ok" ? "  " : check.status === "warn" ? "  [!] " : "  [!!] ";
+        lines.push(`${prefix}${check.name}: ${check.message}`);
+      }
+    } catch {
+      // Non-critical
+    }
 
     return { content: [{ type: "text", text: lines.join("\n") }] };
   }

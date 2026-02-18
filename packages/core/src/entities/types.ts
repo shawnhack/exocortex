@@ -29,6 +29,7 @@ export interface EntityRelationship {
   relationship: string;
   confidence: number;
   memory_id: string | null;
+  context: string | null;
   created_at: string;
 }
 
@@ -37,4 +38,5 @@ export interface ExtractedRelationship {
   target: string;
   relationship: string;
   confidence: number;
+  context?: string;
 }

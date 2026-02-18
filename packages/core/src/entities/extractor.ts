@@ -359,23 +359,47 @@ interface RelationshipPattern {
   re: RegExp;
   relationship: string;
   confidence: number;
+  contextGroup: number; // capture group index for context phrase
+}
+
+// Captures optional trailing context phrase: "for/to/in/as/with {phrase}"
+const CONTEXT_SUFFIX = /(?:\s+(?:for|to|in|as|with)\s+([^.,]+))?/;
+const TERMINATOR = "(?:\\.|,|$)";
+
+/** Count capturing groups in a regex source string */
+function countGroups(source: string): number {
+  let count = 0;
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === "\\") { i++; continue; } // skip escaped chars
+    if (source[i] === "(" && source[i + 1] !== "?") count++;
+  }
+  return count;
+}
+
+function withContext(base: RegExp): { re: RegExp; contextGroup: number } {
+  const src = base.source;
+  if (!src.endsWith(TERMINATOR)) return { re: base, contextGroup: -1 };
+  const stripped = src.slice(0, -TERMINATOR.length);
+  const baseGroups = countGroups(stripped);
+  const re = new RegExp(stripped + CONTEXT_SUFFIX.source + TERMINATOR, base.flags);
+  return { re, contextGroup: baseGroups + 1 };
 }
 
 const RELATIONSHIP_PATTERNS: RelationshipPattern[] = [
   // "X uses Y", "X using Y"
-  { re: /\b(.+?)\s+(?:uses|using|use)\s+(.+?)(?:\.|,|$)/gi, relationship: "uses", confidence: 0.7 },
+  { ...withContext(/\b(.+?)\s+(?:uses|using|use)\s+(.+?)(?:\.|,|$)/gi), relationship: "uses", confidence: 0.7 },
   // "X built with Y", "X built on Y"
-  { re: /\b(.+?)\s+(?:built\s+(?:with|on|using))\s+(.+?)(?:\.|,|$)/gi, relationship: "uses", confidence: 0.7 },
+  { ...withContext(/\b(.+?)\s+(?:built\s+(?:with|on|using))\s+(.+?)(?:\.|,|$)/gi), relationship: "uses", confidence: 0.7 },
   // "X depends on Y"
-  { re: /\b(.+?)\s+(?:depends\s+on|relies\s+on)\s+(.+?)(?:\.|,|$)/gi, relationship: "uses", confidence: 0.7 },
+  { ...withContext(/\b(.+?)\s+(?:depends\s+on|relies\s+on)\s+(.+?)(?:\.|,|$)/gi), relationship: "uses", confidence: 0.7 },
   // "X works at Y", "X joined Y"
-  { re: /\b(.+?)\s+(?:works\s+at|joined|works\s+for)\s+(.+?)(?:\.|,|$)/gi, relationship: "works_at", confidence: 0.7 },
+  { ...withContext(/\b(.+?)\s+(?:works\s+at|joined|works\s+for)\s+(.+?)(?:\.|,|$)/gi), relationship: "works_at", confidence: 0.7 },
   // "X is part of Y", "X belongs to Y"
-  { re: /\b(.+?)\s+(?:is\s+part\s+of|belongs\s+to)\s+(.+?)(?:\.|,|$)/gi, relationship: "part_of", confidence: 0.7 },
+  { ...withContext(/\b(.+?)\s+(?:is\s+part\s+of|belongs\s+to)\s+(.+?)(?:\.|,|$)/gi), relationship: "part_of", confidence: 0.7 },
   // "X created Y", "X built Y", "X authored Y"
-  { re: /\b(.+?)\s+(?:created|built|authored|developed|wrote)\s+(.+?)(?:\.|,|$)/gi, relationship: "created", confidence: 0.7 },
+  { ...withContext(/\b(.+?)\s+(?:created|built|authored|developed|wrote)\s+(.+?)(?:\.|,|$)/gi), relationship: "created", confidence: 0.7 },
   // "X replaces Y", "X supersedes Y"
-  { re: /\b(.+?)\s+(?:replaces|supersedes|replaced)\s+(.+?)(?:\.|,|$)/gi, relationship: "replaces", confidence: 0.7 },
+  { ...withContext(/\b(.+?)\s+(?:replaces|supersedes|replaced)\s+(.+?)(?:\.|,|$)/gi), relationship: "replaces", confidence: 0.7 },
 ];
 
 /**
@@ -403,6 +427,9 @@ export function extractRelationships(
     while ((match = pattern.re.exec(text)) !== null) {
       const rawSource = match[1].trim();
       const rawTarget = match[2].trim();
+      const rawContext = pattern.contextGroup > 0
+        ? match[pattern.contextGroup]?.trim() || undefined
+        : undefined;
 
       // Try to match source and target to known entities
       const source = findMatchingEntity(rawSource, entityNames);
@@ -417,6 +444,7 @@ export function extractRelationships(
             target,
             relationship: pattern.relationship,
             confidence: pattern.confidence,
+            context: rawContext,
           });
         }
       }

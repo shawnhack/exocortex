@@ -22,8 +22,10 @@ export type {
   MemorySource,
 } from "./memory/types.js";
 export { MemoryStore, stripPrivateContent } from "./memory/store.js";
-export { MemorySearch } from "./memory/search.js";
+export { MemorySearch, getSearchMisses } from "./memory/search.js";
+export type { SearchMissAggregate } from "./memory/search.js";
 export { autoGenerateTags } from "./memory/auto-tags.js";
+export { generateKeywords } from "./memory/keywords.js";
 export {
   cosineSimilarity,
   recencyScore,
@@ -63,6 +65,8 @@ export type { Entity, EntityType, CreateEntityInput, EntityRelationship, Extract
 export { EntityStore } from "./entities/store.js";
 export { extractEntities, extractRelationships } from "./entities/extractor.js";
 export type { ExtractedEntity } from "./entities/extractor.js";
+export { computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities } from "./entities/graph.js";
+export type { GraphStats, EntityCentrality, Community } from "./entities/graph.js";
 
 // Intelligence
 export {
@@ -110,6 +114,10 @@ export type {
   ImportanceAdjustOptions,
   ImportanceAdjustResult,
 } from "./intelligence/importance.js";
+export { runHealthChecks } from "./intelligence/health.js";
+export type { HealthCheck, HealthReport } from "./intelligence/health.js";
+export { generateSynthesis } from "./intelligence/synthesis.js";
+export type { SynthesisOptions } from "./intelligence/synthesis.js";
 
 // Backup
 export {

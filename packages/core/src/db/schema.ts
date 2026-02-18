@@ -126,6 +126,31 @@ const CREATE_FTS_TRIGGERS = `
   END;
 `;
 
+// FTS5 with keywords column — used after migration adds keywords column
+const CREATE_FTS_WITH_KEYWORDS = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    content,
+    keywords,
+    content='memories',
+    content_rowid='rowid'
+  );
+`;
+
+const CREATE_FTS_TRIGGERS_WITH_KEYWORDS = `
+  CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, content, keywords) VALUES (new.rowid, new.content, new.keywords);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, content, keywords) VALUES('delete', old.rowid, old.content, old.keywords);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE OF content, keywords ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, content, keywords) VALUES('delete', old.rowid, old.content, old.keywords);
+    INSERT INTO memories_fts(rowid, content, keywords) VALUES (new.rowid, new.content, new.keywords);
+  END;
+`;
+
 const DEFAULT_SETTINGS: Record<string, string> = {
   "scoring.vector_weight": "0.45",
   "scoring.fts_weight": "0.25",
@@ -157,6 +182,8 @@ const initializedDbs = new WeakSet<DatabaseSync>();
 
 export function initializeSchema(db: DatabaseSync): void {
   if (initializedDbs.has(db)) return;
+
+  let needsFtsRebuild = false;
 
   db.exec(CREATE_TABLES);
   db.exec(CREATE_FTS);
@@ -194,6 +221,45 @@ export function initializeSchema(db: DatabaseSync): void {
   }
   if (!colNames.has("metadata")) {
     db.exec("ALTER TABLE memories ADD COLUMN metadata TEXT");
+  }
+  // Search friction signal tracking
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS search_misses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      query TEXT NOT NULL,
+      result_count INTEGER NOT NULL DEFAULT 0,
+      max_score REAL,
+      filters TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_search_misses_created ON search_misses(created_at);
+  `);
+
+  // Context phrases on entity relationships
+  const relColumns = db
+    .prepare("PRAGMA table_info(entity_relationships)")
+    .all() as Array<{ name: string }>;
+  const relColNames = new Set(relColumns.map((c) => c.name));
+  if (!relColNames.has("context")) {
+    db.exec("ALTER TABLE entity_relationships ADD COLUMN context TEXT");
+  }
+
+  if (!colNames.has("keywords")) {
+    db.exec("ALTER TABLE memories ADD COLUMN keywords TEXT");
+    // Rebuild FTS to include keywords column
+    needsFtsRebuild = true;
+  }
+
+  // Rebuild FTS5 to include keywords if needed
+  if (needsFtsRebuild) {
+    // Drop existing FTS table and triggers, recreate with keywords
+    db.exec("DROP TRIGGER IF EXISTS memories_ai");
+    db.exec("DROP TRIGGER IF EXISTS memories_ad");
+    db.exec("DROP TRIGGER IF EXISTS memories_au");
+    db.exec("DROP TABLE IF EXISTS memories_fts");
+    db.exec(CREATE_FTS_WITH_KEYWORDS);
+    db.exec(CREATE_FTS_TRIGGERS_WITH_KEYWORDS);
+    db.exec("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')");
   }
 
   initializedDbs.add(db);

@@ -135,7 +135,8 @@ export class EntityStore {
     targetId: string,
     relationship: string,
     confidence = 0.7,
-    memoryId?: string
+    memoryId?: string,
+    context?: string
   ): void {
     // Deduplicate by source+target+relationship
     const existing = this.db
@@ -150,9 +151,9 @@ export class EntityStore {
     const now = new Date().toISOString().replace("T", " ").replace("Z", "");
     this.db
       .prepare(
-        "INSERT INTO entity_relationships (id, source_entity_id, target_entity_id, relationship, confidence, memory_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO entity_relationships (id, source_entity_id, target_entity_id, relationship, confidence, memory_id, context, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
       )
-      .run(id, sourceId, targetId, relationship, confidence, memoryId ?? null, now);
+      .run(id, sourceId, targetId, relationship, confidence, memoryId ?? null, context ?? null, now);
   }
 
   getRelationships(entityId: string): EntityRelationship[] {
@@ -166,20 +167,20 @@ export class EntityStore {
     return rows;
   }
 
-  getRelatedEntities(entityId: string): Array<{ entity: Entity; relationship: string; direction: "outgoing" | "incoming" }> {
+  getRelatedEntities(entityId: string): Array<{ entity: Entity; relationship: string; direction: "outgoing" | "incoming"; context: string | null }> {
     const rels = this.getRelationships(entityId);
-    const results: Array<{ entity: Entity; relationship: string; direction: "outgoing" | "incoming" }> = [];
+    const results: Array<{ entity: Entity; relationship: string; direction: "outgoing" | "incoming"; context: string | null }> = [];
 
     for (const rel of rels) {
       if (rel.source_entity_id === entityId) {
         const target = this.getById(rel.target_entity_id);
         if (target) {
-          results.push({ entity: target, relationship: rel.relationship, direction: "outgoing" });
+          results.push({ entity: target, relationship: rel.relationship, direction: "outgoing", context: rel.context });
         }
       } else {
         const source = this.getById(rel.source_entity_id);
         if (source) {
-          results.push({ entity: source, relationship: rel.relationship, direction: "incoming" });
+          results.push({ entity: source, relationship: rel.relationship, direction: "incoming", context: rel.context });
         }
       }
     }

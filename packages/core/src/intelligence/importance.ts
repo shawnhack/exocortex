@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { getSetting } from "../db/schema.js";
+import { computeCentrality } from "../entities/graph.js";
 
 export interface ImportanceAdjustOptions {
   dryRun?: boolean;
@@ -87,6 +88,55 @@ export function adjustImportance(
       old_importance: row.importance,
       new_importance: Math.round(newImportance * 100) / 100,
     });
+  }
+
+  // Graph-aware boost: memories linked to high-centrality entities get +0.05
+  try {
+    const centrality = computeCentrality(db);
+    if (centrality.length > 0) {
+      const top10pct = Math.max(1, Math.ceil(centrality.length * 0.1));
+      const highCentralityIds = new Set(
+        centrality.slice(0, top10pct).map((c) => c.entityId)
+      );
+
+      // Find active memories linked to high-centrality entities that aren't already in details
+      const detailIds = new Set(details.map((d) => d.id));
+      const placeholders = Array.from(highCentralityIds).map(() => "?").join(",");
+      if (highCentralityIds.size > 0) {
+        const candidates = db
+          .prepare(
+            `SELECT DISTINCT m.id, m.importance FROM memories m
+             INNER JOIN memory_entities me ON m.id = me.memory_id
+             WHERE m.is_active = 1
+               AND ROUND(m.importance, 2) != 1.0
+               AND m.importance < 0.9
+               AND me.entity_id IN (${placeholders})`
+          )
+          .all(...highCentralityIds) as Array<{ id: string; importance: number }>;
+
+        for (const row of candidates) {
+          if (detailIds.has(row.id)) {
+            // Already boosted/decayed — adjust the existing detail
+            const existing = details.find((d) => d.id === row.id);
+            if (existing) {
+              existing.new_importance = Math.min(0.9, Math.round((existing.new_importance + 0.05) * 100) / 100);
+            }
+          } else {
+            const newImportance = Math.min(0.9, Math.round((row.importance + 0.05) * 100) / 100);
+            if (newImportance !== row.importance) {
+              details.push({
+                id: row.id,
+                action: "boost",
+                old_importance: row.importance,
+                new_importance: newImportance,
+              });
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Graph analysis is non-critical
   }
 
   // Apply changes

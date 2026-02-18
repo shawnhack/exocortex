@@ -17,6 +17,36 @@ interface FtsMatch {
   rank: number;
 }
 
+export interface SearchMissAggregate {
+  query: string;
+  count: number;
+  avg_max_score: number | null;
+  last_seen: string;
+}
+
+export function getSearchMisses(
+  db: DatabaseSync,
+  limit = 10,
+  sinceDays = 7
+): SearchMissAggregate[] {
+  const since = new Date(Date.now() - sinceDays * 86400000)
+    .toISOString()
+    .replace("T", " ")
+    .replace("Z", "");
+
+  return db
+    .prepare(
+      `SELECT query, COUNT(*) as count, AVG(max_score) as avg_max_score,
+              MAX(created_at) as last_seen
+       FROM search_misses
+       WHERE created_at >= ?
+       GROUP BY query
+       ORDER BY count DESC
+       LIMIT ?`
+    )
+    .all(since, limit) as unknown as SearchMissAggregate[];
+}
+
 export class MemorySearch {
   constructor(private db: DatabaseSync) {}
 
@@ -281,6 +311,12 @@ export class MemorySearch {
       }
     }
 
+    // Log search miss if no results after scoring
+    if (page.length === 0) {
+      const maxScore = scored.length > 0 ? scored[0].score : null;
+      this.logSearchMiss(query.query, scored.length, maxScore, query);
+    }
+
     return page.map((p) => {
       const { _rowid, metadata: rawMeta, ...row } = p.row;
       return {
@@ -290,6 +326,7 @@ export class MemorySearch {
           is_active: row.is_active === 1,
           superseded_by: row.superseded_by ?? null,
           chunk_index: row.chunk_index ?? null,
+          keywords: row.keywords ?? undefined,
           metadata: rawMeta ? JSON.parse(rawMeta) : undefined,
           tags: tagMap.get(row.id) ?? [],
         },
@@ -300,6 +337,34 @@ export class MemorySearch {
         frequency_score: p.freq,
       };
     });
+  }
+
+  private logSearchMiss(
+    query: string,
+    resultCount: number,
+    maxScore: number | null,
+    filters: SearchQuery
+  ): void {
+    try {
+      const filterObj: Record<string, unknown> = {};
+      if (filters.tags) filterObj.tags = filters.tags;
+      if (filters.content_type) filterObj.content_type = filters.content_type;
+      if (filters.after) filterObj.after = filters.after;
+      if (filters.before) filterObj.before = filters.before;
+
+      const filterStr = Object.keys(filterObj).length > 0
+        ? JSON.stringify(filterObj)
+        : null;
+
+      this.db
+        .prepare(
+          `INSERT INTO search_misses (query, result_count, max_score, filters)
+           VALUES (?, ?, ?, ?)`
+        )
+        .run(query, resultCount, maxScore, filterStr);
+    } catch {
+      // Non-critical — don't fail searches over logging
+    }
   }
 
   private sanitizeFtsQuery(query: string): string {

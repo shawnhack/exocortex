@@ -7,6 +7,7 @@ import { splitIntoChunks } from "./chunking.js";
 import { extractEntities, extractRelationships } from "../entities/extractor.js";
 import { EntityStore } from "../entities/store.js";
 import { autoGenerateTags } from "./auto-tags.js";
+import { generateKeywords } from "./keywords.js";
 import type {
   Memory,
   MemoryRow,
@@ -33,6 +34,7 @@ function rowToMemory(row: MemoryRow, tags?: string[]): Memory {
     is_active: row.is_active === 1,
     superseded_by: row.superseded_by ?? null,
     chunk_index: row.chunk_index ?? null,
+    keywords: row.keywords ?? undefined,
     metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
     tags,
   };
@@ -152,7 +154,7 @@ export class MemoryStore {
           const sourceId = entityIdMap.get(rel.source.toLowerCase());
           const targetId = entityIdMap.get(rel.target.toLowerCase());
           if (sourceId && targetId) {
-            entityStore.addRelationship(sourceId, targetId, rel.relationship, rel.confidence, id);
+            entityStore.addRelationship(sourceId, targetId, rel.relationship, rel.confidence, id, rel.context);
           }
         }
       }
@@ -180,6 +182,30 @@ export class MemoryStore {
       }
     } catch {
       // Auto-tagging is non-critical — don't fail memory creation
+    }
+
+    // Generate keywords from content, tags, and entity names
+    try {
+      const allTags = this.db
+        .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
+        .all(id) as Array<{ tag: string }>;
+      const tagNames = allTags.map((t) => t.tag);
+
+      const entityRows = this.db
+        .prepare(
+          "SELECT e.name FROM entities e INNER JOIN memory_entities me ON e.id = me.entity_id WHERE me.memory_id = ?"
+        )
+        .all(id) as Array<{ name: string }>;
+      const entityNames = entityRows.map((e) => e.name);
+
+      const keywords = generateKeywords(input.content, tagNames, entityNames);
+      if (keywords.length > 0) {
+        this.db
+          .prepare("UPDATE memories SET keywords = ? WHERE id = ?")
+          .run(keywords, id);
+      }
+    } catch {
+      // Keyword generation is non-critical
     }
 
     const memory = await this.getById(id) as Memory;
@@ -389,7 +415,7 @@ export class MemoryStore {
           const sourceId = entityIdMap.get(rel.source.toLowerCase());
           const targetId = entityIdMap.get(rel.target.toLowerCase());
           if (sourceId && targetId) {
-            entityStore.addRelationship(sourceId, targetId, rel.relationship, rel.confidence, parentId);
+            entityStore.addRelationship(sourceId, targetId, rel.relationship, rel.confidence, parentId, rel.context);
           }
         }
       }
@@ -427,6 +453,30 @@ export class MemoryStore {
       }
     } catch {
       // Auto-tagging is non-critical
+    }
+
+    // Generate keywords for parent
+    try {
+      const allTags = this.db
+        .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
+        .all(parentId) as Array<{ tag: string }>;
+      const tagNames = allTags.map((t) => t.tag);
+
+      const entityRows = this.db
+        .prepare(
+          "SELECT e.name FROM entities e INNER JOIN memory_entities me ON e.id = me.entity_id WHERE me.memory_id = ?"
+        )
+        .all(parentId) as Array<{ name: string }>;
+      const entityNames = entityRows.map((e) => e.name);
+
+      const keywords = generateKeywords(input.content, tagNames, entityNames);
+      if (keywords.length > 0) {
+        this.db
+          .prepare("UPDATE memories SET keywords = ? WHERE id = ?")
+          .run(keywords, parentId);
+      }
+    } catch {
+      // Non-critical
     }
 
     return this.getById(parentId) as Promise<Memory>;
@@ -564,6 +614,35 @@ export class MemoryStore {
     } catch (err) {
       this.db.exec("ROLLBACK");
       throw err;
+    }
+
+    // Regenerate keywords on content or tag change
+    if (input.content !== undefined || input.tags !== undefined) {
+      try {
+        const current = this.db
+          .prepare("SELECT content FROM memories WHERE id = ?")
+          .get(id) as { content: string } | undefined;
+        if (current) {
+          const allTags = this.db
+            .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
+            .all(id) as Array<{ tag: string }>;
+          const tagNames = allTags.map((t) => t.tag);
+
+          const entityRows = this.db
+            .prepare(
+              "SELECT e.name FROM entities e INNER JOIN memory_entities me ON e.id = me.entity_id WHERE me.memory_id = ?"
+            )
+            .all(id) as Array<{ name: string }>;
+          const entityNames = entityRows.map((e) => e.name);
+
+          const keywords = generateKeywords(current.content, tagNames, entityNames);
+          this.db
+            .prepare("UPDATE memories SET keywords = ? WHERE id = ?")
+            .run(keywords || null, id);
+        }
+      } catch {
+        // Non-critical
+      }
     }
 
     return this.getById(id);
