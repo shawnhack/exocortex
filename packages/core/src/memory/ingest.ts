@@ -26,22 +26,34 @@ export interface IngestResult {
   totalReplaced: number;
 }
 
+/** Return the character count of non-header, non-whitespace body text. */
+function bodyLength(text: string): number {
+  return text
+    .split("\n")
+    .filter((line) => !/^#+\s/.test(line))
+    .join("")
+    .replace(/\s/g, "").length;
+}
+
+const MIN_BODY_CHARS = 50;
+
 /**
  * Split markdown content into sections by ## headers.
  * Each section includes its header line.
  * No headers → entire content as one section.
- * Empty sections (< 10 chars of content) are skipped.
+ * Short sections (< 50 chars of body text) are merged into neighbors
+ * rather than dropped, preserving sub-header structure.
  */
 export function splitMarkdownSections(content: string): string[] {
   const lines = content.split("\n");
-  const sections: string[] = [];
+  const raw: string[] = [];
   let current: string[] = [];
 
   for (const line of lines) {
     if (/^##\s/.test(line) && current.length > 0) {
       const text = current.join("\n").trim();
-      if (text.length >= 10) {
-        sections.push(text);
+      if (text.length > 0) {
+        raw.push(text);
       }
       current = [line];
     } else {
@@ -52,12 +64,33 @@ export function splitMarkdownSections(content: string): string[] {
   // Flush last section
   if (current.length > 0) {
     const text = current.join("\n").trim();
-    if (text.length >= 10) {
-      sections.push(text);
+    if (text.length > 0) {
+      raw.push(text);
     }
   }
 
-  return sections;
+  // Merge short sections into neighbors instead of dropping them
+  const sections: string[] = [];
+  for (const section of raw) {
+    if (bodyLength(section) >= MIN_BODY_CHARS) {
+      sections.push(section);
+    } else if (sections.length > 0) {
+      // Merge into previous section
+      sections[sections.length - 1] += "\n\n" + section;
+    } else {
+      // No previous section yet — hold as pending to merge forward
+      sections.push(section);
+    }
+  }
+
+  // If the first section ended up short (was held for forward merge), merge into next
+  if (sections.length > 1 && bodyLength(sections[0]) < MIN_BODY_CHARS) {
+    sections[1] = sections[0] + "\n\n" + sections[1];
+    sections.shift();
+  }
+
+  // Drop any remaining section that is truly empty (no body at all)
+  return sections.filter((s) => bodyLength(s) > 0);
 }
 
 /**
