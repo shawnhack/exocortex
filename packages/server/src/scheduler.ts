@@ -1,4 +1,6 @@
 import cron from "node-cron";
+import fs from "node:fs";
+import path from "node:path";
 import {
   getDb,
   findClusters,
@@ -12,6 +14,7 @@ import {
   adjustImportance,
   getSetting,
   purgeTrash,
+  backupDatabase,
 } from "@exocortex/core";
 
 /**
@@ -64,6 +67,38 @@ export function notifyMemoryStored(): void {
  * - Entity extraction for unprocessed memories (3:00 AM)
  */
 export function startScheduler(): void {
+  // Database backup — every day at 1:30 AM (before nightly maintenance pipeline)
+  cron.schedule("30 1 * * *", () => {
+    try {
+      console.log("[scheduler] Running database backup...");
+      const db = getDb();
+      const maxStr = getSetting(db, "backup.max_count");
+      const maxBackups = maxStr ? parseInt(maxStr, 10) : 7;
+      const result = backupDatabase(db, { maxBackups });
+      const sizeMB = (result.sizeBytes / 1024 / 1024).toFixed(1);
+      console.log(
+        `[scheduler] Backup complete: ${result.path} (${sizeMB} MB)${result.pruned > 0 ? `, pruned ${result.pruned} old backups` : ""}`
+      );
+
+      // Copy to secondary location if configured
+      const copyTo = getSetting(db, "backup.copy_to");
+      if (copyTo) {
+        try {
+          if (!fs.existsSync(copyTo)) {
+            fs.mkdirSync(copyTo, { recursive: true });
+          }
+          const dest = path.join(copyTo, path.basename(result.path));
+          fs.copyFileSync(result.path, dest);
+          console.log(`[scheduler] Backup copied to: ${dest}`);
+        } catch (copyErr) {
+          console.error("[scheduler] Backup copy error:", copyErr);
+        }
+      }
+    } catch (err) {
+      console.error("[scheduler] Backup error:", err);
+    }
+  });
+
   // Consolidation — every day at 2:00 AM
   cron.schedule("0 2 * * *", async () => {
     try {
@@ -184,7 +219,7 @@ export function startScheduler(): void {
     }
   });
 
-  console.log("[scheduler] Background jobs scheduled (consolidation 2:00, contradictions 2:30, entities 3:00, importance 3:30, archival 4:00, purge 4:30)");
+  console.log("[scheduler] Background jobs scheduled (backup 1:30, consolidation 2:00, contradictions 2:30, entities 3:00, importance 3:30, archival 4:00, purge 4:30)");
 
   // Run maintenance on startup (short delay to not block server init)
   setTimeout(() => {

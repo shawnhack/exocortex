@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   getDbForTesting,
   initializeSchema,
@@ -6,6 +9,7 @@ import {
   encryptBackup,
   decryptBackup,
   importData,
+  backupDatabase,
   MemoryStore,
   EntityStore,
 } from "@exocortex/core";
@@ -153,5 +157,77 @@ describe("Backup Import", () => {
     const second = db.prepare("SELECT COUNT(*) as count FROM memories").get() as { count: number };
 
     expect(second.count).toBe(first.count);
+  });
+});
+
+describe("Database Backup (SQLite copy)", () => {
+  // backupDatabase uses VACUUM INTO which requires a real on-disk DB
+  let diskDb: DatabaseSync;
+  let dbPath: string;
+  let backupDir: string;
+
+  beforeEach(() => {
+    // Create a temp directory for the test DB and backups
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "exo-backup-test-"));
+    dbPath = path.join(tmpDir, "test.db");
+    backupDir = path.join(tmpDir, "backups");
+
+    // Need a real on-disk database — VACUUM INTO doesn't work with :memory:
+    const { DatabaseSync: SqliteDb } = require("node:sqlite");
+    diskDb = new SqliteDb(dbPath) as DatabaseSync;
+    diskDb.exec("PRAGMA journal_mode = WAL");
+    diskDb.exec("PRAGMA foreign_keys = ON");
+    initializeSchema(diskDb);
+  });
+
+  afterEach(() => {
+    diskDb.close();
+    // Clean up temp files
+    const tmpDir = path.dirname(dbPath);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("creates a backup file", () => {
+    diskDb.exec("INSERT INTO settings (key, value) VALUES ('test.key', 'test.value')");
+
+    const result = backupDatabase(diskDb, { backupDir });
+
+    expect(fs.existsSync(result.path)).toBe(true);
+    expect(result.sizeBytes).toBeGreaterThan(0);
+    expect(result.pruned).toBe(0);
+    expect(result.path).toContain("exocortex-");
+    expect(result.path.endsWith(".db")).toBe(true);
+  });
+
+  it("backup contains the original data", () => {
+    diskDb.exec("INSERT INTO settings (key, value) VALUES ('backup.test', 'hello')");
+
+    const result = backupDatabase(diskDb, { backupDir });
+
+    // Open the backup and verify data
+    const { DatabaseSync: SqliteDb } = require("node:sqlite");
+    const backupDb = new SqliteDb(result.path) as DatabaseSync;
+    const row = backupDb.prepare("SELECT value FROM settings WHERE key = 'backup.test'").get() as { value: string };
+    expect(row.value).toBe("hello");
+    backupDb.close();
+  });
+
+  it("rotates old backups beyond maxBackups", () => {
+    // Create 3 backups with different timestamps by manipulating filenames
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.writeFileSync(path.join(backupDir, "exocortex-2025-01-01T00-00-00.db"), "old1");
+    fs.writeFileSync(path.join(backupDir, "exocortex-2025-01-02T00-00-00.db"), "old2");
+    fs.writeFileSync(path.join(backupDir, "exocortex-2025-01-03T00-00-00.db"), "old3");
+
+    const result = backupDatabase(diskDb, { backupDir, maxBackups: 2 });
+
+    // Should have pruned 2 old ones (3 existing + 1 new = 4, keep 2)
+    expect(result.pruned).toBe(2);
+
+    const remaining = fs.readdirSync(backupDir).filter((f) => f.endsWith(".db"));
+    expect(remaining.length).toBe(2);
+    // Should keep the newest old one and the new backup
+    expect(remaining.some((f) => f.includes("2025-01-03"))).toBe(true);
+    expect(remaining.some((f) => f === path.basename(result.path))).toBe(true);
   });
 });

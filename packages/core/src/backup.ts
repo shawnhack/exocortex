@@ -4,6 +4,9 @@ import {
   randomBytes,
   pbkdf2Sync,
 } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import type { DatabaseSync } from "node:sqlite";
 import type { MemoryRow } from "./memory/types.js";
 import type { Entity } from "./entities/types.js";
@@ -250,4 +253,63 @@ export function importData(db: DatabaseSync, data: BackupData): {
   }
 
   return { memories: memoriesImported, entities: entitiesImported, links: linksImported };
+}
+
+export interface BackupDatabaseOptions {
+  backupDir?: string;
+  maxBackups?: number;
+}
+
+export interface BackupDatabaseResult {
+  path: string;
+  sizeBytes: number;
+  pruned: number;
+}
+
+/**
+ * Create a SQLite backup using VACUUM INTO (atomic, compact copy).
+ * Rotates old backups, keeping the most recent `maxBackups` files.
+ */
+export function backupDatabase(
+  db: DatabaseSync,
+  options?: BackupDatabaseOptions
+): BackupDatabaseResult {
+  const backupDir =
+    options?.backupDir ??
+    path.join(os.homedir(), ".exocortex", "backups");
+  const maxBackups = options?.maxBackups ?? 7;
+
+  if (!fs.existsSync(backupDir)) {
+    fs.mkdirSync(backupDir, { recursive: true });
+  }
+
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")
+    .slice(0, 19);
+  const backupPath = path.join(backupDir, `exocortex-${timestamp}.db`);
+
+  // VACUUM INTO creates an atomic, compact copy of the database.
+  // Use forward slashes — SQLite handles them on all platforms.
+  const sqlPath = backupPath.replace(/\\/g, "/");
+  db.exec(`VACUUM INTO '${sqlPath}'`);
+
+  const sizeBytes = fs.statSync(backupPath).size;
+
+  // Rotate: remove oldest backups beyond the limit
+  let pruned = 0;
+  if (maxBackups > 0) {
+    const backups = fs
+      .readdirSync(backupDir)
+      .filter((f) => f.startsWith("exocortex-") && f.endsWith(".db"))
+      .sort(); // ISO timestamps sort lexicographically
+
+    while (backups.length > maxBackups) {
+      const oldest = backups.shift()!;
+      fs.unlinkSync(path.join(backupDir, oldest));
+      pruned++;
+    }
+  }
+
+  return { path: backupPath, sizeBytes, pruned };
 }

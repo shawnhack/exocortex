@@ -117,5 +117,6 @@ export {
   encryptBackup,
   decryptBackup,
   importData,
+  backupDatabase,
 } from "./backup.js";
-export type { BackupData } from "./backup.js";
+export type { BackupData, BackupDatabaseOptions, BackupDatabaseResult } from "./backup.js";
