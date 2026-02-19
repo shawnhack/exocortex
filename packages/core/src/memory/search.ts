@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { getEmbeddingProvider } from "../embedding/manager.js";
 import type { SearchQuery, SearchResult, MemoryRow } from "./types.js";
@@ -11,6 +12,7 @@ import {
   getRRFConfig,
   reciprocalRankFusion,
 } from "./scoring.js";
+import { EntityStore } from "../entities/store.js";
 
 interface FtsMatch {
   rowid: number;
@@ -106,23 +108,34 @@ export class MemorySearch {
 
     if (rows.length === 0) return [];
 
-    // Get query embedding
+    // Query expansion via entity graph
+    const expansion = this.expandQuery(query.query);
+    const embeddingText = expansion ? expansion.expandedText : query.query;
+    const ftsText = query.query;
+    const extraFtsTerms = expansion ? expansion.expandedTerms : [];
+
+    // Get query embedding (use expanded text if available)
     let queryEmbedding: Float32Array | null = null;
     try {
       const provider = await getEmbeddingProvider();
-      queryEmbedding = await provider.embed(query.query);
+      queryEmbedding = await provider.embed(embeddingText);
     } catch {
       // Fall back to FTS-only if embedding fails
     }
 
-    // Get FTS matches
+    // Get FTS matches (original query + expanded terms)
     const ftsMatches = new Map<number, number>();
     try {
+      let ftsQuery = this.sanitizeFtsQuery(ftsText);
+      if (extraFtsTerms.length > 0) {
+        const extraTermsStr = extraFtsTerms.map((t) => `"${t}"`).join(" OR ");
+        ftsQuery = `${ftsQuery} OR ${extraTermsStr}`;
+      }
       const ftsRows = this.db
         .prepare(
           "SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT 200"
         )
-        .all(this.sanitizeFtsQuery(query.query)) as unknown as FtsMatch[];
+        .all(ftsQuery) as unknown as FtsMatch[];
 
       // Normalize FTS ranks (rank is negative in FTS5, more negative = better)
       if (ftsRows.length > 0) {
@@ -203,6 +216,11 @@ export class MemorySearch {
       candidates.push({ row, vectorScore, ftsScore, recency, freq });
     }
 
+    // Graph-proximity scores (if weight > 0)
+    const graphScores = weights.graph > 0
+      ? this.getGraphProximityScores(query.query, candidates.map((c) => c.row.id))
+      : new Map<string, number>();
+
     // RRF or legacy scoring
     const rrfConfig = getRRFConfig(this.db);
     const scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number }> = [];
@@ -216,13 +234,19 @@ export class MemorySearch {
         .filter((c) => c.ftsScore > 0)
         .map((c) => ({ id: c.row.id, score: c.ftsScore }));
 
-      const rrfScores = reciprocalRankFusion(
-        [
-          { entries: vectorList, weight: weights.vector },
-          { entries: ftsList, weight: weights.fts },
-        ],
-        rrfConfig.k
-      );
+      const rankedLists = [
+        { entries: vectorList, weight: weights.vector },
+        { entries: ftsList, weight: weights.fts },
+      ];
+
+      // Add graph-proximity as a ranked list if enabled
+      if (graphScores.size > 0) {
+        const graphList = Array.from(graphScores.entries())
+          .map(([id, score]) => ({ id, score }));
+        rankedLists.push({ entries: graphList, weight: weights.graph });
+      }
+
+      const rrfScores = reciprocalRankFusion(rankedLists, rrfConfig.k);
 
       // RRF min_score (query param overrides setting, but use RRF-specific default)
       const rrfMinScore = query.min_score ??
@@ -317,6 +341,11 @@ export class MemorySearch {
       this.logSearchMiss(query.query, scored.length, maxScore, query);
     }
 
+    // Track co-retrieval for link building
+    if (page.length >= 2) {
+      this.trackCoRetrieval(query.query, page.map((p) => p.row.id));
+    }
+
     return page.map((p) => {
       const { _rowid, metadata: rawMeta, ...row } = p.row;
       return {
@@ -364,6 +393,122 @@ export class MemorySearch {
         .run(query, resultCount, maxScore, filterStr);
     } catch {
       // Non-critical — don't fail searches over logging
+    }
+  }
+
+  private getGraphProximityScores(
+    query: string,
+    candidateIds: string[]
+  ): Map<string, number> {
+    const scores = new Map<string, number>();
+    const candidateSet = new Set(candidateIds);
+
+    const entityStore = new EntityStore(this.db);
+    const words = query
+      .split(/\s+/)
+      .filter((w) => w.length > 2)
+      .map((w) => w.toLowerCase());
+
+    // Find entities mentioned in query
+    const queryEntities: string[] = [];
+    for (const word of words) {
+      const entity = entityStore.getByName(word);
+      if (entity) queryEntities.push(entity.id);
+    }
+
+    if (queryEntities.length === 0) return scores;
+
+    // Direct-linked memories (1-hop) score 1.0
+    for (const entityId of queryEntities) {
+      const memoryIds = entityStore.getMemoriesForEntity(entityId);
+      for (const mid of memoryIds) {
+        if (candidateSet.has(mid)) {
+          scores.set(mid, Math.max(scores.get(mid) ?? 0, 1.0));
+        }
+      }
+    }
+
+    // Indirect memories (2-hop via related entities) score 0.5
+    for (const entityId of queryEntities) {
+      const related = entityStore.getRelatedEntities(entityId);
+      let count = 0;
+      for (const rel of related) {
+        if (count >= 10) break;
+        const memoryIds = entityStore.getMemoriesForEntity(rel.entity.id);
+        for (const mid of memoryIds) {
+          if (candidateSet.has(mid) && !scores.has(mid)) {
+            scores.set(mid, 0.5);
+          }
+        }
+        count++;
+      }
+    }
+
+    return scores;
+  }
+
+  private expandQuery(
+    query: string
+  ): { expandedText: string; expandedTerms: string[] } | null {
+    const enabled = getSetting(this.db, "search.query_expansion");
+    if (enabled !== "true") return null;
+
+    const words = query
+      .split(/\s+/)
+      .filter((w) => w.length > 2)
+      .map((w) => w.toLowerCase());
+
+    if (words.length === 0) return null;
+
+    const entityStore = new EntityStore(this.db);
+    const additionalTerms = new Set<string>();
+    const queryLower = query.toLowerCase();
+
+    for (const word of words) {
+      const entity = entityStore.getByName(word);
+      if (!entity) continue;
+
+      // Add entity aliases
+      for (const alias of entity.aliases) {
+        const aliasLower = alias.toLowerCase();
+        if (!queryLower.includes(aliasLower)) {
+          additionalTerms.add(alias);
+        }
+      }
+
+      // Add names of related entities (limit 5)
+      const related = entityStore.getRelatedEntities(entity.id);
+      let count = 0;
+      for (const rel of related) {
+        if (count >= 5) break;
+        const relNameLower = rel.entity.name.toLowerCase();
+        if (!queryLower.includes(relNameLower)) {
+          additionalTerms.add(rel.entity.name);
+          count++;
+        }
+      }
+    }
+
+    if (additionalTerms.size === 0) return null;
+
+    const terms = Array.from(additionalTerms);
+    return {
+      expandedText: `${query} ${terms.join(" ")}`,
+      expandedTerms: terms,
+    };
+  }
+
+  private trackCoRetrieval(query: string, resultIds: string[]): void {
+    try {
+      const hash = createHash("sha256").update(query).digest("hex").slice(0, 16);
+      const top10 = resultIds.slice(0, 10);
+      this.db
+        .prepare(
+          "INSERT INTO co_retrievals (query_hash, memory_ids, result_count) VALUES (?, ?, ?)"
+        )
+        .run(hash, JSON.stringify(top10), top10.length);
+    } catch {
+      // Non-critical — don't fail searches over tracking
     }
   }
 

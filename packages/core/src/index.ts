@@ -36,6 +36,8 @@ export {
   reciprocalRankFusion,
 } from "./memory/scoring.js";
 export type { ScoringWeights, RRFConfig } from "./memory/scoring.js";
+export { MemoryLinkStore } from "./memory/links.js";
+export type { LinkType, MemoryLink, LinkedMemoryRef } from "./memory/links.js";
 export { splitIntoChunks } from "./memory/chunking.js";
 export type { ChunkOptions } from "./memory/chunking.js";
 export {
@@ -89,8 +91,8 @@ export type {
   Contradiction,
   ContradictionCandidate,
 } from "./intelligence/contradictions.js";
-export { getTimeline, getTemporalStats } from "./intelligence/temporal.js";
-export type { TimelineEntry, TemporalStats } from "./intelligence/temporal.js";
+export { getTimeline, getTemporalStats, getMemoryLineage, getDecisionTimeline } from "./intelligence/temporal.js";
+export type { TimelineEntry, TemporalStats, LineageEntry, DecisionTimelineEntry } from "./intelligence/temporal.js";
 export {
   getArchiveCandidates,
   archiveStaleMemories,
@@ -118,6 +120,24 @@ export { runHealthChecks } from "./intelligence/health.js";
 export type { HealthCheck, HealthReport } from "./intelligence/health.js";
 export { generateSynthesis } from "./intelligence/synthesis.js";
 export type { SynthesisOptions } from "./intelligence/synthesis.js";
+export { reembedMissing, backfillEntities, recalibrateImportance } from "./intelligence/maintenance.js";
+export type { ReembedResult, BackfillEntitiesResult, RecalibrateResult } from "./intelligence/maintenance.js";
+export { densifyEntityGraph } from "./intelligence/graph-densify.js";
+export type { DensifyOptions, DensifyResult } from "./intelligence/graph-densify.js";
+export { buildCoRetrievalLinks } from "./intelligence/co-retrieval.js";
+export type { CoRetrievalLinkOptions, CoRetrievalLinkResult } from "./intelligence/co-retrieval.js";
+
+// Goals
+export type {
+  Goal,
+  GoalStatus,
+  GoalPriority,
+  CreateGoalInput,
+  UpdateGoalInput,
+  GoalWithProgress,
+  GoalProgressEntry,
+} from "./goals/types.js";
+export { GoalStore } from "./goals/store.js";
 
 // Backup
 export {

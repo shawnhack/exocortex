@@ -115,7 +115,9 @@ The MCP server exposes all memory tools over stdio. See [Quick Start](#connect-a
 | `memory_entities` | List tracked entities — people, projects, technologies, organizations, concepts |
 | `memory_ingest` | Index markdown files — splits by `##` headers, deduplicates by `source_uri`, supports globs |
 | `memory_digest_session` | Digest a coding session transcript into a structured session summary |
-| `memory_maintenance` | Adjust importance scores based on access patterns and archive stale memories |
+| `memory_maintenance` | Adjust importance scores, archive stale memories, health diagnostics, search friction signals |
+| `memory_consolidate` | Find and merge clusters of similar memories into summaries |
+| `memory_graph` | Entity graph analysis — full graph, bridge detection, community detection |
 | `memory_decay_preview` | Dry-run preview of what maintenance would archive |
 | `memory_ping` | Health check — memory counts, entity/tag stats, date range, uptime |
 
@@ -282,7 +284,18 @@ All weights are configurable via the `settings` table. Score range: ~0.15–0.80
 
 ### Consolidation
 
-Greedy agglomerative clustering of semantically similar memories (threshold: 0.75). Clusters of 3+ memories are merged into a summary that extracts key facts — dates, metrics, decisions, architecture notes. Source memories are archived and linked to the summary via `parent_id`.
+Greedy agglomerative clustering of semantically similar memories (threshold: 0.75). Clusters of 3+ memories are merged into a basic summary that extracts key facts — dates, metrics, decisions, architecture notes. Source memories are archived and linked to the summary via `parent_id`. LLM-powered synthesis is handled externally by Cortex's sentinel gardening job, keeping Exocortex API-cost-free.
+
+### Entity Graph Analysis
+
+The entity graph supports three analysis modes via `memory_graph`:
+- **Full graph** — all entities and relationships
+- **Bridge detection** — entities connecting otherwise-separate clusters (betweenness centrality)
+- **Community detection** — label propagation algorithm discovers dense subgraphs, O(V+E) per iteration
+
+### Search Friction Tracking
+
+Zero-result queries are logged to a `search_misses` table, revealing gaps in indexed knowledge. `memory_maintenance` surfaces the top missed queries as "Search Friction Signals", helping identify what knowledge should be stored or better tagged.
 
 ### Contradiction detection
 
@@ -329,7 +342,7 @@ Regex-based NER extracts five entity types from memory content (an optional LLM-
 | Project | "working on X", "building X", kebab-case package names | 0.5–0.65 |
 | Concept | "machine learning", "RAG", quoted terms | 0.4–0.8 |
 
-Entities are linked to memories with relevance scores and can be queried independently.
+Entities are linked to memories with relevance scores and can be queried independently. Relationships include optional context phrases extracted from memory content (e.g. "uses -> for real-time event streaming").
 
 ### Auto-tagging
 
@@ -357,6 +370,8 @@ New memories are compared against the 50 most recent active memories of the same
 | `access_log` | Query access history for importance adjustment |
 | `consolidations` | Consolidation history — which memories were merged and how |
 | `contradictions` | Detected contradictions with status tracking (pending/resolved/dismissed) |
+| `entity_relationships` | Directed relationships between entities with labels and optional context phrases |
+| `search_misses` | Zero-result query log for friction analysis |
 | `settings` | Key-value configuration store |
 | `memories_fts` | FTS5 virtual table with auto-sync triggers on insert/update/delete |
 

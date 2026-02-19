@@ -4,6 +4,7 @@ import {
   getDb,
   MemoryStore,
   MemorySearch,
+  MemoryLinkStore,
   getAllSettings,
   setSetting,
   exportData,
@@ -162,6 +163,146 @@ memories.post("/api/memories/search", async (c) => {
   }
 
   return c.json({ results, count: results.length });
+});
+
+const contextGraphSchema = z.object({
+  query: z.string().min(1),
+  max_tokens: z.number().int().min(100).max(100000).optional(),
+  compact: z.boolean().optional(),
+  max_linked: z.number().int().min(0).max(50).optional(),
+});
+
+// POST /api/memories/context-graph
+memories.post("/api/memories/context-graph", async (c) => {
+  const body = await c.req.json();
+  const parsed = contextGraphSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten() }, 400);
+  }
+
+  const { query, compact, max_linked = 5 } = parsed.data;
+  const maxTokens = parsed.data.max_tokens;
+
+  const db = getDb();
+  const search = new MemorySearch(db);
+  const store = new MemoryStore(db);
+  const linkStore = new MemoryLinkStore(db);
+
+  // 1. Run standard hybrid search (same as /api/memories/search)
+  const searchResults = await search.search({
+    query,
+    limit: maxTokens ? 50 : 15,
+  });
+
+  if (searchResults.length === 0) {
+    return c.json({ results: [], count: 0, linked_count: 0 });
+  }
+
+  // 2. Collect seed memory IDs
+  const seedIds = searchResults.map((r) => r.memory.id);
+
+  // 3. Get 1-hop linked memory refs
+  const linkedRefs = linkStore.getLinkedRefs(seedIds);
+
+  // 4. Cap at max_linked
+  const cappedRefs = linkedRefs.slice(0, max_linked);
+
+  // 5. Fetch linked memories
+  const linkedIds = cappedRefs.map((ref) => ref.id);
+  const linkedMemories = linkedIds.length > 0 ? await store.getByIds(linkedIds) : [];
+
+  // Build ref lookup
+  const refMap = new Map(cappedRefs.map((ref) => [ref.id, ref]));
+
+  // 6. Format results
+  if (compact) {
+    // Token budget: 80% seeds, 20% linked
+    const seedBudget = maxTokens ? Math.floor(maxTokens * 0.8) : undefined;
+    const linkedBudget = maxTokens ? maxTokens - (seedBudget ?? 0) : undefined;
+
+    // Format seed results
+    let seedResults = searchResults.map((r) => ({
+      id: r.memory.id,
+      preview: r.memory.content.substring(0, 120) + (r.memory.content.length > 120 ? "..." : ""),
+      score: r.score,
+      tags: r.memory.tags ?? [],
+      created_at: r.memory.created_at,
+    }));
+
+    // Apply token budget to seeds
+    if (seedBudget) {
+      let tokens = 0;
+      const capped: typeof seedResults = [];
+      for (const r of seedResults) {
+        const est = Math.ceil((r.preview.length + 40) / 4);
+        if (capped.length > 0 && tokens + est > seedBudget) break;
+        capped.push(r);
+        tokens += est;
+      }
+      seedResults = capped;
+    }
+
+    // Format linked results
+    let linkedResults = linkedMemories.map((m) => {
+      const ref = refMap.get(m.id);
+      return {
+        id: m.id,
+        preview: m.content.substring(0, 120) + (m.content.length > 120 ? "..." : ""),
+        score: ref?.strength ?? 0,
+        tags: m.tags ?? [],
+        created_at: m.created_at,
+        linked_from: ref?.linked_from,
+        link_type: ref?.link_type,
+      };
+    });
+
+    // Apply token budget to linked
+    if (linkedBudget) {
+      let tokens = 0;
+      const capped: typeof linkedResults = [];
+      for (const r of linkedResults) {
+        const est = Math.ceil((r.preview.length + 60) / 4);
+        if (capped.length > 0 && tokens + est > linkedBudget) break;
+        capped.push(r);
+        tokens += est;
+      }
+      linkedResults = capped;
+    }
+
+    const allResults = [...seedResults, ...linkedResults];
+    return c.json({
+      results: allResults,
+      count: allResults.length,
+      linked_count: linkedResults.length,
+    });
+  }
+
+  // Non-compact: full results
+  const seedFormatted = searchResults.map((r) => ({
+    memory: r.memory,
+    score: r.score,
+  }));
+
+  const linkedFormatted = linkedMemories.map((m) => {
+    const ref = refMap.get(m.id);
+    return {
+      memory: m,
+      score: ref?.strength ?? 0,
+      linked_from: ref?.linked_from,
+      link_type: ref?.link_type,
+    };
+  });
+
+  // Record access for non-compact results
+  for (const r of searchResults) {
+    await store.recordAccess(r.memory.id, query);
+  }
+
+  return c.json({
+    results: [...seedFormatted, ...linkedFormatted],
+    count: seedFormatted.length + linkedFormatted.length,
+    linked_count: linkedFormatted.length,
+  });
 });
 
 // GET /api/memories/archived

@@ -176,6 +176,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "scoring.rrf_min_score": "0.001",
   "auto_tagging.enabled": "true",
   "trash.auto_purge_days": "30",
+  "search.query_expansion": "false",
+  "scoring.graph_weight": "0",
 };
 
 const initializedDbs = new WeakSet<DatabaseSync>();
@@ -233,6 +235,60 @@ export function initializeSchema(db: DatabaseSync): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_search_misses_created ON search_misses(created_at);
+  `);
+
+  // Memory-to-memory links
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_links (
+      source_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+      target_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+      link_type TEXT NOT NULL DEFAULT 'related',
+      strength REAL NOT NULL DEFAULT 0.5,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (source_id, target_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_links_target ON memory_links(target_id);
+  `);
+
+  // Goals table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS goals (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'active'
+        CHECK(status IN ('active', 'completed', 'stalled', 'abandoned')),
+      priority TEXT NOT NULL DEFAULT 'medium'
+        CHECK(priority IN ('low', 'medium', 'high', 'critical')),
+      deadline TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT,
+      embedding BLOB
+    );
+    CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);
+  `);
+
+  // Goals embedding column (migration for existing databases)
+  const goalColumns = db
+    .prepare("PRAGMA table_info(goals)")
+    .all() as Array<{ name: string }>;
+  const goalColNames = new Set(goalColumns.map((c) => c.name));
+  if (!goalColNames.has("embedding")) {
+    db.exec("ALTER TABLE goals ADD COLUMN embedding BLOB");
+  }
+
+  // Co-retrieval tracking for link building
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS co_retrievals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      query_hash TEXT NOT NULL,
+      memory_ids TEXT NOT NULL,
+      result_count INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_co_retrievals_created ON co_retrievals(created_at);
   `);
 
   // Context phrases on entity relationships

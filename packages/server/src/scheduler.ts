@@ -8,13 +8,16 @@ import {
   generateBasicSummary,
   detectContradictions,
   recordContradiction,
-  extractEntities,
-  EntityStore,
   archiveStaleMemories,
   adjustImportance,
   getSetting,
   purgeTrash,
   backupDatabase,
+  backfillEntities,
+  reembedMissing,
+  getEmbeddingProvider,
+  densifyEntityGraph,
+  buildCoRetrievalLinks,
 } from "@exocortex/core";
 
 /**
@@ -134,47 +137,17 @@ export function startScheduler(): void {
     }
   });
 
-  // Entity extraction for unprocessed memories — every day at 3:00 AM
+  // Entity extraction + relationship backfill — every day at 3:00 AM
   cron.schedule("0 3 * * *", () => {
     try {
-      console.log("[scheduler] Running entity extraction on unprocessed memories...");
+      console.log("[scheduler] Running entity backfill on unprocessed memories...");
       const db = getDb();
-      const entityStore = new EntityStore(db);
-
-      // Find memories without any linked entities
-      const unprocessed = db
-        .prepare(
-          `SELECT m.id, m.content FROM memories m
-           WHERE m.is_active = 1
-           AND m.id NOT IN (SELECT DISTINCT memory_id FROM memory_entities)
-           ORDER BY m.created_at DESC
-           LIMIT 100`
-        )
-        .all() as unknown as Array<{ id: string; content: string }>;
-
-      let entitiesLinked = 0;
-
-      for (const memory of unprocessed) {
-        const extracted = extractEntities(memory.content);
-        for (const entity of extracted) {
-          // Find or create entity
-          let existing = entityStore.getByName(entity.name);
-          if (!existing) {
-            existing = entityStore.create({
-              name: entity.name,
-              type: entity.type,
-            });
-          }
-          entityStore.linkMemory(existing.id, memory.id, entity.confidence);
-          entitiesLinked++;
-        }
-      }
-
+      const result = backfillEntities(db, { limit: 100 });
       console.log(
-        `[scheduler] Entity extraction complete: ${unprocessed.length} memories processed, ${entitiesLinked} entity links created`
+        `[scheduler] Entity backfill complete: ${result.memoriesProcessed} memories, ${result.entitiesCreated} entities created, ${result.entitiesLinked} links, ${result.relationshipsCreated} relationships`
       );
     } catch (err) {
-      console.error("[scheduler] Entity extraction error:", err);
+      console.error("[scheduler] Entity backfill error:", err);
     }
   });
 
@@ -219,11 +192,61 @@ export function startScheduler(): void {
     }
   });
 
-  console.log("[scheduler] Background jobs scheduled (backup 1:30, consolidation 2:00, contradictions 2:30, entities 3:00, importance 3:30, archival 4:00, purge 4:30)");
+  // Graph densification — every day at 5:00 AM
+  cron.schedule("0 5 * * *", () => {
+    try {
+      console.log("[scheduler] Running graph densification...");
+      const db = getDb();
+      const result = densifyEntityGraph(db, { minCoOccurrences: 2, limit: 500 });
+      console.log(`[scheduler] Graph densification complete: ${result.pairsAnalyzed} pairs, ${result.relationshipsCreated} relationships created`);
+    } catch (err) {
+      console.error("[scheduler] Graph densification error:", err);
+    }
+  });
+
+  // Co-retrieval link building + cleanup — every day at 5:30 AM
+  cron.schedule("30 5 * * *", () => {
+    try {
+      console.log("[scheduler] Running co-retrieval link building...");
+      const db = getDb();
+      const result = buildCoRetrievalLinks(db);
+      console.log(`[scheduler] Co-retrieval links: ${result.pairsAnalyzed} pairs, ${result.linksCreated} created, ${result.linksStrengthened} strengthened`);
+
+      // Cleanup old co-retrieval records (>60 days)
+      const cutoff = new Date(Date.now() - 60 * 86400000)
+        .toISOString()
+        .replace("T", " ")
+        .replace("Z", "");
+      const deleted = db
+        .prepare("DELETE FROM co_retrievals WHERE created_at < ?")
+        .run(cutoff) as { changes: number };
+      if (deleted.changes > 0) {
+        console.log(`[scheduler] Cleaned up ${deleted.changes} old co-retrieval records`);
+      }
+    } catch (err) {
+      console.error("[scheduler] Co-retrieval link building error:", err);
+    }
+  });
+
+  console.log("[scheduler] Background jobs scheduled (backup 1:30, consolidation 2:00, contradictions 2:30, entities 3:00, importance 3:30, archival 4:00, purge 4:30, densify 5:00, co-retrieval 5:30)");
 
   // Run maintenance on startup (short delay to not block server init)
   setTimeout(() => {
     console.log("[maintenance] Running startup maintenance...");
     runMaintenanceNow();
   }, 5000);
+
+  // Re-embed memories with missing embeddings on startup
+  setTimeout(async () => {
+    try {
+      const db = getDb();
+      const provider = await getEmbeddingProvider();
+      const result = await reembedMissing(db, provider);
+      if (result.processed > 0 || result.failed > 0) {
+        console.log(`[maintenance] Re-embed: ${result.processed} processed, ${result.failed} failed`);
+      }
+    } catch (err) {
+      console.error("[maintenance] Re-embed error:", err);
+    }
+  }, 10000);
 }

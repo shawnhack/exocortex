@@ -5,7 +5,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, initializeSchema, MemoryStore, MemorySearch, EntityStore, getEmbeddingProvider, getArchiveCandidates, archiveStaleMemories, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses } from "@exocortex/core";
+import { getDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, getArchiveCandidates, archiveStaleMemories, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, backfillEntities, recalibrateImportance, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks } from "@exocortex/core";
+import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 
 const startTime = Date.now();
@@ -112,6 +113,20 @@ server.tool(
     if (result.superseded_id) {
       const pct = Math.round((result.dedup_similarity ?? 0) * 100);
       meta.push(`superseded ${result.superseded_id} — ${pct}% similar`);
+    }
+
+    // Auto-detect goal progress
+    try {
+      const goalStore = new GoalStore(db);
+      const linkedGoalIds = await goalStore.autoLinkProgress(result.memory.id, args.content, result.memory.embedding);
+      if (linkedGoalIds.length > 0) {
+        const goal = goalStore.getById(linkedGoalIds[0]);
+        if (goal) {
+          meta.push(`goal: "${goal.title}"`);
+        }
+      }
+    } catch {
+      // Non-critical
     }
 
     return { content: [{ type: "text", text: `Stored memory (${meta.join(" | ")})` }] };
@@ -696,8 +711,14 @@ server.tool(
 server.tool(
   "memory_maintenance",
   "Run maintenance: adjust importance scores based on access patterns and archive stale memories.",
-  {},
-  async () => {
+  {
+    reembed: z.boolean().optional().describe("Re-embed memories with missing embeddings"),
+    backfill_entities: z.boolean().optional().describe("Process memories without entity links and extract relationships"),
+    recalibrate: z.boolean().optional().describe("Normalize importance distribution via percentile-rank mapping"),
+    densify_graph: z.boolean().optional().describe("Create co_occurs relationships between entities sharing memories"),
+    build_co_retrieval_links: z.boolean().optional().describe("Build memory links from co-retrieval patterns"),
+  },
+  async (args) => {
     const importanceResult = adjustImportance(db);
     const archiveResult = archiveStaleMemories(db);
 
@@ -781,7 +802,121 @@ server.tool(
       // Non-critical
     }
 
+    // Re-embed missing embeddings
+    if (args.reembed) {
+      try {
+        const provider = await getEmbeddingProvider();
+        const reembedResult = await reembedMissing(db, provider);
+        parts.push(`\nRe-embedding: ${reembedResult.processed} processed, ${reembedResult.failed} failed`);
+      } catch (err) {
+        parts.push(`\nRe-embedding: error — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Backfill entity links
+    if (args.backfill_entities) {
+      try {
+        const backfillResult = backfillEntities(db);
+        parts.push(`\nEntity backfill: ${backfillResult.memoriesProcessed} memories processed, ${backfillResult.entitiesCreated} entities created, ${backfillResult.entitiesLinked} links, ${backfillResult.relationshipsCreated} relationships`);
+      } catch (err) {
+        parts.push(`\nEntity backfill: error — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Recalibrate importance distribution
+    if (args.recalibrate) {
+      try {
+        const recalResult = recalibrateImportance(db);
+        parts.push(`\nRecalibration: ${recalResult.adjusted} adjusted, mean ${recalResult.oldMean} → ${recalResult.newMean}, stddev ${recalResult.oldStdDev} → ${recalResult.newStdDev}`);
+        parts.push(`  Distribution: min=${recalResult.distribution.min}, p25=${recalResult.distribution.p25}, median=${recalResult.distribution.median}, p75=${recalResult.distribution.p75}, max=${recalResult.distribution.max}`);
+      } catch (err) {
+        parts.push(`\nRecalibration: error — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Graph densification
+    if (args.densify_graph) {
+      try {
+        const densifyResult = densifyEntityGraph(db);
+        parts.push(`\nGraph densification: ${densifyResult.pairsAnalyzed} pairs analyzed, ${densifyResult.relationshipsCreated} relationships created`);
+      } catch (err) {
+        parts.push(`\nGraph densification: error — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Co-retrieval link building
+    if (args.build_co_retrieval_links) {
+      try {
+        const coRetResult = buildCoRetrievalLinks(db);
+        parts.push(`\nCo-retrieval links: ${coRetResult.pairsAnalyzed} pairs analyzed, ${coRetResult.linksCreated} created, ${coRetResult.linksStrengthened} strengthened`);
+      } catch (err) {
+        parts.push(`\nCo-retrieval links: error — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     return { content: [{ type: "text", text: `Maintenance complete:\n\n${parts.join("\n")}` }] };
+  }
+);
+
+// memory_timeline
+server.tool(
+  "memory_timeline",
+  "Query decision history and memory lineage. Use 'decisions' mode to see decision-tagged memories chronologically, or 'lineage' mode to trace a memory's supersession chain.",
+  {
+    mode: z.enum(["decisions", "lineage"]).describe("'decisions' for decision timeline, 'lineage' for supersession chain"),
+    memory_id: z.string().optional().describe("Memory ID (required for lineage mode)"),
+    after: z.string().optional().describe("Only after this date (YYYY-MM-DD)"),
+    before: z.string().optional().describe("Only before this date (YYYY-MM-DD)"),
+    limit: z.number().optional().describe("Max results (default 50)"),
+    tags: z.array(z.string()).optional().describe("Additional tag filters (for decisions mode)"),
+  },
+  async (args) => {
+    if (args.mode === "lineage") {
+      if (!args.memory_id) {
+        return { content: [{ type: "text", text: "memory_id is required for lineage mode." }] };
+      }
+
+      const lineage = getMemoryLineage(db, args.memory_id);
+      if (lineage.length === 0) {
+        return { content: [{ type: "text", text: `Memory ${args.memory_id} not found.` }] };
+      }
+
+      const lines = lineage.map((entry) => {
+        const marker = entry.direction === "current" ? ">>>" : entry.direction === "predecessor" ? " < " : " > ";
+        const preview = entry.content.length > 120 ? entry.content.substring(0, 117) + "..." : entry.content;
+        return `${marker} [${entry.id}] ${preview} (importance: ${entry.importance}, ${entry.created_at})`;
+      });
+
+      return {
+        content: [{ type: "text", text: `Lineage for ${args.memory_id} (${lineage.length} entries):\n\n${lines.join("\n")}` }],
+      };
+    }
+
+    // decisions mode
+    const timeline = getDecisionTimeline(db, {
+      after: args.after,
+      before: args.before,
+      limit: args.limit,
+      tags: args.tags,
+    });
+
+    if (timeline.length === 0) {
+      return { content: [{ type: "text", text: "No decision-tagged memories found." }] };
+    }
+
+    const lines = timeline.map((entry) => {
+      const preview = entry.content.length > 150 ? entry.content.substring(0, 147) + "..." : entry.content;
+      const tagStr = entry.tags.length > 0 ? ` [${entry.tags.join(", ")}]` : "";
+      const links: string[] = [];
+      if (entry.supersedes) links.push(`supersedes: ${entry.supersedes}`);
+      if (entry.superseded_by) links.push(`superseded_by: ${entry.superseded_by}`);
+      const linkStr = links.length > 0 ? ` (${links.join(", ")})` : "";
+      return `- [${entry.id}] ${preview}${tagStr}${linkStr} (${entry.created_at})`;
+    });
+
+    return {
+      content: [{ type: "text", text: `Decision timeline (${timeline.length} entries):\n\n${lines.join("\n")}` }],
+    };
   }
 );
 
@@ -916,6 +1051,54 @@ server.tool(
   }
 );
 
+// memory_link
+server.tool(
+  "memory_link",
+  "Create or remove a link between two memories. Links enable graph-aware context retrieval — linked memories surface together during context loading.",
+  {
+    source_id: z.string().describe("Source memory ID"),
+    target_id: z.string().describe("Target memory ID"),
+    link_type: z.enum(["related", "elaborates", "contradicts", "supersedes", "supports", "derived_from"]).optional().describe("Link type (default 'related')"),
+    strength: z.number().min(0).max(1).optional().describe("Link strength 0-1 (default 0.5)"),
+    remove: z.boolean().optional().describe("Set to true to remove the link instead of creating it"),
+  },
+  async (args) => {
+    const store = new MemoryStore(db);
+    const linkStore = new MemoryLinkStore(db);
+
+    // Validate both memories exist
+    const source = await store.getById(args.source_id);
+    if (!source) {
+      return { content: [{ type: "text", text: `Source memory ${args.source_id} not found.` }] };
+    }
+    const target = await store.getById(args.target_id);
+    if (!target) {
+      return { content: [{ type: "text", text: `Target memory ${args.target_id} not found.` }] };
+    }
+
+    if (args.remove) {
+      const removed = linkStore.unlink(args.source_id, args.target_id);
+      if (!removed) {
+        return { content: [{ type: "text", text: `No link found between ${args.source_id} and ${args.target_id}.` }] };
+      }
+      return { content: [{ type: "text", text: `Removed link ${args.source_id} → ${args.target_id}` }] };
+    }
+
+    const linkType = (args.link_type ?? "related") as LinkType;
+    const strength = args.strength ?? 0.5;
+    linkStore.link(args.source_id, args.target_id, linkType, strength);
+
+    const srcPreview = source.content.substring(0, 60) + (source.content.length > 60 ? "..." : "");
+    const tgtPreview = target.content.substring(0, 60) + (target.content.length > 60 ? "..." : "");
+    return {
+      content: [{
+        type: "text",
+        text: `Linked: "${srcPreview}" —[${linkType}, ${strength}]→ "${tgtPreview}"`,
+      }],
+    };
+  }
+);
+
 // memory_digest_session
 server.tool(
   "memory_digest_session",
@@ -973,6 +1156,186 @@ server.tool(
         text: `Stored session digest (${result.actions.length} actions, project: ${result.project ?? "unknown"})${factStr}.\nID: ${memory.id}`,
       }],
     };
+  }
+);
+
+// goal_create
+server.tool(
+  "goal_create",
+  "Create a new goal to track. Goals are persistent objectives with progress monitoring — define what you're trying to achieve, and the system tracks progress and detects stalls.",
+  {
+    title: z.string().describe("Goal title"),
+    description: z.string().optional().describe("Detailed description of the goal"),
+    priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("Priority level (default 'medium')"),
+    deadline: z.string().optional().describe("Target deadline (ISO date YYYY-MM-DD)"),
+    metadata: z.record(z.string(), z.any()).optional().describe("Arbitrary JSON metadata"),
+  },
+  async (args) => {
+    const store = new GoalStore(db);
+    const goal = store.create({
+      title: args.title,
+      description: args.description,
+      priority: args.priority,
+      deadline: args.deadline,
+      metadata: args.metadata,
+    });
+
+    const meta: string[] = [`id: ${goal.id}`, `priority: ${goal.priority}`];
+    if (goal.deadline) meta.push(`deadline: ${goal.deadline}`);
+
+    return { content: [{ type: "text", text: `Created goal: "${goal.title}" (${meta.join(" | ")})` }] };
+  }
+);
+
+// goal_list
+server.tool(
+  "goal_list",
+  "List goals, optionally filtered by status. Default: active goals only.",
+  {
+    status: z.enum(["active", "completed", "stalled", "abandoned"]).optional().describe("Filter by status (default: active)"),
+    include_progress: z.boolean().optional().describe("Include recent progress entries (default false)"),
+  },
+  async (args) => {
+    const store = new GoalStore(db);
+    const status = args.status ?? "active";
+    const goals = store.list(status);
+
+    if (goals.length === 0) {
+      return { content: [{ type: "text", text: `No ${status} goals found.` }] };
+    }
+
+    const lines = goals.map((goal) => {
+      const meta: string[] = [`priority: ${goal.priority}`];
+      if (goal.deadline) meta.push(`deadline: ${goal.deadline}`);
+      meta.push(`created: ${goal.created_at}`);
+      if (goal.completed_at) meta.push(`completed: ${goal.completed_at}`);
+
+      let line = `[${goal.id}] ${goal.title}\n  ${goal.description ?? "(no description)"}\n  (${meta.join(" | ")})`;
+
+      if (args.include_progress) {
+        const withProgress = store.getWithProgress(goal.id, 5);
+        if (withProgress && withProgress.progress.length > 0) {
+          const progressLines = withProgress.progress.map(
+            (p) => `    - ${p.content} (${p.created_at})`
+          );
+          line += `\n  Progress:\n${progressLines.join("\n")}`;
+        } else {
+          line += "\n  Progress: none";
+        }
+      }
+
+      return line;
+    });
+
+    return {
+      content: [{ type: "text", text: `${status.charAt(0).toUpperCase() + status.slice(1)} goals (${goals.length}):\n\n${lines.join("\n\n")}` }],
+    };
+  }
+);
+
+// goal_update
+server.tool(
+  "goal_update",
+  "Update an existing goal's title, description, status, priority, deadline, or metadata.",
+  {
+    id: z.string().describe("Goal ID"),
+    title: z.string().optional().describe("New title"),
+    description: z.string().optional().describe("New description"),
+    status: z.enum(["active", "completed", "stalled", "abandoned"]).optional().describe("New status"),
+    priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("New priority"),
+    deadline: z.string().optional().describe("New deadline (ISO date YYYY-MM-DD)"),
+    metadata: z.record(z.string(), z.any()).optional().describe("Merge metadata (set value to null to delete a key)"),
+  },
+  async (args) => {
+    const { id, ...updates } = args;
+
+    if (!updates.title && !updates.description && !updates.status && !updates.priority && !updates.deadline && !updates.metadata) {
+      return { content: [{ type: "text", text: "No update fields provided." }] };
+    }
+
+    const store = new GoalStore(db);
+    const updated = store.update(id, updates);
+
+    if (!updated) {
+      return { content: [{ type: "text", text: `Goal ${id} not found.` }] };
+    }
+
+    const meta: string[] = [`status: ${updated.status}`, `priority: ${updated.priority}`];
+    if (updated.deadline) meta.push(`deadline: ${updated.deadline}`);
+
+    return { content: [{ type: "text", text: `Updated goal: "${updated.title}" (${meta.join(" | ")})` }] };
+  }
+);
+
+// goal_log
+server.tool(
+  "goal_log",
+  "Log progress on a goal. Creates a memory tagged 'goal-progress' linked to the goal.",
+  {
+    id: z.string().describe("Goal ID"),
+    content: z.string().describe("Progress note"),
+    importance: z.number().min(0).max(1).optional().describe("Importance 0-1 (default 0.5)"),
+  },
+  async (args) => {
+    const store = new GoalStore(db);
+
+    const goal = store.getById(args.id);
+    if (!goal) {
+      return { content: [{ type: "text", text: `Goal ${args.id} not found.` }] };
+    }
+
+    const memoryId = await store.logProgress(args.id, args.content, args.importance);
+
+    return {
+      content: [{ type: "text", text: `Logged progress on "${goal.title}" (memory: ${memoryId})` }],
+    };
+  }
+);
+
+// goal_get
+server.tool(
+  "goal_get",
+  "Get a goal's details including recent progress entries.",
+  {
+    id: z.string().describe("Goal ID"),
+    progress_limit: z.number().optional().describe("Max progress entries to return (default 10)"),
+  },
+  async (args) => {
+    const store = new GoalStore(db);
+    const goal = store.getWithProgress(args.id, args.progress_limit ?? 10);
+
+    if (!goal) {
+      return { content: [{ type: "text", text: `Goal ${args.id} not found.` }] };
+    }
+
+    const meta: string[] = [
+      `status: ${goal.status}`,
+      `priority: ${goal.priority}`,
+    ];
+    if (goal.deadline) meta.push(`deadline: ${goal.deadline}`);
+    meta.push(`created: ${goal.created_at}`);
+    if (goal.completed_at) meta.push(`completed: ${goal.completed_at}`);
+
+    const parts: string[] = [
+      `[${goal.id}] ${goal.title}`,
+      goal.description ?? "(no description)",
+      `(${meta.join(" | ")})`,
+    ];
+
+    if (Object.keys(goal.metadata).length > 0) {
+      parts.push(`Metadata: ${JSON.stringify(goal.metadata)}`);
+    }
+
+    if (goal.progress.length > 0) {
+      parts.push(`\nProgress (${goal.progress.length}):`);
+      for (const p of goal.progress) {
+        parts.push(`  - [${p.id}] ${p.content} (${p.created_at})`);
+      }
+    } else {
+      parts.push("\nProgress: none");
+    }
+
+    return { content: [{ type: "text", text: parts.join("\n") }] };
   }
 );
 

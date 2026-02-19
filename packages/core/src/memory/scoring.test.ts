@@ -191,6 +191,7 @@ describe("scoring", () => {
         recency: 0.20,
         frequency: 0.10,
         recencyDecay: 0.05,
+        graph: 0,
       };
 
       const score = computeHybridScore(1.0, 1.0, 1.0, 1.0, weights);
@@ -204,6 +205,7 @@ describe("scoring", () => {
         recency: 0.20,
         frequency: 0.10,
         recencyDecay: 0.05,
+        graph: 0,
       };
 
       const score = computeHybridScore(0, 0, 0, 0, weights);
