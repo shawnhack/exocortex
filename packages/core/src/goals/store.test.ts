@@ -375,6 +375,124 @@ describe("GoalStore", () => {
     });
   });
 
+  describe("milestones", () => {
+    it("should add a milestone to a goal", () => {
+      const goal = store.create({ title: "Multi-step goal" });
+      const milestone = store.addMilestone(goal.id, { title: "Step 1" });
+
+      expect(milestone.id).toBeTruthy();
+      expect(milestone.title).toBe("Step 1");
+      expect(milestone.status).toBe("pending");
+      expect(milestone.order).toBe(1);
+      expect(milestone.deadline).toBeNull();
+      expect(milestone.completed_at).toBeNull();
+    });
+
+    it("should auto-increment order", () => {
+      const goal = store.create({ title: "Ordered goal" });
+      const m1 = store.addMilestone(goal.id, { title: "First" });
+      const m2 = store.addMilestone(goal.id, { title: "Second" });
+
+      expect(m1.order).toBe(1);
+      expect(m2.order).toBe(2);
+    });
+
+    it("should respect explicit order", () => {
+      const goal = store.create({ title: "Custom order" });
+      const m1 = store.addMilestone(goal.id, { title: "Third", order: 3 });
+
+      expect(m1.order).toBe(3);
+    });
+
+    it("should update a milestone", () => {
+      const goal = store.create({ title: "Update test" });
+      const milestone = store.addMilestone(goal.id, { title: "Original" });
+
+      const updated = store.updateMilestone(goal.id, milestone.id, {
+        title: "Updated",
+        status: "in_progress",
+        deadline: "2026-06-01",
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated!.title).toBe("Updated");
+      expect(updated!.status).toBe("in_progress");
+      expect(updated!.deadline).toBe("2026-06-01");
+    });
+
+    it("should set completed_at when status changes to completed", () => {
+      const goal = store.create({ title: "Complete test" });
+      const milestone = store.addMilestone(goal.id, { title: "Will complete" });
+
+      const updated = store.updateMilestone(goal.id, milestone.id, {
+        status: "completed",
+      });
+
+      expect(updated!.status).toBe("completed");
+      expect(updated!.completed_at).not.toBeNull();
+    });
+
+    it("should remove a milestone", () => {
+      const goal = store.create({ title: "Remove test" });
+      const milestone = store.addMilestone(goal.id, { title: "To remove" });
+
+      expect(store.removeMilestone(goal.id, milestone.id)).toBe(true);
+      expect(store.getMilestones(goal.id)).toHaveLength(0);
+    });
+
+    it("should return false removing non-existent milestone", () => {
+      const goal = store.create({ title: "No milestone" });
+      expect(store.removeMilestone(goal.id, "nonexistent")).toBe(false);
+    });
+
+    it("should get milestones sorted by order", () => {
+      const goal = store.create({ title: "Sorted milestones" });
+      store.addMilestone(goal.id, { title: "Third", order: 3 });
+      store.addMilestone(goal.id, { title: "First", order: 1 });
+      store.addMilestone(goal.id, { title: "Second", order: 2 });
+
+      const milestones = store.getMilestones(goal.id);
+      expect(milestones).toHaveLength(3);
+      expect(milestones[0].title).toBe("First");
+      expect(milestones[1].title).toBe("Second");
+      expect(milestones[2].title).toBe("Third");
+    });
+
+    it("should include milestones in getWithProgress", () => {
+      const goal = store.create({ title: "Full goal" });
+      store.addMilestone(goal.id, { title: "Milestone A" });
+      store.addMilestone(goal.id, { title: "Milestone B" });
+
+      const result = store.getWithProgress(goal.id);
+      expect(result).not.toBeNull();
+      expect(result!.milestones).toHaveLength(2);
+      expect(result!.milestones[0].title).toBe("Milestone A");
+    });
+
+    it("should throw when adding milestone to non-existent goal", () => {
+      expect(() => store.addMilestone("nonexistent", { title: "X" })).toThrow(
+        "Goal nonexistent not found"
+      );
+    });
+
+    it("should return null updating milestone on non-existent goal", () => {
+      expect(store.updateMilestone("nonexistent", "x", { title: "Y" })).toBeNull();
+    });
+
+    it("should store milestones with deadline", () => {
+      const goal = store.create({ title: "Deadline test" });
+      const m = store.addMilestone(goal.id, {
+        title: "Has deadline",
+        deadline: "2026-12-31",
+      });
+
+      expect(m.deadline).toBe("2026-12-31");
+
+      const fetched = store.getMilestones(goal.id);
+      expect(fetched[0].deadline).toBe("2026-12-31");
+    });
+  });
+
   describe("findStalled", () => {
     it("should find active goals with no recent progress", () => {
       store.create({ title: "Stalled goal" });

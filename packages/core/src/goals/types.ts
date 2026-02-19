@@ -31,8 +31,24 @@ export interface UpdateGoalInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface Milestone {
+  id: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  order: number;
+  deadline: string | null;
+  completed_at: string | null;
+}
+
+export interface CreateMilestoneInput {
+  title: string;
+  order?: number;
+  deadline?: string;
+}
+
 export interface GoalWithProgress extends Goal {
   progress: GoalProgressEntry[];
+  milestones: Milestone[];
 }
 
 export interface GoalProgressEntry {

@@ -58,8 +58,9 @@ All data stored in `~/.exocortex/` (DB + cached embedding models). Override mode
 - Full entity graph (all entities + relationships) available via `GET /api/entities/graph` — single SQL query, no N+1
 - Community detection via label propagation algorithm — `detectCommunities()` in `packages/core/src/entities/graph.ts`. O(V+E) per iteration, converges in ~10 iterations. Exposed via `memory_graph` action `"communities"`
 - Search friction tracking — zero-result queries logged to `search_misses` table. `getSearchMisses()` aggregates by query. Surfaced in `memory_maintenance` output as "Search Friction Signals"
-- MCP server exposes tools: memory_store, memory_search, memory_forget, memory_context, memory_entities, memory_get, memory_update, memory_browse, memory_ping, memory_decay_preview, memory_maintenance, memory_ingest, memory_digest_session, memory_consolidate, memory_graph
+- MCP server exposes tools: memory_store, memory_search, memory_forget, memory_context, memory_entities, memory_get, memory_update, memory_browse, memory_ping, memory_decay_preview, memory_maintenance, memory_ingest, memory_digest_session, memory_consolidate, memory_graph, memory_link, memory_timeline, goal_create, goal_list, goal_update, goal_log, goal_get, goal_add_milestone, goal_update_milestone, goal_remove_milestone
 - `memory_digest_session` parses a session transcript JSONL, extracts write/edit/bash actions, and stores a structured session summary as a memory with tag `session-digest`
+- Goals support milestones — stored in `metadata.milestones` JSON array (no dedicated table). Milestone CRUD via `GoalStore.addMilestone/updateMilestone/removeMilestone/getMilestones`. `GoalWithProgress` includes `milestones: Milestone[]`
 - Memories are stored with ULID IDs, importance scores, tags, and content types
 - `memory_ingest` splits markdown files by `##` headers, deduplicates by `source_uri`, supports glob patterns
 - Fact-type tags (`decision`, `discovery`, `architecture`, `learning`) render with distinct colors in memory cards

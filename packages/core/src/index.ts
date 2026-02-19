@@ -136,6 +136,8 @@ export type {
   UpdateGoalInput,
   GoalWithProgress,
   GoalProgressEntry,
+  Milestone,
+  CreateMilestoneInput,
 } from "./goals/types.js";
 export { GoalStore } from "./goals/store.js";
 

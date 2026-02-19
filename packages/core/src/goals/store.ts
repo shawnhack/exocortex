@@ -10,6 +10,8 @@ import type {
   UpdateGoalInput,
   GoalWithProgress,
   GoalProgressEntry,
+  Milestone,
+  CreateMilestoneInput,
 } from "./types.js";
 
 interface GoalRow {
@@ -198,7 +200,7 @@ export class GoalStore {
   }
 
   /**
-   * Get goal with recent progress entries.
+   * Get goal with recent progress entries and milestones.
    */
   getWithProgress(
     id: string,
@@ -208,8 +210,92 @@ export class GoalStore {
     if (!goal) return null;
 
     const progress = this.getProgressEntries(id, progressLimit);
+    const milestones = this.getMilestones(id);
 
-    return { ...goal, progress };
+    return { ...goal, progress, milestones };
+  }
+
+  /**
+   * Add a milestone to a goal. Stored in metadata.milestones JSON array.
+   */
+  addMilestone(goalId: string, input: CreateMilestoneInput): Milestone {
+    const goal = this.getById(goalId);
+    if (!goal) throw new Error(`Goal ${goalId} not found`);
+
+    const milestones: Milestone[] = (goal.metadata.milestones as Milestone[]) ?? [];
+    const maxOrder = milestones.length > 0
+      ? Math.max(...milestones.map((m) => m.order))
+      : 0;
+
+    const milestone: Milestone = {
+      id: ulid(),
+      title: input.title,
+      status: 'pending',
+      order: input.order ?? maxOrder + 1,
+      deadline: input.deadline ?? null,
+      completed_at: null,
+    };
+
+    milestones.push(milestone);
+    this.update(goalId, { metadata: { milestones } });
+
+    return milestone;
+  }
+
+  /**
+   * Update a milestone within a goal.
+   */
+  updateMilestone(
+    goalId: string,
+    milestoneId: string,
+    updates: Partial<Pick<Milestone, 'title' | 'status' | 'order' | 'deadline'>>
+  ): Milestone | null {
+    const goal = this.getById(goalId);
+    if (!goal) return null;
+
+    const milestones: Milestone[] = (goal.metadata.milestones as Milestone[]) ?? [];
+    const idx = milestones.findIndex((m) => m.id === milestoneId);
+    if (idx === -1) return null;
+
+    if (updates.title !== undefined) milestones[idx].title = updates.title;
+    if (updates.status !== undefined) {
+      milestones[idx].status = updates.status;
+      if (updates.status === 'completed') {
+        milestones[idx].completed_at = new Date().toISOString().replace("T", " ").replace("Z", "");
+      }
+    }
+    if (updates.order !== undefined) milestones[idx].order = updates.order;
+    if (updates.deadline !== undefined) milestones[idx].deadline = updates.deadline;
+
+    this.update(goalId, { metadata: { milestones } });
+    return milestones[idx];
+  }
+
+  /**
+   * Remove a milestone from a goal.
+   */
+  removeMilestone(goalId: string, milestoneId: string): boolean {
+    const goal = this.getById(goalId);
+    if (!goal) return false;
+
+    const milestones: Milestone[] = (goal.metadata.milestones as Milestone[]) ?? [];
+    const idx = milestones.findIndex((m) => m.id === milestoneId);
+    if (idx === -1) return false;
+
+    milestones.splice(idx, 1);
+    this.update(goalId, { metadata: { milestones } });
+    return true;
+  }
+
+  /**
+   * Get milestones for a goal, sorted by order.
+   */
+  getMilestones(goalId: string): Milestone[] {
+    const goal = this.getById(goalId);
+    if (!goal) return [];
+
+    const milestones: Milestone[] = (goal.metadata.milestones as Milestone[]) ?? [];
+    return milestones.sort((a, b) => a.order - b.order);
   }
 
   /**

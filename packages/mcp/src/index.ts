@@ -1214,13 +1214,19 @@ server.tool(
 
       if (args.include_progress) {
         const withProgress = store.getWithProgress(goal.id, 5);
-        if (withProgress && withProgress.progress.length > 0) {
-          const progressLines = withProgress.progress.map(
-            (p) => `    - ${p.content} (${p.created_at})`
-          );
-          line += `\n  Progress:\n${progressLines.join("\n")}`;
-        } else {
-          line += "\n  Progress: none";
+        if (withProgress) {
+          if (withProgress.milestones.length > 0) {
+            const completed = withProgress.milestones.filter((m) => m.status === "completed").length;
+            line += `\n  Milestones: ${completed}/${withProgress.milestones.length} completed`;
+          }
+          if (withProgress.progress.length > 0) {
+            const progressLines = withProgress.progress.map(
+              (p) => `    - ${p.content} (${p.created_at})`
+            );
+            line += `\n  Progress:\n${progressLines.join("\n")}`;
+          } else {
+            line += "\n  Progress: none";
+          }
         }
       }
 
@@ -1322,8 +1328,21 @@ server.tool(
       `(${meta.join(" | ")})`,
     ];
 
-    if (Object.keys(goal.metadata).length > 0) {
-      parts.push(`Metadata: ${JSON.stringify(goal.metadata)}`);
+    // Show metadata (excluding milestones which are shown separately)
+    const displayMeta = { ...goal.metadata };
+    delete displayMeta.milestones;
+    if (Object.keys(displayMeta).length > 0) {
+      parts.push(`Metadata: ${JSON.stringify(displayMeta)}`);
+    }
+
+    if (goal.milestones.length > 0) {
+      const completed = goal.milestones.filter((m) => m.status === "completed").length;
+      parts.push(`\nMilestones (${completed}/${goal.milestones.length} completed):`);
+      for (const m of goal.milestones) {
+        const statusIcon = m.status === "completed" ? "[x]" : m.status === "in_progress" ? "[~]" : "[ ]";
+        const deadlineStr = m.deadline ? ` (deadline: ${m.deadline})` : "";
+        parts.push(`  ${statusIcon} ${m.title}${deadlineStr}`);
+      }
     }
 
     if (goal.progress.length > 0) {
@@ -1336,6 +1355,85 @@ server.tool(
     }
 
     return { content: [{ type: "text", text: parts.join("\n") }] };
+  }
+);
+
+// goal_add_milestone
+server.tool(
+  "goal_add_milestone",
+  "Add a milestone to a goal. Milestones break goals into trackable sub-objectives.",
+  {
+    id: z.string().describe("Goal ID"),
+    title: z.string().describe("Milestone title"),
+    order: z.number().optional().describe("Sort order (auto-increments if omitted)"),
+    deadline: z.string().optional().describe("Milestone deadline (ISO date YYYY-MM-DD)"),
+  },
+  async (args) => {
+    const store = new GoalStore(db);
+    try {
+      const milestone = store.addMilestone(args.id, {
+        title: args.title,
+        order: args.order,
+        deadline: args.deadline,
+      });
+      const meta: string[] = [`id: ${milestone.id}`, `order: ${milestone.order}`];
+      if (milestone.deadline) meta.push(`deadline: ${milestone.deadline}`);
+      return { content: [{ type: "text", text: `Added milestone: "${milestone.title}" (${meta.join(" | ")})` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }] };
+    }
+  }
+);
+
+// goal_update_milestone
+server.tool(
+  "goal_update_milestone",
+  "Update a milestone's title, status, order, or deadline.",
+  {
+    goal_id: z.string().describe("Goal ID"),
+    milestone_id: z.string().describe("Milestone ID"),
+    title: z.string().optional().describe("New title"),
+    status: z.enum(["pending", "in_progress", "completed"]).optional().describe("New status"),
+    order: z.number().optional().describe("New sort order"),
+    deadline: z.string().optional().describe("New deadline (ISO date YYYY-MM-DD)"),
+  },
+  async (args) => {
+    const { goal_id, milestone_id, ...updates } = args;
+
+    if (!updates.title && !updates.status && updates.order === undefined && !updates.deadline) {
+      return { content: [{ type: "text", text: "No update fields provided." }] };
+    }
+
+    const store = new GoalStore(db);
+    const updated = store.updateMilestone(goal_id, milestone_id, updates);
+
+    if (!updated) {
+      return { content: [{ type: "text", text: `Goal or milestone not found.` }] };
+    }
+
+    const meta: string[] = [`status: ${updated.status}`, `order: ${updated.order}`];
+    if (updated.deadline) meta.push(`deadline: ${updated.deadline}`);
+    return { content: [{ type: "text", text: `Updated milestone: "${updated.title}" (${meta.join(" | ")})` }] };
+  }
+);
+
+// goal_remove_milestone
+server.tool(
+  "goal_remove_milestone",
+  "Remove a milestone from a goal.",
+  {
+    goal_id: z.string().describe("Goal ID"),
+    milestone_id: z.string().describe("Milestone ID"),
+  },
+  async (args) => {
+    const store = new GoalStore(db);
+    const removed = store.removeMilestone(args.goal_id, args.milestone_id);
+
+    if (!removed) {
+      return { content: [{ type: "text", text: `Goal or milestone not found.` }] };
+    }
+
+    return { content: [{ type: "text", text: `Removed milestone ${args.milestone_id}` }] };
   }
 );
 
