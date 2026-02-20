@@ -603,6 +603,9 @@ export function MemoryDetail() {
         </div>
       )}
 
+      {/* Linked Memories */}
+      <LinkedMemories memoryId={memory.id} />
+
       {/* Supersession diff view */}
       <SupersessionView memory={memory} />
 
@@ -641,6 +644,107 @@ export function MemoryDetail() {
             {(deleteMutation.error as Error).message}
           </span>
         )}
+      </div>
+    </div>
+  );
+}
+
+const LINK_TYPE_COLORS: Record<string, string> = {
+  related: "#8b5cf6",
+  elaborates: "#22d3ee",
+  contradicts: "#f87171",
+  supersedes: "#fbbf24",
+  supports: "#34d399",
+  derived_from: "#f472b6",
+};
+
+function LinkedMemories({ memoryId }: { memoryId: string }) {
+  const navigate = useNavigate();
+
+  const { data } = useQuery({
+    queryKey: ["memory-links", memoryId],
+    queryFn: () => api.getMemoryLinks(memoryId),
+    enabled: !!memoryId,
+  });
+
+  if (!data || data.count === 0) return null;
+
+  return (
+    <div
+      style={{
+        background: "#0c0c1d",
+        border: "1px solid #16163a",
+        borderRadius: 12,
+        padding: 20,
+        marginBottom: 24,
+        animation: "slideUp 0.3s ease-out 0.10s both",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          color: "#8b5cf6",
+          marginBottom: 14,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+        </svg>
+        Linked Memories ({data.count})
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {data.links.map((link) => (
+          <div
+            key={link.memory_id}
+            onClick={() => navigate(`/memory/${link.memory_id}`)}
+            style={{
+              background: "#06060e",
+              border: "1px solid #16163a",
+              borderRadius: 8,
+              padding: "10px 14px",
+              cursor: "pointer",
+              transition: "all 0.15s",
+              borderLeft: `3px solid ${LINK_TYPE_COLORS[link.link_type] ?? "#8b5cf6"}`,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "rgba(139, 92, 246, 0.3)";
+              e.currentTarget.style.background = "#0a0a18";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "#16163a";
+              e.currentTarget.style.background = "#06060e";
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: LINK_TYPE_COLORS[link.link_type] ?? "#8b5cf6",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                {link.link_type}
+              </span>
+              <span style={{ fontSize: 10, color: "#8080a0" }}>
+                strength: {link.strength.toFixed(2)}
+              </span>
+            </div>
+            {link.preview && (
+              <div style={{ fontSize: 13, color: "#a0a0be", lineHeight: 1.5 }}>
+                {link.preview.content}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -53,6 +53,48 @@ export interface Entity {
   updated_at: string;
 }
 
+export interface MemoryLinkResult {
+  memory_id: string;
+  link_type: string;
+  strength: number;
+  direction: "outgoing" | "incoming";
+  created_at: string;
+  preview: {
+    id: string;
+    content: string;
+    content_type: string;
+    importance: number;
+    created_at: string;
+  } | null;
+}
+
+export interface Goal {
+  id: string;
+  title: string;
+  description: string | null;
+  status: "active" | "completed" | "stalled" | "abandoned";
+  priority: "low" | "medium" | "high" | "critical";
+  deadline: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface Milestone {
+  id: string;
+  title: string;
+  status: "pending" | "in_progress" | "completed";
+  order: number;
+  deadline: string | null;
+  completed_at: string | null;
+}
+
+export interface GoalWithProgress extends Goal {
+  progress: Array<{ id: string; content: string; created_at: string }>;
+  milestones: Milestone[];
+}
+
 export interface Stats {
   total_memories: number;
   active_memories: number;
@@ -182,6 +224,43 @@ export const api = {
 
   deleteEntity(id: string) {
     return request<{ ok: boolean }>(`/api/entities/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  // Memory links
+  getMemoryLinks(id: string) {
+    return request<{ links: MemoryLinkResult[]; count: number }>(
+      `/api/memories/${id}/links`
+    );
+  },
+
+  // Goals
+  getGoals(status?: string) {
+    const qs = status ? `?status=${status}` : "?status=all";
+    return request<{ goals: Goal[]; count: number }>(`/api/goals${qs}`);
+  },
+
+  getGoal(id: string) {
+    return request<GoalWithProgress>(`/api/goals/${id}`);
+  },
+
+  createGoal(data: { title: string; description?: string; priority?: string; deadline?: string }) {
+    return request<Goal>("/api/goals", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateGoal(id: string, data: Partial<Goal>) {
+    return request<Goal>(`/api/goals/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteGoal(id: string) {
+    return request<{ ok: boolean }>(`/api/goals/${id}`, {
       method: "DELETE",
     });
   },

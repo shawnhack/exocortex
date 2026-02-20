@@ -10,7 +10,8 @@ import { Entities } from "./pages/Entities";
 import { EntityDetail } from "./pages/EntityDetail";
 import { Settings } from "./pages/Settings";
 import { Trash } from "./pages/Trash";
-
+import { Graph } from "./pages/Graph";
+import { Goals } from "./pages/Goals";
 import { Chat } from "./pages/Chat";
 
 const queryClient = new QueryClient({
@@ -32,6 +33,8 @@ export default function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/entities" element={<Entities />} />
               <Route path="/entities/:id" element={<EntityDetail />} />
+              <Route path="/graph" element={<Graph />} />
+              <Route path="/goals" element={<Goals />} />
               <Route path="/trash" element={<Trash />} />
 
               <Route path="/chat" element={<Chat />} />

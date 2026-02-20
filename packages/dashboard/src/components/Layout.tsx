@@ -39,7 +39,26 @@ const navItems = [
       </svg>
     ),
   },
-{
+  {
+    to: "/graph",
+    label: "Graph",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><circle cx="12" cy="11" r="2" />
+        <path d="M6.7 7.5L10.8 9.8" /><path d="M17.3 7.5L13.2 9.8" /><path d="M12 13L12 16" />
+      </svg>
+    ),
+  },
+  {
+    to: "/goals",
+    label: "Goals",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" />
+      </svg>
+    ),
+  },
+  {
     to: "/trash",
     label: "Trash",
     icon: (
