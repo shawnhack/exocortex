@@ -8,6 +8,7 @@ export interface ScoringWeights {
   frequency: number;
   recencyDecay: number;
   graph: number;
+  usefulness: number;
 }
 
 export function getWeights(db: DatabaseSync): ScoringWeights {
@@ -18,6 +19,7 @@ export function getWeights(db: DatabaseSync): ScoringWeights {
     frequency: parseFloat(getSetting(db, "scoring.frequency_weight") ?? "0.10"),
     recencyDecay: parseFloat(getSetting(db, "scoring.recency_decay") ?? "0.05"),
     graph: parseFloat(getSetting(db, "scoring.graph_weight") ?? "0"),
+    usefulness: parseFloat(getSetting(db, "scoring.usefulness_weight") ?? "0.05"),
   };
 }
 
@@ -59,6 +61,16 @@ export function frequencyScore(
 ): number {
   if (maxAccessCount <= 0) return 0;
   return Math.log(1 + accessCount) / Math.log(1 + maxAccessCount);
+}
+
+/**
+ * Usefulness score based on confirmed-useful retrievals.
+ * Uses absolute scale: saturates at 5 useful signals → score 1.0.
+ * Memories with 0 useful_count score 0 (no penalty, just no boost).
+ */
+export function usefulnessScore(usefulCount: number): number {
+  if (usefulCount <= 0) return 0;
+  return Math.min(1.0, Math.log(1 + usefulCount) / Math.log(1 + 5));
 }
 
 export function computeHybridScore(

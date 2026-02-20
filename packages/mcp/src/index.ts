@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, getArchiveCandidates, archiveStaleMemories, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, backfillEntities, recalibrateImportance, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks } from "@exocortex/core";
+import { getDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, backfillEntities, recalibrateImportance, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks } from "@exocortex/core";
 import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 
@@ -84,6 +84,34 @@ getEmbeddingProvider().catch(() => {
   // Model warmup failed — will retry on first tool call
 });
 
+// --- Retrieval feedback: track recent search results for implicit usefulness signaling ---
+const SEARCH_RESULT_TTL = 5 * 60 * 1000; // 5 minutes
+const recentSearchIds = new Map<string, number>(); // memory_id → timestamp
+
+function recordSearchResults(ids: string[]): void {
+  const now = Date.now();
+  for (const id of ids) recentSearchIds.set(id, now);
+  // Cleanup expired entries
+  for (const [id, ts] of recentSearchIds) {
+    if (now - ts > SEARCH_RESULT_TTL) recentSearchIds.delete(id);
+  }
+}
+
+function checkAndSignalUsefulness(ids: string[]): string[] {
+  const now = Date.now();
+  const useful: string[] = [];
+  const store = new MemoryStore(db);
+  for (const id of ids) {
+    const ts = recentSearchIds.get(id);
+    if (ts && now - ts <= SEARCH_RESULT_TTL) {
+      useful.push(id);
+      recentSearchIds.delete(id); // Don't double-count
+      try { store.incrementUsefulCount(id); } catch { /* non-critical */ }
+    }
+  }
+  return useful;
+}
+
 // memory_store
 server.tool(
   "memory_store",
@@ -129,6 +157,37 @@ server.tool(
       // Non-critical
     }
 
+    // Store-time relation discovery: auto-link similar existing memories
+    try {
+      if (result.memory.embedding) {
+        const linkStore = new MemoryLinkStore(db);
+        const candidates = db
+          .prepare(
+            `SELECT id, embedding FROM memories
+             WHERE id != ? AND is_active = 1 AND embedding IS NOT NULL AND parent_id IS NULL
+             ORDER BY created_at DESC LIMIT 200`
+          )
+          .all(result.memory.id) as unknown as Array<{ id: string; embedding: Uint8Array }>;
+
+        const linked: string[] = [];
+        for (const c of candidates) {
+          if (linked.length >= 5) break;
+          const bytes = c.embedding as unknown as Uint8Array;
+          const cEmb = new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+          const sim = cosineSimilarity(result.memory.embedding, cEmb);
+          if (sim >= 0.75) {
+            linkStore.link(result.memory.id, c.id, "related", Math.round(sim * 100) / 100);
+            linked.push(c.id);
+          }
+        }
+        if (linked.length > 0) {
+          meta.push(`linked: ${linked.length} related`);
+        }
+      }
+    } catch {
+      // Relation discovery is non-critical
+    }
+
     return { content: [{ type: "text", text: `Stored memory (${meta.join(" | ")})` }] };
   }
 );
@@ -167,6 +226,9 @@ server.tool(
     if (results.length === 0) {
       return { content: [{ type: "text", text: "No memories found matching the query." }] };
     }
+
+    // Track result IDs for implicit usefulness signaling
+    recordSearchResults(results.map((r) => r.memory.id));
 
     const scoringMode = getRRFConfig(db).enabled ? "rrf" : "legacy";
 
@@ -269,6 +331,9 @@ server.tool(
       return { content: [{ type: "text", text: `No context found for "${args.topic}".` }] };
     }
 
+    // Track result IDs for implicit usefulness signaling
+    recordSearchResults(results.map((r) => r.memory.id));
+
     if (args.compact) {
       const formatCompact = (r: typeof results[number]) => {
         const m = r.memory;
@@ -329,6 +394,9 @@ server.tool(
     const store = new MemoryStore(db);
     const results: string[] = [];
 
+    // Implicit usefulness signal: if these IDs were in recent search results, mark useful
+    checkAndSignalUsefulness(args.ids);
+
     for (const id of args.ids) {
       const memory = await store.getById(id);
       if (!memory) {
@@ -346,6 +414,26 @@ server.tool(
     }
 
     return { content: [{ type: "text", text: results.join("\n\n") }] };
+  }
+);
+
+// memory_feedback — explicit usefulness signal
+server.tool(
+  "memory_feedback",
+  "Mark memories as useful after retrieval. Call this after using search results to improve future ranking. Also triggered implicitly when memory_get is called on recent search results.",
+  {
+    ids: z.array(z.string()).min(1).max(20).describe("Memory IDs that were useful"),
+  },
+  async (args) => {
+    const store = new MemoryStore(db);
+    let count = 0;
+    for (const id of args.ids) {
+      try {
+        store.incrementUsefulCount(id);
+        count++;
+      } catch { /* skip invalid IDs */ }
+    }
+    return { content: [{ type: "text", text: `Recorded usefulness signal for ${count} memories.` }] };
   }
 );
 
@@ -884,10 +972,11 @@ server.tool(
 // memory_timeline
 server.tool(
   "memory_timeline",
-  "Query decision history and memory lineage. Use 'decisions' mode to see decision-tagged memories chronologically, or 'lineage' mode to trace a memory's supersession chain.",
+  "Query decision history, memory lineage, or topic evolution. Use 'decisions' for decision-tagged memories chronologically, 'lineage' to trace a memory's supersession chain, or 'evolution' to see how knowledge about a topic changed over time.",
   {
-    mode: z.enum(["decisions", "lineage"]).describe("'decisions' for decision timeline, 'lineage' for supersession chain"),
+    mode: z.enum(["decisions", "lineage", "evolution"]).describe("'decisions' for decision timeline, 'lineage' for supersession chain, 'evolution' for topic knowledge evolution"),
     memory_id: z.string().optional().describe("Memory ID (required for lineage mode)"),
+    topic: z.string().optional().describe("Topic to trace evolution for (required for evolution mode)"),
     after: z.string().optional().describe("Only after this date (YYYY-MM-DD)"),
     before: z.string().optional().describe("Only before this date (YYYY-MM-DD)"),
     limit: z.number().optional().describe("Max results (default 50)"),
@@ -912,6 +1001,63 @@ server.tool(
 
       return {
         content: [{ type: "text", text: `Lineage for ${args.memory_id} (${lineage.length} entries):\n\n${lines.join("\n")}` }],
+      };
+    }
+
+    // evolution mode — trace how knowledge about a topic evolved
+    if (args.mode === "evolution") {
+      if (!args.topic) {
+        return { content: [{ type: "text", text: "topic is required for evolution mode." }] };
+      }
+
+      const search = new MemorySearch(db);
+      const results = await search.search({
+        query: args.topic,
+        limit: args.limit ?? 30,
+        after: args.after,
+        before: args.before,
+      });
+
+      if (results.length === 0) {
+        return { content: [{ type: "text", text: `No memories found about "${args.topic}".` }] };
+      }
+
+      // Sort chronologically
+      results.sort((a, b) => a.memory.created_at.localeCompare(b.memory.created_at));
+
+      const linkStore = new MemoryLinkStore(db);
+      const lines = results.map((r) => {
+        const m = r.memory;
+        const preview = m.content.length > 200 ? m.content.substring(0, 197) + "..." : m.content;
+        const tagStr = m.tags?.length ? ` [${m.tags.join(", ")}]` : "";
+
+        // Supersession info
+        const supersessionParts: string[] = [];
+        const predecessor = db
+          .prepare("SELECT id FROM memories WHERE superseded_by = ?")
+          .get(m.id) as { id: string } | undefined;
+        if (predecessor) supersessionParts.push(`supersedes: ${predecessor.id}`);
+        if ((m as any).superseded_by) supersessionParts.push(`superseded_by: ${(m as any).superseded_by}`);
+
+        // Memory links
+        const memLinks = linkStore.getLinks(m.id);
+        const linkParts = memLinks
+          .filter((l) => results.some((r2) => r2.memory.id === (l.source_id === m.id ? l.target_id : l.source_id)))
+          .slice(0, 3)
+          .map((l) => {
+            const otherId = l.source_id === m.id ? l.target_id : l.source_id;
+            return `${l.link_type}→${otherId.substring(0, 8)}`;
+          });
+
+        const metaParts: string[] = [`score: ${r.score.toFixed(3)}`];
+        if (supersessionParts.length > 0) metaParts.push(supersessionParts.join(", "));
+        if (linkParts.length > 0) metaParts.push(`links: ${linkParts.join(", ")}`);
+
+        return `[${m.created_at}] [${m.id}] ${preview}${tagStr}\n  (${metaParts.join(" | ")})`;
+      });
+
+      return {
+        content: [{ type: "text", text: `Knowledge evolution for "${args.topic}" (${results.length} memories, chronological):\n\n${lines.join("\n\n")}` }],
       };
     }
 

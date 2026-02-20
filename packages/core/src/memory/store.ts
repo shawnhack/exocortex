@@ -729,6 +729,12 @@ export class MemoryStore {
     }
   }
 
+  incrementUsefulCount(id: string): void {
+    this.db
+      .prepare("UPDATE memories SET useful_count = useful_count + 1 WHERE id = ?")
+      .run(id);
+  }
+
   async getStats(): Promise<MemoryStats> {
     const total = this.db
       .prepare("SELECT COUNT(*) as count FROM memories")

@@ -178,6 +178,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "trash.auto_purge_days": "30",
   "search.query_expansion": "false",
   "scoring.graph_weight": "0",
+  "scoring.usefulness_weight": "0.05",
 };
 
 const initializedDbs = new WeakSet<DatabaseSync>();
@@ -298,6 +299,10 @@ export function initializeSchema(db: DatabaseSync): void {
   const relColNames = new Set(relColumns.map((c) => c.name));
   if (!relColNames.has("context")) {
     db.exec("ALTER TABLE entity_relationships ADD COLUMN context TEXT");
+  }
+
+  if (!colNames.has("useful_count")) {
+    db.exec("ALTER TABLE memories ADD COLUMN useful_count INTEGER NOT NULL DEFAULT 0");
   }
 
   if (!colNames.has("keywords")) {

@@ -7,6 +7,7 @@ import {
   cosineSimilarity,
   recencyScore,
   frequencyScore,
+  usefulnessScore,
   computeHybridScore,
   getWeights,
   getRRFConfig,
@@ -195,6 +196,7 @@ export class MemorySearch {
       ftsScore: number;
       recency: number;
       freq: number;
+      usefulness: number;
     }> = [];
 
     for (const row of rows) {
@@ -212,8 +214,9 @@ export class MemorySearch {
       const ftsScore = ftsMatches.get(row._rowid) ?? 0;
       const recency = recencyScore(row.created_at, weights.recencyDecay, row.importance);
       const freq = frequencyScore(row.access_count, maxAccessCount);
+      const usefulness = usefulnessScore((row as any).useful_count ?? 0);
 
-      candidates.push({ row, vectorScore, ftsScore, recency, freq });
+      candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness });
     }
 
     // Graph-proximity scores (if weight > 0)
@@ -223,7 +226,7 @@ export class MemorySearch {
 
     // RRF or legacy scoring
     const rrfConfig = getRRFConfig(this.db);
-    const scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number }> = [];
+    const scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number }> = [];
 
     if (rrfConfig.enabled) {
       // Build ranked lists from candidates with non-zero scores
@@ -261,8 +264,8 @@ export class MemorySearch {
       for (const c of candidates) {
         const baseRrf = rrfScores.get(c.row.id) ?? 0;
 
-        // Post-RRF multiplicative boost from recency + frequency
-        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq;
+        // Post-RRF multiplicative boost from recency + frequency + usefulness
+        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness;
         let score = baseRrf * boostMultiplier;
 
         // Tag boost scaled to RRF range
@@ -279,7 +282,7 @@ export class MemorySearch {
         }
 
         if (score >= rrfMinScore) {
-          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq });
+          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness });
         }
       }
     } else {
@@ -292,6 +295,9 @@ export class MemorySearch {
           c.freq,
           weights
         );
+
+        // Additive usefulness boost (only positive, never penalizes)
+        score += weights.usefulness * c.usefulness;
 
         if (tagBoost > 0 && queryTerms.length > 0) {
           const memTags = candidateTagMap.get(c.row.id);
@@ -306,7 +312,7 @@ export class MemorySearch {
         }
 
         if (score >= minScore) {
-          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq });
+          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness });
         }
       }
     }

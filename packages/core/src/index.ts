@@ -30,6 +30,7 @@ export {
   cosineSimilarity,
   recencyScore,
   frequencyScore,
+  usefulnessScore,
   computeHybridScore,
   getWeights,
   getRRFConfig,
