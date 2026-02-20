@@ -144,12 +144,26 @@ async function waitForServer(url, maxWaitMs = 15000) {
   throw new Error(`Server did not start within ${maxWaitMs}ms`);
 }
 
+const demoGoals = [
+  { title: "Ship v1.0 public release", description: "Finalize API stability, write migration guide, publish to npm.", priority: "critical" },
+  { title: "Add multi-modal memory support", description: "Support images and audio alongside text memories. Requires new embedding pipeline.", priority: "high" },
+  { title: "Improve search recall for short queries", description: "Short queries (1-2 words) often miss relevant results. Investigate query expansion and synonym matching.", priority: "medium" },
+  { title: "Write contributor guide", description: "Document architecture, setup instructions, and contribution workflow for open-source contributors.", priority: "low" },
+];
+
 async function seedData(baseUrl) {
   for (const mem of demoMemories) {
     await fetch(`${baseUrl}/api/memories`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(mem),
+    });
+  }
+  for (const goal of demoGoals) {
+    await fetch(`${baseUrl}/api/goals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(goal),
     });
   }
 }
@@ -176,6 +190,43 @@ try {
   await seedData(BASE);
   // Let enrichment (entities, tags) settle
   await new Promise((r) => setTimeout(r, 3000));
+
+  // Tag extracted entities for screenshot showcase
+  console.log("Tagging entities...");
+  const entRes = await fetch(`${BASE}/api/entities`);
+  const entData = await entRes.json();
+  const tagMap = {
+    // Technologies
+    react: ["technology", "frontend"], typescript: ["technology", "language"],
+    sqlite: ["technology", "database"], "node.js": ["technology", "runtime"],
+    hono: ["technology", "backend"], vite: ["technology", "tooling"],
+    vitest: ["technology", "testing"], playwright: ["technology", "testing"],
+    redis: ["technology", "database"], docker: ["technology", "devops"],
+    tailwind: ["technology", "frontend"], pnpm: ["technology", "tooling"],
+    zod: ["technology", "validation"], "react query": ["technology", "frontend"],
+    "tanstack query": ["technology", "frontend"], jwt: ["technology", "auth"],
+    // Organizations
+    anthropic: ["organization", "ai"], openai: ["organization", "ai"],
+    "hugging face": ["organization", "ml"], huggingface: ["organization", "ml"],
+    github: ["platform", "devops"], cloudflare: ["platform", "infrastructure"],
+    // Protocols & products
+    mcp: ["protocol", "ai"], "model context protocol": ["protocol", "ai"],
+    claude: ["product", "ai"], gemini: ["product", "ai"], codex: ["product", "ai"],
+    // Concepts
+    "reciprocal rank fusion": ["scoring", "algorithm"], rrf: ["scoring", "algorithm"],
+    bm25: ["scoring", "algorithm"], wal: ["database", "concept"],
+  };
+  for (const entity of entData.results ?? []) {
+    const key = entity.name.toLowerCase();
+    const tags = tagMap[key];
+    if (tags) {
+      await fetch(`${BASE}/api/entities/${entity.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags }),
+      });
+    }
+  }
 
   console.log("Taking screenshots...");
 
@@ -233,9 +284,11 @@ try {
   {
     const page = await context.newPage();
     console.log("  entity detail...");
-    const res = await fetch(`${BASE}/api/entities?limit=1`);
+    const res = await fetch(`${BASE}/api/entities`);
     const data = await res.json();
-    const entityId = data.results?.[0]?.id;
+    // Pick an entity with tags for a better screenshot
+    const tagged = (data.results ?? []).find(e => e.tags?.length > 0);
+    const entityId = tagged?.id ?? data.results?.[0]?.id;
     if (entityId) {
       await page.goto(`${BASE}/entities/${entityId}`, { waitUntil: "networkidle", timeout: 15000 });
       await page.waitForTimeout(2000);
@@ -243,6 +296,26 @@ try {
     } else {
       console.log("    skipped — no entities found");
     }
+    await page.close();
+  }
+
+  // Graph
+  {
+    const page = await context.newPage();
+    console.log("  graph...");
+    await page.goto(`${BASE}/graph`, { waitUntil: "networkidle", timeout: 15000 });
+    await page.waitForTimeout(4000); // let force simulation settle
+    await page.screenshot({ path: path.join(OUT, "graph.png"), type: "png" });
+    await page.close();
+  }
+
+  // Goals
+  {
+    const page = await context.newPage();
+    console.log("  goals...");
+    await page.goto(`${BASE}/goals`, { waitUntil: "networkidle", timeout: 15000 });
+    await page.waitForTimeout(2000);
+    await page.screenshot({ path: path.join(OUT, "goals.png"), type: "png" });
     await page.close();
   }
 

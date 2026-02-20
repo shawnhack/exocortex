@@ -42,6 +42,14 @@ Exocortex gives AI coding agents persistent memory across sessions. It stores me
 </p>
 
 <p align="center">
+  <img src="docs/screenshots/graph.png" alt="Graph — interactive force-directed knowledge graph" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/goals.png" alt="Goals — objective tracking with milestones" width="800" />
+</p>
+
+<p align="center">
   <img src="docs/screenshots/entity-detail.png" alt="Entity Detail — relationships and linked memories" width="800" />
 </p>
 
@@ -155,7 +163,7 @@ The MCP server exposes all memory tools over stdio. See [Quick Start](#connect-a
 | `memory_forget` | Delete a memory by ID |
 | `memory_context` | Load contextual memories for a topic (use at session start) |
 | `memory_browse` | Browse memories by tags, type, or date range without semantic search |
-| `memory_entities` | List tracked entities — people, projects, technologies, organizations, concepts |
+| `memory_entities` | List tracked entities with optional tag filtering |
 | `memory_ingest` | Index markdown files — splits by `##` headers, deduplicates by `source_uri`, supports globs |
 | `memory_digest_session` | Digest a coding session transcript into a structured session summary |
 | `memory_maintenance` | Adjust importance scores, archive stale memories, health diagnostics, search friction signals |
@@ -256,10 +264,11 @@ POST   /api/memories/:id/restore — Restore an archived memory
 ### Entities
 
 ```
-GET    /api/entities            — List entities (filter by type, search by name)
+GET    /api/entities            — List entities (filter by type or tags)
 POST   /api/entities            — Create entity
+GET    /api/entities/tags       — List all distinct entity tags
 GET    /api/entities/:id        — Get by ID
-PATCH  /api/entities/:id        — Update
+PATCH  /api/entities/:id        — Update (name, type, aliases, tags)
 DELETE /api/entities/:id        — Delete
 GET    /api/entities/:id/memories       — Linked memories
 GET    /api/entities/:id/relationships  — Entity relationships
@@ -327,7 +336,7 @@ All weights are configurable via the `settings` table. Score range: ~0.15–0.80
 
 ### Consolidation
 
-Greedy agglomerative clustering of semantically similar memories (threshold: 0.75). Clusters of 3+ memories are merged into a basic summary that extracts key facts — dates, metrics, decisions, architecture notes. Source memories are archived and linked to the summary via `parent_id`. LLM-powered synthesis is handled externally by Cortex's sentinel gardening job, keeping Exocortex API-cost-free.
+Greedy agglomerative clustering of semantically similar memories (threshold: 0.75). Clusters of 3+ memories are merged into a basic summary that extracts key facts — dates, metrics, decisions, architecture notes. Source memories are archived and linked to the summary via `parent_id`. LLM-powered synthesis can be handled externally by scheduled maintenance jobs, keeping Exocortex API-cost-free.
 
 ### Entity Graph Analysis
 
@@ -402,14 +411,15 @@ New memories are compared against the 50 most recent active memories of the same
 
 ## Database Schema
 
-8 tables + 1 virtual FTS5 table:
+9 tables + 1 virtual FTS5 table:
 
 | Table | Purpose |
 |-------|---------|
 | `memories` | Core records — content, embeddings, importance, access tracking, parent/child links |
 | `memory_tags` | Many-to-many tag associations |
 | `memory_entities` | Junction table linking memories to entities with relevance scores |
-| `entities` | Named entities — people, projects, technologies, organizations, concepts |
+| `entities` | Named entities with freeform tags |
+| `entity_tags` | Many-to-many tag associations for entities |
 | `access_log` | Query access history for importance adjustment |
 | `consolidations` | Consolidation history — which memories were merged and how |
 | `contradictions` | Detected contradictions with status tracking (pending/resolved/dismissed) |
