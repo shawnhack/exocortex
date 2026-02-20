@@ -3,11 +3,13 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { ContentType, Memory } from "./types.js";
 import { MemoryStore } from "./store.js";
+import { getTagAliasMap, normalizeTags } from "./tag-normalization.js";
 
 export interface IngestOptions {
   tags?: string[];
   importance?: number;
   content_type?: ContentType;
+  benchmark?: boolean;
 }
 
 export interface IngestFileResult {
@@ -123,6 +125,7 @@ export async function ingestMarkdownFile(
   const store = new MemoryStore(db);
   const memories: Memory[] = [];
   let skipped = 0;
+  const normalizedTags = normalizeTags(options?.tags, getTagAliasMap(db));
 
   for (const section of sections) {
     if (section.length < 10) {
@@ -136,7 +139,8 @@ export async function ingestMarkdownFile(
       source: "import",
       source_uri: absolutePath,
       importance: options?.importance ?? 0.5,
-      tags: options?.tags,
+      tags: normalizedTags,
+      benchmark: options?.benchmark,
     });
     memories.push(memory);
   }

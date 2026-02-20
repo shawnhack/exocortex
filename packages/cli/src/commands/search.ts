@@ -15,6 +15,7 @@ export function registerSearch(program: Command): void {
     .option("--before <date>", "Only before this date (YYYY-MM-DD)")
     .option("-t, --tags <tags>", "Filter by tags (comma-separated)")
     .option("--type <type>", "Filter by content type")
+    .option("--include-metadata", "Include benchmark/progress/regression metadata memories")
     .option("-v, --verbose", "Show score breakdown")
     .action(async (query: string, opts) => {
       const ora = (await import("ora")).default;
@@ -37,6 +38,7 @@ export function registerSearch(program: Command): void {
             ? opts.tags.split(",").map((t: string) => t.trim())
             : undefined,
           content_type: opts.type,
+          include_metadata: opts.includeMetadata === true,
         });
 
         spinner.stop();

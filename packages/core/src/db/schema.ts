@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
 
 const CREATE_TABLES = `
   CREATE TABLE IF NOT EXISTS memories (
@@ -12,6 +12,9 @@ const CREATE_TABLES = `
       CHECK(source IN ('manual', 'cli', 'api', 'mcp', 'browser', 'import', 'consolidation')),
     source_uri TEXT,
     embedding BLOB,
+    content_hash TEXT,
+    is_indexed INTEGER NOT NULL DEFAULT 1,
+    is_metadata INTEGER NOT NULL DEFAULT 0,
     importance REAL NOT NULL DEFAULT 0.5
       CHECK(importance >= 0 AND importance <= 1),
     access_count INTEGER NOT NULL DEFAULT 0,
@@ -112,17 +115,23 @@ const CREATE_FTS = `
 `;
 
 const CREATE_FTS_TRIGGERS = `
-  CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+  CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories
+  WHEN new.is_indexed = 1
+  BEGIN
     INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
   END;
 
-  CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+  CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories
+  WHEN old.is_indexed = 1
+  BEGIN
     INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
   END;
 
-  CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE OF content ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
-    INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
+  CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE OF content, is_indexed ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, content)
+    SELECT 'delete', old.rowid, old.content WHERE old.is_indexed = 1;
+    INSERT INTO memories_fts(rowid, content)
+    SELECT new.rowid, new.content WHERE new.is_indexed = 1;
   END;
 `;
 
@@ -137,17 +146,23 @@ const CREATE_FTS_WITH_KEYWORDS = `
 `;
 
 const CREATE_FTS_TRIGGERS_WITH_KEYWORDS = `
-  CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+  CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories
+  WHEN new.is_indexed = 1
+  BEGIN
     INSERT INTO memories_fts(rowid, content, keywords) VALUES (new.rowid, new.content, new.keywords);
   END;
 
-  CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+  CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories
+  WHEN old.is_indexed = 1
+  BEGIN
     INSERT INTO memories_fts(memories_fts, rowid, content, keywords) VALUES('delete', old.rowid, old.content, old.keywords);
   END;
 
-  CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE OF content, keywords ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, content, keywords) VALUES('delete', old.rowid, old.content, old.keywords);
-    INSERT INTO memories_fts(rowid, content, keywords) VALUES (new.rowid, new.content, new.keywords);
+  CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE OF content, keywords, is_indexed ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, content, keywords)
+    SELECT 'delete', old.rowid, old.content, old.keywords WHERE old.is_indexed = 1;
+    INSERT INTO memories_fts(rowid, content, keywords)
+    SELECT new.rowid, new.content, new.keywords WHERE new.is_indexed = 1;
   END;
 `;
 
@@ -166,8 +181,11 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "importance.boost_threshold": "5",
   "importance.decay_age_days": "30",
   "dedup.enabled": "true",
+  "dedup.hash_enabled": "true",
   "dedup.similarity_threshold": "0.85",
   "dedup.candidate_pool": "200",
+  "dedup.skip_insert_on_match": "true",
+  "dedup.hash_normalize_whitespace": "true",
   "chunking.enabled": "true",
   "chunking.max_length": "1500",
   "chunking.target_size": "500",
@@ -177,6 +195,21 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "auto_tagging.enabled": "true",
   "trash.auto_purge_days": "30",
   "search.query_expansion": "false",
+  "search.metadata_mode": "penalize",
+  "search.metadata_penalty": "0.35",
+  "search.metadata_tags": "benchmark-artifact,golden-queries,retrieval-regression,goal-progress,goal-progress-implicit",
+  "tags.alias_map": "{\"nextjs\":\"next.js\",\"next-js\":\"next.js\",\"clawworld\":\"claw-world\"}",
+  "benchmark.default_importance": "0.15",
+  "benchmark.indexed": "false",
+  "benchmark.chunking": "false",
+  "retrieval_regression.enabled": "true",
+  "retrieval_regression.schedule": "15 6 * * *",
+  "retrieval_regression.queries": "[]",
+  "retrieval_regression.limit": "10",
+  "retrieval_regression.min_overlap_at_10": "0.80",
+  "retrieval_regression.max_avg_rank_shift": "3",
+  "retrieval_regression.create_alert_memory": "true",
+  "observability.log_events": "false",
   "scoring.graph_weight": "0.10",
   "scoring.usefulness_weight": "0.05",
 };
@@ -190,7 +223,6 @@ export function initializeSchema(db: DatabaseSync): void {
 
   db.exec(CREATE_TABLES);
   db.exec(CREATE_FTS);
-  db.exec(CREATE_FTS_TRIGGERS);
 
   const upsertSetting = db.prepare(
     "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)"
@@ -225,6 +257,83 @@ export function initializeSchema(db: DatabaseSync): void {
   if (!colNames.has("metadata")) {
     db.exec("ALTER TABLE memories ADD COLUMN metadata TEXT");
   }
+  if (!colNames.has("content_hash")) {
+    db.exec("ALTER TABLE memories ADD COLUMN content_hash TEXT");
+    db.exec("UPDATE memories SET content_hash = lower(trim(content)) WHERE content_hash IS NULL");
+  }
+  if (!colNames.has("is_indexed")) {
+    db.exec("ALTER TABLE memories ADD COLUMN is_indexed INTEGER NOT NULL DEFAULT 1");
+  }
+  if (!colNames.has("is_metadata")) {
+    db.exec("ALTER TABLE memories ADD COLUMN is_metadata INTEGER NOT NULL DEFAULT 0");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memories_content_hash ON memories(content_hash)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memories_is_metadata ON memories(is_metadata)");
+
+  // Backfill metadata flag for known system/benchmark classes.
+  const metadataTagList = (
+    getSetting(db, "search.metadata_tags") ??
+    DEFAULT_SETTINGS["search.metadata_tags"]
+  )
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (metadataTagList.length > 0) {
+    const placeholders = metadataTagList.map(() => "?").join(", ");
+    db.prepare(
+      `UPDATE memories
+       SET is_metadata = 1
+       WHERE is_metadata = 0
+         AND id IN (
+           SELECT memory_id FROM memory_tags WHERE tag IN (${placeholders})
+         )`
+    ).run(...metadataTagList);
+  }
+  db.exec(
+    `UPDATE memories
+     SET is_metadata = 1
+     WHERE is_metadata = 0
+       AND metadata IS NOT NULL
+       AND (
+         metadata LIKE '%"mode":"benchmark"%'
+         OR metadata LIKE '%retrieval-regression%'
+         OR metadata LIKE '%goal-progress%'
+         OR metadata LIKE '%benchmark%'
+       )`
+  );
+
+  // Canonicalize active hash duplicates before enabling uniqueness.
+  db.exec(`
+    WITH ranked AS (
+      SELECT
+        id,
+        first_value(id) OVER (
+          PARTITION BY content_type, content_hash
+          ORDER BY created_at DESC, id DESC
+        ) AS keep_id,
+        row_number() OVER (
+          PARTITION BY content_type, content_hash
+          ORDER BY created_at DESC, id DESC
+        ) AS rn
+      FROM memories
+      WHERE is_active = 1
+        AND parent_id IS NULL
+        AND content_hash IS NOT NULL
+    )
+    UPDATE memories
+    SET
+      is_active = 0,
+      superseded_by = (SELECT keep_id FROM ranked WHERE ranked.id = memories.id),
+      updated_at = datetime('now')
+    WHERE id IN (SELECT id FROM ranked WHERE rn > 1);
+  `);
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_memories_active_root_hash_type
+      ON memories(content_type, content_hash)
+      WHERE is_active = 1
+        AND parent_id IS NULL
+        AND content_hash IS NOT NULL
+  `);
   // Search friction signal tracking
   db.exec(`
     CREATE TABLE IF NOT EXISTS search_misses (
@@ -236,6 +345,15 @@ export function initializeSchema(db: DatabaseSync): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_search_misses_created ON search_misses(created_at);
+  `);
+
+  // Lightweight event counters for operational observability.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS observability_counters (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Memory-to-memory links
@@ -292,6 +410,46 @@ export function initializeSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_co_retrievals_created ON co_retrievals(created_at);
   `);
 
+  // Golden-query retrieval regression tracking
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS retrieval_regression_baselines (
+      query TEXT PRIMARY KEY,
+      top_ids TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS retrieval_regression_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_group_id TEXT NOT NULL DEFAULT '',
+      query TEXT NOT NULL,
+      baseline_ids TEXT NOT NULL DEFAULT '[]',
+      current_ids TEXT NOT NULL DEFAULT '[]',
+      overlap_at_10 REAL NOT NULL DEFAULT 0,
+      avg_rank_shift REAL NOT NULL DEFAULT 0,
+      exact_order INTEGER NOT NULL DEFAULT 0,
+      alert INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_retrieval_regression_runs_query_created
+      ON retrieval_regression_runs(query, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_retrieval_regression_runs_group
+      ON retrieval_regression_runs(run_group_id, created_at DESC);
+  `);
+  const regressionRunColumns = db
+    .prepare("PRAGMA table_info(retrieval_regression_runs)")
+    .all() as Array<{ name: string }>;
+  const regressionRunColNames = new Set(regressionRunColumns.map((c) => c.name));
+  if (!regressionRunColNames.has("run_group_id")) {
+    db.exec(
+      "ALTER TABLE retrieval_regression_runs ADD COLUMN run_group_id TEXT NOT NULL DEFAULT ''"
+    );
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_retrieval_regression_runs_group ON retrieval_regression_runs(run_group_id, created_at DESC)"
+    );
+  }
+
   // Entity tags (multi-label classification)
   db.exec(`
     CREATE TABLE IF NOT EXISTS entity_tags (
@@ -331,6 +489,16 @@ export function initializeSchema(db: DatabaseSync): void {
     db.exec(CREATE_FTS_WITH_KEYWORDS);
     db.exec(CREATE_FTS_TRIGGERS_WITH_KEYWORDS);
     db.exec("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')");
+  }
+
+  // Always refresh triggers to ensure `is_indexed` conditional indexing is active.
+  db.exec("DROP TRIGGER IF EXISTS memories_ai");
+  db.exec("DROP TRIGGER IF EXISTS memories_ad");
+  db.exec("DROP TRIGGER IF EXISTS memories_au");
+  if (colNames.has("keywords") || needsFtsRebuild) {
+    db.exec(CREATE_FTS_TRIGGERS_WITH_KEYWORDS);
+  } else {
+    db.exec(CREATE_FTS_TRIGGERS);
   }
 
   // Legacy cleanup: older schemas used ON DELETE SET NULL for parent_id, which

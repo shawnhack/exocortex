@@ -4,6 +4,7 @@ import {
   initializeSchema,
   MemoryStore,
   MemorySearch,
+  setSetting,
   setEmbeddingProvider,
   resetEmbeddingProvider,
 } from "@exocortex/core";
@@ -139,5 +140,51 @@ describe("MemorySearch", () => {
     if (results.length >= 2) {
       expect(results[0].score).toBeGreaterThanOrEqual(results[1].score);
     }
+  });
+
+  it("excludes metadata memories by default when metadata mode is exclude", async () => {
+    setSetting(db, "search.metadata_mode", "exclude");
+    await store.create({
+      content: "Golden query regression benchmark notes",
+      benchmark: true,
+      tags: ["golden-queries"],
+    });
+    await store.create({
+      content: "Golden query implementation details",
+      tags: ["search"],
+    });
+
+    const results = await search.search({ query: "golden query" });
+    expect(results.some((r) => r.memory.tags?.includes("benchmark-artifact"))).toBe(false);
+  });
+
+  it("returns metadata memories when explicitly requested", async () => {
+    setSetting(db, "search.metadata_mode", "exclude");
+    const created = await store.create({
+      content: "Regression drift report for golden queries",
+      benchmark: true,
+      tags: ["retrieval-regression"],
+    });
+
+    const results = await search.search({
+      query: "retrieval regression",
+      include_metadata: true,
+    });
+
+    expect(results.map((r) => r.memory.id)).toContain(created.memory.id);
+  });
+
+  it("normalizes tag filter aliases", async () => {
+    const created = await store.create({
+      content: "Next.js routing memo",
+      tags: ["next.js"],
+    });
+
+    const results = await search.search({
+      query: "routing",
+      tags: ["nextjs"],
+    });
+
+    expect(results.map((r) => r.memory.id)).toContain(created.memory.id);
   });
 });

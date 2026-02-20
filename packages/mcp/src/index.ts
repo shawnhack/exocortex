@@ -80,9 +80,11 @@ const server = new McpServer({
 // so first tool call doesn't pay the cost
 const db = getDb();
 initializeSchema(db);
-getEmbeddingProvider().catch(() => {
-  // Model warmup failed — will retry on first tool call
-});
+if (process.env.EXOCORTEX_SKIP_EMBEDDING_WARMUP !== "1") {
+  getEmbeddingProvider().catch(() => {
+    // Model warmup failed — will retry on first tool call
+  });
+}
 
 // --- Retrieval feedback: track recent search results for implicit usefulness signaling ---
 const SEARCH_RESULT_TTL = 5 * 60 * 1000; // 5 minutes
@@ -166,6 +168,8 @@ server.tool(
     importance: z.number().min(0).max(1).optional().describe("Importance 0-1 (default 0.5, use 0.8+ for critical info)"),
     content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("Content type (default 'text')"),
     metadata: z.record(z.string(), z.any()).optional().describe("Arbitrary JSON metadata (e.g. { model: 'claude-opus-4-6' })"),
+    is_metadata: z.boolean().optional().describe("Explicitly mark this memory as metadata/system artifact"),
+    benchmark: z.boolean().optional().describe("Store as benchmark artifact (low default importance, reduced indexing/chunking)"),
   },
   async (args) => {
     try {
@@ -175,9 +179,11 @@ server.tool(
         content: args.content,
         content_type: args.content_type ?? "text",
         source: "mcp",
-        importance: args.importance ?? 0.5,
+        importance: args.importance,
         tags: args.tags,
         metadata: args.metadata,
+        is_metadata: args.is_metadata,
+        benchmark: args.benchmark,
       });
 
       const meta: string[] = [`id: ${result.memory.id}`];
@@ -185,26 +191,32 @@ server.tool(
       if (args.importance !== undefined) meta.push(`importance: ${args.importance}`);
       if (result.superseded_id) {
         const pct = Math.round((result.dedup_similarity ?? 0) * 100);
-        meta.push(`superseded ${result.superseded_id} — ${pct}% similar`);
+        if (result.dedup_action === "skipped") {
+          meta.push(`dedup reused ${result.superseded_id} — ${pct}% similar`);
+        } else {
+          meta.push(`superseded ${result.superseded_id} — ${pct}% similar`);
+        }
       }
 
       // Auto-detect goal progress
-      try {
-        const goalStore = new GoalStore(db);
-        const linkedGoalIds = await goalStore.autoLinkProgress(result.memory.id, args.content, result.memory.embedding);
-        if (linkedGoalIds.length > 0) {
-          const goal = goalStore.getById(linkedGoalIds[0]);
-          if (goal) {
-            meta.push(`goal: "${goal.title}"`);
+      if (!args.benchmark && result.dedup_action !== "skipped") {
+        try {
+          const goalStore = new GoalStore(db);
+          const linkedGoalIds = await goalStore.autoLinkProgress(result.memory.id, args.content, result.memory.embedding);
+          if (linkedGoalIds.length > 0) {
+            const goal = goalStore.getById(linkedGoalIds[0]);
+            if (goal) {
+              meta.push(`goal: "${goal.title}"`);
+            }
           }
+        } catch {
+          // Non-critical
         }
-      } catch {
-        // Non-critical
       }
 
       // Store-time relation discovery: auto-link similar existing memories
       try {
-        if (result.memory.embedding) {
+        if (!args.benchmark && result.dedup_action !== "skipped" && result.memory.embedding) {
           const linkStore = new MemoryLinkStore(db);
           const candidates = db
             .prepare(
@@ -252,6 +264,7 @@ server.tool(
     before: z.string().optional().describe("Only before this date (YYYY-MM-DD)"),
     content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("Filter by content type"),
     min_score: z.number().min(0).optional().describe("Minimum score threshold. RRF scoring range is ~0.001-0.03; legacy range is ~0.15-0.80. Default auto-detected from scoring mode."),
+    include_metadata: z.boolean().optional().describe("Include benchmark/progress/regression metadata memories (default false)"),
     compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
     max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
   },
@@ -270,6 +283,7 @@ server.tool(
         before: args.before,
         content_type: args.content_type,
         min_score: args.min_score,
+        include_metadata: args.include_metadata,
       });
 
       if (results.length === 0) {
@@ -709,6 +723,7 @@ server.tool(
     content: z.string().optional().describe("New content (will re-embed)"),
     content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("New content type"),
     importance: z.number().min(0).max(1).optional().describe("New importance score"),
+    is_metadata: z.boolean().optional().describe("Explicitly set metadata/system classification"),
     tags: z.array(z.string()).optional().describe("Replace all tags with these"),
     metadata: z.record(z.string(), z.any()).optional().describe("Merge metadata keys (set value to null to delete a key)"),
   },
@@ -716,8 +731,8 @@ server.tool(
     try {
       const { id, ...updates } = args;
 
-      if (!updates.content && !updates.content_type && updates.importance === undefined && !updates.tags && !updates.metadata) {
-        return { content: [{ type: "text", text: "No update fields provided. Specify at least one of: content, content_type, importance, tags, metadata." }] };
+      if (!updates.content && !updates.content_type && updates.importance === undefined && updates.is_metadata === undefined && !updates.tags && !updates.metadata) {
+        return { content: [{ type: "text", text: "No update fields provided. Specify at least one of: content, content_type, importance, is_metadata, tags, metadata." }] };
       }
 
       const store = new MemoryStore(db);
@@ -1843,7 +1858,31 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch((err) => {
-  console.error("Exocortex MCP server failed to start:", err);
-  process.exit(1);
-});
+export { server };
+
+export function getRegisteredToolForTesting(name: string): unknown {
+  const tools = (server as unknown as { _registeredTools?: unknown })
+    ._registeredTools;
+  if (!tools) return undefined;
+  if (tools instanceof Map) {
+    return tools.get(name);
+  }
+  if (Array.isArray(tools)) {
+    return tools.find((tool) =>
+      typeof tool === "object" &&
+      tool !== null &&
+      (tool as { name?: string }).name === name
+    );
+  }
+  if (typeof tools === "object") {
+    return (tools as Record<string, unknown>)[name];
+  }
+  return undefined;
+}
+
+if (process.env.EXOCORTEX_MCP_NO_AUTOSTART !== "1") {
+  main().catch((err) => {
+    console.error("Exocortex MCP server failed to start:", err);
+    process.exit(1);
+  });
+}

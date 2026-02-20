@@ -20,6 +20,9 @@ export interface BackupData {
     content_type: string;
     source: string;
     source_uri: string | null;
+    content_hash?: string | null;
+    is_indexed?: number;
+    is_metadata?: number;
     importance: number;
     access_count: number;
     parent_id: string | null;
@@ -93,7 +96,7 @@ export interface BackupData {
 export function exportData(db: DatabaseSync): BackupData {
   const memories = db
     .prepare(
-      "SELECT id, content, content_type, source, source_uri, importance, access_count, parent_id, is_active, metadata, created_at, updated_at FROM memories ORDER BY created_at ASC"
+      "SELECT id, content, content_type, source, source_uri, content_hash, is_indexed, is_metadata, importance, access_count, parent_id, is_active, metadata, created_at, updated_at FROM memories ORDER BY created_at ASC"
     )
     .all() as unknown as Array<{
     id: string;
@@ -101,6 +104,9 @@ export function exportData(db: DatabaseSync): BackupData {
     content_type: string;
     source: string;
     source_uri: string | null;
+    content_hash: string | null;
+    is_indexed: number;
+    is_metadata: number;
     importance: number;
     access_count: number;
     parent_id: string | null;
@@ -296,8 +302,8 @@ export function importData(db: DatabaseSync, data: BackupData): {
     // Import memories (without embeddings — they'll be regenerated)
     const insertMemory = db.prepare(
       `INSERT OR IGNORE INTO memories
-       (id, content, content_type, source, source_uri, importance, access_count, parent_id, is_active, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, content, content_type, source, source_uri, content_hash, is_indexed, is_metadata, importance, access_count, parent_id, is_active, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insertTag = db.prepare(
       "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
@@ -306,6 +312,9 @@ export function importData(db: DatabaseSync, data: BackupData): {
     for (const m of data.memories) {
       const result = insertMemory.run(
         m.id, m.content, m.content_type, m.source, m.source_uri,
+        m.content_hash ?? null,
+        m.is_indexed ?? 1,
+        m.is_metadata ?? 0,
         m.importance, m.access_count, m.parent_id, m.is_active,
         m.metadata ? JSON.stringify(m.metadata) : null,
         m.created_at, m.updated_at

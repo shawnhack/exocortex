@@ -121,12 +121,46 @@ export { runHealthChecks } from "./intelligence/health.js";
 export type { HealthCheck, HealthReport } from "./intelligence/health.js";
 export { generateSynthesis } from "./intelligence/synthesis.js";
 export type { SynthesisOptions } from "./intelligence/synthesis.js";
-export { reembedMissing, backfillEntities, recalibrateImportance, tuneWeights, pruneOldData } from "./intelligence/maintenance.js";
-export type { ReembedResult, BackfillEntitiesResult, RecalibrateResult, TuneWeightsResult, PruneResult } from "./intelligence/maintenance.js";
+export {
+  reembedMissing,
+  backfillEntities,
+  recalibrateImportance,
+  tuneWeights,
+  backfillMemoryCanonicalization,
+  pruneOldData,
+} from "./intelligence/maintenance.js";
+export type {
+  ReembedResult,
+  BackfillEntitiesResult,
+  RecalibrateResult,
+  TuneWeightsResult,
+  CanonicalBackfillResult,
+  PruneResult,
+} from "./intelligence/maintenance.js";
 export { densifyEntityGraph } from "./intelligence/graph-densify.js";
 export type { DensifyOptions, DensifyResult } from "./intelligence/graph-densify.js";
 export { buildCoRetrievalLinks } from "./intelligence/co-retrieval.js";
 export type { CoRetrievalLinkOptions, CoRetrievalLinkResult } from "./intelligence/co-retrieval.js";
+export {
+  getGoldenQueries,
+  setGoldenQueries,
+  getLatestRetrievalRegressionRunId,
+  resetGoldenBaselines,
+  promoteGoldenBaselinesFromRun,
+  compareRetrievalAgainstRun,
+  runRetrievalRegression,
+} from "./intelligence/retrieval-regression.js";
+export type {
+  GoldenQueryDefinition,
+  RetrievalRegressionOptions,
+  RetrievalRegressionCompareOptions,
+  RetrievalRegressionCompareResult,
+  RetrievalBaselineResetResult,
+  RetrievalBaselinePromoteResult,
+  RetrievalRunSnapshot,
+  RetrievalRegressionQueryResult,
+  RetrievalRegressionResult,
+} from "./intelligence/retrieval-regression.js";
 
 // Goals
 export type {
@@ -141,6 +175,23 @@ export type {
   CreateMilestoneInput,
 } from "./goals/types.js";
 export { GoalStore } from "./goals/store.js";
+
+// Tag normalization
+export {
+  DEFAULT_TAG_ALIAS_MAP,
+  parseTagAliasMap,
+  getTagAliasMap,
+  normalizeTag,
+  normalizeTags,
+} from "./memory/tag-normalization.js";
+
+// Observability
+export {
+  incrementCounter,
+  getCounter,
+  getCounters,
+} from "./observability/counters.js";
+export type { CounterRow } from "./observability/counters.js";
 
 // Backup
 export {

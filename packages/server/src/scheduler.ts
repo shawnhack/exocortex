@@ -18,7 +18,9 @@ import {
   getEmbeddingProvider,
   densifyEntityGraph,
   buildCoRetrievalLinks,
+  runRetrievalRegression,
 } from "@exocortex/core";
+import type { RetrievalRegressionResult } from "@exocortex/core";
 
 /**
  * Run importance adjustment + archival immediately.
@@ -61,6 +63,29 @@ export function notifyMemoryStored(): void {
     console.log(`[maintenance] ${MAINTENANCE_EVERY_N_STORES} memories stored — running maintenance`);
     runMaintenanceNow();
   }
+}
+
+export async function runScheduledRetrievalRegression(): Promise<
+  | { status: "disabled" | "no_queries" }
+  | { status: "ran"; result: RetrievalRegressionResult }
+> {
+  const db = getDb();
+  if (getSetting(db, "retrieval_regression.enabled") === "false") {
+    console.log("[scheduler] Retrieval regression disabled, skipping");
+    return { status: "disabled" };
+  }
+
+  console.log("[scheduler] Running golden-query retrieval regression...");
+  const result = await runRetrievalRegression(db);
+  if (result.ran === 0) {
+    console.log("[scheduler] Retrieval regression skipped — no golden queries configured");
+    return { status: "no_queries" };
+  }
+
+  console.log(
+    `[scheduler] Retrieval regression run ${result.run_id ?? "unknown"}: ${result.ran} queries, ${result.alerts} alerts${result.alert_memory_id ? ` (alert memory: ${result.alert_memory_id})` : ""}`
+  );
+  return { status: "ran", result };
 }
 
 /**
@@ -228,7 +253,19 @@ export function startScheduler(): void {
     }
   });
 
-  console.log("[scheduler] Background jobs scheduled (backup 1:30, consolidation 2:00, contradictions 2:30, entities 3:00, importance 3:30, archival 4:00, purge 4:30, densify 5:00, co-retrieval 5:30)");
+  const regressionSchedule =
+    getSetting(getDb(), "retrieval_regression.schedule") ?? "15 6 * * *";
+  cron.schedule(regressionSchedule, async () => {
+    try {
+      await runScheduledRetrievalRegression();
+    } catch (err) {
+      console.error("[scheduler] Retrieval regression error:", err);
+    }
+  });
+
+  console.log(
+    `[scheduler] Background jobs scheduled (backup 1:30, consolidation 2:00, contradictions 2:30, entities 3:00, importance 3:30, archival 4:00, purge 4:30, densify 5:00, co-retrieval 5:30, retrieval-regression ${regressionSchedule})`
+  );
 
   // Run maintenance on startup (short delay to not block server init)
   setTimeout(() => {

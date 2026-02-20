@@ -11,6 +11,8 @@ import { registerConsolidate } from "./commands/consolidate.js";
 import { registerEntities } from "./commands/entities.js";
 import { registerContradictions } from "./commands/contradictions.js";
 import { registerExport } from "./commands/export.js";
+import { registerRetrievalRegression } from "./commands/retrieval-regression.js";
+import { registerBackfill } from "./commands/backfill.js";
 
 const program = new Command();
 
@@ -29,5 +31,7 @@ registerConsolidate(program);
 registerEntities(program);
 registerContradictions(program);
 registerExport(program);
+registerRetrievalRegression(program);
+registerBackfill(program);
 
 program.parse();

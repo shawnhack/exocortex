@@ -7,6 +7,8 @@
     "build": "pnpm -r build",
     "dev": "tsx watch packages/cli/src/index.ts serve",
     "test": "vitest run",
+    "test:retrieval-gate": "tsx scripts/retrieval-regression-gate.mjs",
+    "test:ui": "node scripts/test-memory-detail-layout.mjs && node scripts/test-dashboard-interactions.mjs",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
     "release": "bash scripts/release.sh"

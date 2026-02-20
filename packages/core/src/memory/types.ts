@@ -15,6 +15,7 @@ export interface Memory {
   source: MemorySource;
   source_uri: string | null;
   embedding: Float32Array | null;
+  is_metadata: boolean;
   importance: number;
   access_count: number;
   last_accessed_at: string | null;
@@ -38,6 +39,12 @@ export interface CreateMemoryInput {
   parent_id?: string;
   tags?: string[];
   metadata?: Record<string, unknown>;
+  is_metadata?: boolean;
+  /**
+   * Benchmark artifacts are stored with lower default importance and reduced indexing/chunking.
+   * Use for evaluation snapshots, regression reports, and query benchmark metadata.
+   */
+  benchmark?: boolean;
 }
 
 export interface UpdateMemoryInput {
@@ -47,6 +54,7 @@ export interface UpdateMemoryInput {
   is_active?: boolean;
   tags?: string[];
   metadata?: Record<string, unknown>;
+  is_metadata?: boolean;
 }
 
 export interface SearchQuery {
@@ -61,6 +69,11 @@ export interface SearchQuery {
   min_importance?: number;
   min_score?: number;
   active_only?: boolean;
+  /**
+   * Include benchmark/progress/regression metadata memories in default retrieval.
+   * Defaults to false.
+   */
+  include_metadata?: boolean;
 }
 
 export interface SearchResult {
@@ -87,6 +100,7 @@ export interface CreateMemoryResult {
   memory: Memory;
   superseded_id?: string;
   dedup_similarity?: number;
+  dedup_action?: "superseded" | "skipped";
 }
 
 /** Raw row shape from SQLite (embedding as Buffer, is_active as integer) */
@@ -97,6 +111,9 @@ export interface MemoryRow {
   source: MemorySource;
   source_uri: string | null;
   embedding: Uint8Array | null;
+  content_hash: string | null;
+  is_indexed: number;
+  is_metadata: number;
   importance: number;
   access_count: number;
   last_accessed_at: string | null;

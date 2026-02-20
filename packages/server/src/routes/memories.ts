@@ -35,6 +35,8 @@ const createSchema = z.object({
   parent_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.string(), z.any()).optional(),
+  is_metadata: z.boolean().optional(),
+  benchmark: z.boolean().optional(),
 });
 
 const updateSchema = z.object({
@@ -46,6 +48,7 @@ const updateSchema = z.object({
   is_active: z.boolean().optional(),
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.string(), z.any()).optional(),
+  is_metadata: z.boolean().optional(),
 });
 
 const searchSchema = z.object({
@@ -71,6 +74,7 @@ const searchSchema = z.object({
   before: z.string().optional(),
   min_importance: z.number().min(0).max(1).optional(),
   min_score: z.number().min(0).max(1).optional(),
+  include_metadata: z.boolean().optional(),
   compact: z.boolean().optional(),
 });
 
@@ -113,11 +117,14 @@ memories.post("/api/memories", async (c) => {
 
   const db = getDb();
   const store = new MemoryStore(db);
-  const { memory } = await store.create({
+  const result = await store.create({
     ...parsed.data,
     source: parsed.data.source ?? "api",
   });
-  notifyMemoryStored();
+  if (result.dedup_action !== "skipped") {
+    notifyMemoryStored();
+  }
+  const { memory } = result;
   return c.json(stripEmbedding(memory), 201);
 });
 

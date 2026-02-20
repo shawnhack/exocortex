@@ -15,6 +15,9 @@ import {
 } from "./scoring.js";
 import { EntityStore } from "../entities/store.js";
 import { MemoryLinkStore } from "./links.js";
+import { getTagAliasMap, normalizeTags } from "./tag-normalization.js";
+import { getMetadataTags } from "./metadata-classification.js";
+import { incrementCounter } from "../observability/counters.js";
 
 interface FtsMatch {
   rowid: number;
@@ -58,6 +61,19 @@ export class MemorySearch {
     const limit = query.limit ?? 20;
     const offset = query.offset ?? 0;
     const weights = getWeights(this.db);
+    const aliasMap = getTagAliasMap(this.db);
+    const normalizedTagFilter = normalizeTags(query.tags, aliasMap);
+    const metadataTags = getMetadataTags(this.db, aliasMap);
+    const metadataMode = (getSetting(this.db, "search.metadata_mode") ?? "penalize").toLowerCase();
+    const rawPenalty = parseFloat(getSetting(this.db, "search.metadata_penalty") ?? "0.35");
+    const metadataPenalty = Number.isFinite(rawPenalty)
+      ? Math.max(0, Math.min(rawPenalty, 1))
+      : 0.35;
+    const metadataRequested = this.isMetadataExplicitlyRequested(
+      query,
+      metadataTags,
+      aliasMap
+    );
 
     // Build WHERE clauses for filtering
     const conditions: string[] = ["m.is_active = 1"];
@@ -88,12 +104,31 @@ export class MemorySearch {
       params.push(query.min_importance);
     }
 
-    if (query.tags && query.tags.length > 0) {
-      const placeholders = query.tags.map(() => "?").join(", ");
+    if (normalizedTagFilter.length > 0) {
+      const placeholders = normalizedTagFilter.map(() => "?").join(", ");
       conditions.push(
         `m.id IN (SELECT memory_id FROM memory_tags WHERE tag IN (${placeholders}))`
       );
-      params.push(...query.tags.map((t) => t.toLowerCase().trim()));
+      params.push(...normalizedTagFilter);
+    }
+
+    let excludedMetadataCount = 0;
+    if (!metadataRequested && metadataMode === "exclude") {
+      if (metadataTags.size > 0) {
+        try {
+          const baseWhere = conditions.join(" AND ");
+          const excluded = this.db
+            .prepare(
+              `SELECT COUNT(*) as count FROM memories m WHERE ${baseWhere} AND m.is_metadata = 1`
+            )
+            .get(...params) as { count: number };
+          excludedMetadataCount = excluded.count ?? 0;
+        } catch {
+          excludedMetadataCount = 0;
+        }
+      }
+      conditions.push("m.is_metadata = 0");
+      incrementCounter(this.db, "search.metadata_excluded_queries");
     }
 
     const whereClause = conditions.join(" AND ");
@@ -173,6 +208,10 @@ export class MemorySearch {
           `SELECT m.*, m.rowid as _rowid FROM memories m WHERE ${whereClause} ORDER BY created_at DESC LIMIT ${candidateLimit}`
         )
         .all(...params) as unknown as (MemoryRow & { _rowid: number })[];
+    }
+
+    if (excludedMetadataCount > 0) {
+      incrementCounter(this.db, "search.metadata_excluded_memories", excludedMetadataCount);
     }
 
     if (rows.length === 0) return [];
@@ -261,6 +300,7 @@ export class MemorySearch {
     // RRF or legacy scoring
     const rrfConfig = getRRFConfig(this.db);
     const scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number }> = [];
+    let penalizedMetadataCount = 0;
 
     if (rrfConfig.enabled) {
       // Build ranked lists from candidates with non-zero scores
@@ -296,23 +336,44 @@ export class MemorySearch {
       }
 
       for (const c of candidates) {
-        const baseRrf = rrfScores.get(c.row.id) ?? 0;
+        let baseRrf = rrfScores.get(c.row.id) ?? 0;
+        const memTags = candidateTagMap.get(c.row.id) ?? [];
+        const hasQueryTagMatch =
+          queryTerms.length > 0 &&
+          queryTerms.some((term) => memTags.some((tag) => tag.includes(term)));
+
+        // Tag-only fallback: allow retrieval of explicitly tag-filtered memories
+        // even when they have no vector/FTS score (e.g. benchmark artifacts).
+        if (baseRrf === 0) {
+          const hasTagFilterMatch =
+            normalizedTagFilter.length > 0 &&
+            normalizedTagFilter.some((tag) => memTags.includes(tag));
+          if (hasTagFilterMatch) {
+            baseRrf = 1 / (rrfConfig.k + 1);
+          } else if (hasQueryTagMatch) {
+            const denominator = rrfConfig.k + Math.max(10, candidates.length);
+            baseRrf = 1 / denominator;
+          }
+        }
 
         // Post-RRF multiplicative boost from recency + frequency + usefulness
         const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness;
         let score = baseRrf * boostMultiplier;
 
         // Tag boost scaled to RRF range
-        if (tagBoost > 0 && queryTerms.length > 0 && maxRrf > 0) {
-          const memTags = candidateTagMap.get(c.row.id);
-          if (memTags) {
-            const hasMatch = queryTerms.some((term) =>
-              memTags.some((tag) => tag.includes(term))
-            );
-            if (hasMatch) {
-              score += tagBoost * maxRrf;
-            }
-          }
+        if (tagBoost > 0 && hasQueryTagMatch) {
+          const scale = maxRrf > 0 ? maxRrf : 1 / (rrfConfig.k + 1);
+          score += tagBoost * scale;
+        }
+
+        if (
+          !metadataRequested &&
+          metadataMode !== "exclude" &&
+          metadataPenalty < 1 &&
+          c.row.is_metadata === 1
+        ) {
+          penalizedMetadataCount++;
+          score *= metadataPenalty;
         }
 
         if (score >= rrfMinScore) {
@@ -345,10 +406,30 @@ export class MemorySearch {
           }
         }
 
+        if (
+          !metadataRequested &&
+          metadataMode !== "exclude" &&
+          metadataPenalty < 1 &&
+          c.row.is_metadata === 1
+        ) {
+          penalizedMetadataCount++;
+          score *= metadataPenalty;
+        }
+
         if (score >= minScore) {
           scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness });
         }
       }
+    }
+
+    if (
+      !metadataRequested &&
+      metadataMode !== "exclude" &&
+      metadataPenalty < 1 &&
+      penalizedMetadataCount > 0
+    ) {
+      incrementCounter(this.db, "search.metadata_penalized_queries");
+      incrementCounter(this.db, "search.metadata_penalized_memories", penalizedMetadataCount);
     }
 
     // Sort by score descending, apply offset + limit
@@ -387,11 +468,19 @@ export class MemorySearch {
     }
 
     return page.map((p) => {
-      const { _rowid, metadata: rawMeta, ...row } = p.row;
+      const {
+        _rowid,
+        metadata: rawMeta,
+        content_hash: _contentHash,
+        is_indexed: _isIndexed,
+        is_metadata: isMetadata,
+        ...row
+      } = p.row;
       return {
         memory: {
           ...row,
           embedding: null,
+          is_metadata: isMetadata === 1,
           is_active: row.is_active === 1,
           superseded_by: row.superseded_by ?? null,
           chunk_index: row.chunk_index ?? null,
@@ -406,6 +495,30 @@ export class MemorySearch {
         frequency_score: p.freq,
       };
     });
+  }
+
+  private isMetadataExplicitlyRequested(
+    query: SearchQuery,
+    metadataTags: Set<string>,
+    aliasMap: Record<string, string>
+  ): boolean {
+    if (query.include_metadata === true) return true;
+
+    if (query.tags && query.tags.length > 0) {
+      const requested = new Set(normalizeTags(query.tags, aliasMap));
+      for (const tag of requested) {
+        if (metadataTags.has(tag)) return true;
+      }
+    }
+
+    const q = query.query.toLowerCase();
+    for (const tag of metadataTags) {
+      if (q.includes(tag) || q.includes(tag.replace(/-/g, " "))) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private logSearchMiss(

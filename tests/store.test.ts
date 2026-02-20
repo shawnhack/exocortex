@@ -69,6 +69,16 @@ describe("MemoryStore", () => {
       expect(memory.tags!.length).toBe(2);
     });
 
+    it("normalizes aliased tags on create", async () => {
+      const { memory } = await store.create({
+        content: "Tag alias test",
+        tags: ["nextjs", "next-js", "clawworld", "NEXTJS"],
+      });
+      expect(memory.tags).toContain("next.js");
+      expect(memory.tags).toContain("claw-world");
+      expect(memory.tags?.filter((t) => t === "next.js")).toHaveLength(1);
+    });
+
     it("creates a memory with custom fields", async () => {
       const { memory } = await store.create({
         content: "Important note",
@@ -104,6 +114,74 @@ describe("MemoryStore", () => {
       const { memory: a } = await store.create({ content: "First" });
       const { memory: b } = await store.create({ content: "Second" });
       expect(a.id).not.toBe(b.id);
+    });
+
+    it("supports benchmark mode defaults with reduced indexing", async () => {
+      const { memory } = await store.create({
+        content: "Benchmark capture for retrieval snapshot.",
+        benchmark: true,
+      });
+      expect(memory.importance).toBe(0.15);
+      expect(memory.tags).toContain("benchmark-artifact");
+      expect(memory.is_metadata).toBe(true);
+      expect(memory.embedding).toBeNull();
+
+      const row = db
+        .prepare("SELECT is_indexed, is_metadata FROM memories WHERE id = ?")
+        .get(memory.id) as { is_indexed: number; is_metadata: number };
+      expect(row.is_indexed).toBe(0);
+      expect(row.is_metadata).toBe(1);
+    });
+
+    it("supports explicit metadata classification", async () => {
+      const { memory } = await store.create({
+        content: "Explicit metadata classification test",
+        is_metadata: true,
+      });
+      expect(memory.is_metadata).toBe(true);
+    });
+
+    it("skips insert on exact hash duplicate and merges tags", async () => {
+      const base = await store.create({
+        content:
+          "This duplicate content is long enough for dedup and should be reused exactly.",
+        tags: ["alpha"],
+      });
+      const duplicate = await store.create({
+        content:
+          "This duplicate content is long enough for dedup and should be reused exactly.",
+        tags: ["beta"],
+      });
+
+      expect(duplicate.dedup_action).toBe("skipped");
+      expect(duplicate.memory.id).toBe(base.memory.id);
+      expect(duplicate.memory.tags).toEqual(expect.arrayContaining(["alpha", "beta"]));
+
+      const count = db
+        .prepare("SELECT COUNT(*) as count FROM memories")
+        .get() as { count: number };
+      expect(count.count).toBe(1);
+    });
+
+    it("skips insert on semantic duplicate when threshold is met", async () => {
+      setSetting(db, "dedup.similarity_threshold", "0.75");
+      await store.create({
+        content:
+          "TypeScript project setup with pnpm workspace and strict config enabled.",
+        tags: ["typescript"],
+      });
+      const nearDup = await store.create({
+        content:
+          "TypeScript project setup with pnpm workspaces and strict configs enabled.",
+        tags: ["typescript"],
+      });
+
+      expect(nearDup.dedup_action).toBe("skipped");
+
+      const active = db
+        .prepare("SELECT COUNT(*) as count FROM memories WHERE is_active = 1")
+        .get() as { count: number };
+      expect(active.count).toBe(1);
     });
 
     it("does not deactivate an existing memory when a dedup-candidate insert fails", async () => {

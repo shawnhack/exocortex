@@ -98,6 +98,67 @@ describe("server routes", () => {
     expect(body.results.map((r) => r.content)).toEqual(["C", "B", "A"]);
   });
 
+  it("supports benchmark metadata filtering with include_metadata", async () => {
+    const db = getDb();
+    setSetting(db, "search.metadata_mode", "exclude");
+
+    const createdBenchmark = await app.request("http://localhost/api/memories", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        content: "Regression drift snapshot for benchmark run",
+        benchmark: true,
+        tags: ["retrieval-regression"],
+      }),
+    });
+    expect(createdBenchmark.status).toBe(201);
+    const benchmarkBody = (await createdBenchmark.json()) as { is_metadata: boolean };
+    expect(benchmarkBody.is_metadata).toBe(true);
+
+    const createdNormal = await app.request("http://localhost/api/memories", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        content: "Regression handling in production system",
+        tags: ["search"],
+      }),
+    });
+    expect(createdNormal.status).toBe(201);
+
+    const hidden = await app.request("http://localhost/api/memories/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: "regression",
+        limit: 10,
+      }),
+    });
+    expect(hidden.status).toBe(200);
+    const hiddenBody = (await hidden.json()) as {
+      results: Array<{ memory: { tags?: string[] } }>;
+    };
+    expect(
+      hiddenBody.results.some((r) => r.memory.tags?.includes("benchmark-artifact"))
+    ).toBe(false);
+
+    const shown = await app.request("http://localhost/api/memories/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: "regression",
+        limit: 10,
+        include_metadata: true,
+      }),
+    });
+    expect(shown.status).toBe(200);
+    const shownBody = (await shown.json()) as {
+      results: Array<{ memory: { tags?: string[] } }>;
+    };
+    expect(
+      shownBody.results.some((r) => r.memory.tags?.includes("benchmark-artifact"))
+    ).toBe(true);
+  });
+
   it("rejects invalid contradictions status filters", async () => {
     const res = await app.request("http://localhost/api/contradictions?status=bad");
     expect(res.status).toBe(400);

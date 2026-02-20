@@ -7,6 +7,7 @@ import {
   decryptBackup,
   importData,
 } from "@exocortex/core";
+import type { BackupData } from "@exocortex/core";
 
 interface JsonMemory {
   content: string;
@@ -103,15 +104,19 @@ export function registerImport(program: Command): void {
         if (isBackupData(parsed)) {
           const db = getDb();
           initializeSchema(db);
+          const backup: BackupData = {
+            ...(parsed as Omit<BackupData, "exported_at">),
+            exported_at: parsed.exported_at ?? new Date().toISOString(),
+          };
 
           console.log(chalk.bold("\nImporting structured Exocortex backup...\n"));
-          if (parsed.exported_at) {
-            console.log(`  Backup date: ${chalk.dim(parsed.exported_at)}`);
+          if (backup.exported_at) {
+            console.log(`  Backup date: ${chalk.dim(backup.exported_at)}`);
           }
-          console.log(`  Memories: ${parsed.memories.length}`);
-          console.log(`  Entities: ${parsed.entities.length}`);
-          if (Array.isArray((parsed as any).goals)) {
-            console.log(`  Goals: ${(parsed as any).goals.length}`);
+          console.log(`  Memories: ${backup.memories.length}`);
+          console.log(`  Entities: ${backup.entities.length}`);
+          if (Array.isArray((backup as any).goals)) {
+            console.log(`  Goals: ${(backup as any).goals.length}`);
           }
 
           if (opts.dryRun) {
@@ -119,7 +124,7 @@ export function registerImport(program: Command): void {
             return;
           }
 
-          const result = importData(db, parsed);
+          const result = importData(db, backup);
           console.log(
             chalk.green(
               `\n  Restored: ${result.memories} memories, ${result.entities} entities, ${result.links} links`

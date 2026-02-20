@@ -11,6 +11,13 @@ import type { EmbeddingProvider } from "../embedding/types.js";
 import { EntityStore } from "../entities/store.js";
 import { extractEntities, extractRelationships } from "../entities/extractor.js";
 import { setSetting, getSetting } from "../db/schema.js";
+import { getTagAliasMap, normalizeTags } from "../memory/tag-normalization.js";
+import { computeContentHashForDb } from "../memory/content-hash.js";
+import {
+  getMetadataTags,
+  inferIsMetadata,
+} from "../memory/metadata-classification.js";
+import { incrementCounter } from "../observability/counters.js";
 
 // --- A1: Re-embedding Pass ---
 
@@ -434,7 +441,148 @@ export function tuneWeights(
   };
 }
 
-// --- A5: Prune Old Data ---
+// --- A5: Canonical Backfill (hashes + tags + metadata flag) ---
+
+export interface CanonicalBackfillResult {
+  scanned: number;
+  hashesUpdated: number;
+  tagsUpdated: number;
+  metadataFlagUpdated: number;
+  dry_run: boolean;
+}
+
+export function backfillMemoryCanonicalization(
+  db: DatabaseSync,
+  opts?: { dryRun?: boolean; limit?: number }
+): CanonicalBackfillResult {
+  const dryRun = opts?.dryRun ?? false;
+  const limit = opts?.limit ?? 10000;
+  const aliasMap = getTagAliasMap(db);
+  const metadataTags = getMetadataTags(db, aliasMap);
+
+  const rows = db
+    .prepare(
+      `SELECT id, content, content_hash, is_metadata, metadata
+       FROM memories
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(limit) as Array<{
+    id: string;
+    content: string;
+    content_hash: string | null;
+    is_metadata: number;
+    metadata: string | null;
+  }>;
+
+  if (rows.length === 0) {
+    return {
+      scanned: 0,
+      hashesUpdated: 0,
+      tagsUpdated: 0,
+      metadataFlagUpdated: 0,
+      dry_run: dryRun,
+    };
+  }
+
+  const selectTags = db.prepare(
+    "SELECT tag FROM memory_tags WHERE memory_id = ? ORDER BY tag ASC"
+  );
+  const deleteTags = db.prepare("DELETE FROM memory_tags WHERE memory_id = ?");
+  const insertTag = db.prepare(
+    "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
+  );
+  const updateHash = db.prepare(
+    "UPDATE memories SET content_hash = ?, updated_at = ? WHERE id = ?"
+  );
+  const updateMetadataFlag = db.prepare(
+    "UPDATE memories SET is_metadata = ?, updated_at = ? WHERE id = ?"
+  );
+
+  let hashesUpdated = 0;
+  let tagsUpdated = 0;
+  let metadataFlagUpdated = 0;
+  const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+
+  if (!dryRun) db.exec("BEGIN");
+  try {
+    for (const row of rows) {
+      const desiredHash = computeContentHashForDb(db, row.content);
+      if (row.content_hash !== desiredHash) {
+        hashesUpdated++;
+        if (!dryRun) {
+          updateHash.run(desiredHash, now, row.id);
+        }
+      }
+
+      const currentTags = (selectTags.all(row.id) as Array<{ tag: string }>).map(
+        (t) => t.tag
+      );
+      const normalizedTags = normalizeTags(currentTags, aliasMap).slice().sort();
+      const sortedCurrent = [...currentTags].sort();
+      const tagsChanged =
+        normalizedTags.length !== sortedCurrent.length ||
+        normalizedTags.some((t, i) => t !== sortedCurrent[i]);
+      if (tagsChanged) {
+        tagsUpdated++;
+        if (!dryRun) {
+          deleteTags.run(row.id);
+          for (const tag of normalizedTags) {
+            insertTag.run(row.id, tag);
+          }
+        }
+      }
+
+      let parsedMetadata: Record<string, unknown> = {};
+      if (row.metadata) {
+        try {
+          parsedMetadata = JSON.parse(row.metadata) as Record<string, unknown>;
+        } catch {
+          parsedMetadata = {};
+        }
+      }
+      const inferredMetadata = inferIsMetadata({
+        tags: normalizedTags,
+        metadata: parsedMetadata,
+        metadataTags,
+      });
+      const currentIsMetadata = row.is_metadata === 1;
+      if (currentIsMetadata !== inferredMetadata) {
+        metadataFlagUpdated++;
+        if (!dryRun) {
+          updateMetadataFlag.run(inferredMetadata ? 1 : 0, now, row.id);
+        }
+      }
+    }
+
+    if (!dryRun) db.exec("COMMIT");
+  } catch (err) {
+    if (!dryRun) db.exec("ROLLBACK");
+    throw err;
+  }
+
+  if (!dryRun) {
+    if (hashesUpdated > 0) {
+      incrementCounter(db, "maintenance.hash_backfill_updates", hashesUpdated);
+    }
+    if (tagsUpdated > 0) {
+      incrementCounter(db, "maintenance.tag_normalization_updates", tagsUpdated);
+    }
+    if (metadataFlagUpdated > 0) {
+      incrementCounter(db, "maintenance.metadata_flag_updates", metadataFlagUpdated);
+    }
+  }
+
+  return {
+    scanned: rows.length,
+    hashesUpdated,
+    tagsUpdated,
+    metadataFlagUpdated,
+    dry_run: dryRun,
+  };
+}
+
+// --- A6: Prune Old Data ---
 
 export interface PruneResult {
   access_log: number;
