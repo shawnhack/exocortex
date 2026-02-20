@@ -96,6 +96,7 @@ export function Layout() {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+  const isFullWidth = location.pathname === "/graph";
   const isCollapsed = collapsed && !isMobile;
   const width = isCollapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
 
@@ -372,7 +373,7 @@ export function Layout() {
         style={{
           flex: 1,
           padding: "32px 40px",
-          maxWidth: 1000,
+          maxWidth: isFullWidth ? "none" : 1000,
           minHeight: "100vh",
           position: "relative",
           zIndex: 1,

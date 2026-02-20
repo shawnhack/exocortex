@@ -1,8 +1,51 @@
-# Exocortex
+<p align="center">
+  <img src="docs/icon.svg" alt="Exocortex" width="120" />
+</p>
 
-Personal unified memory system — SQLite-backed, local-first, hybrid RAG retrieval with MCP integration.
+<h1 align="center">Exocortex</h1>
+
+<p align="center">
+  Personal unified memory system — SQLite-backed, local-first, hybrid RAG retrieval with MCP integration.
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#mcp-server">MCP Server</a> &middot;
+  <a href="#cli">CLI</a> &middot;
+  <a href="#rest-api">REST API</a> &middot;
+  <a href="#dashboard-1">Dashboard</a>
+</p>
+
+---
 
 Exocortex gives AI coding agents persistent memory across sessions. It stores memories with embeddings, scores them using Reciprocal Rank Fusion, and exposes everything through an MCP server, REST API, CLI, and React dashboard. Works with any MCP-compatible tool — Claude Code, Codex, Gemini, Copilot, and others. All data stays local — no cloud, no API keys for embeddings.
+
+## Dashboard
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Dashboard — memory storage overview" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/search.png" alt="Search — hybrid retrieval with tag filtering" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/timeline.png" alt="Timeline — chronological memory view" width="800" />
+</p>
+
+<details>
+<summary>More screenshots</summary>
+
+<p align="center">
+  <img src="docs/screenshots/entities.png" alt="Entities — extracted knowledge graph nodes" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/entity-detail.png" alt="Entity Detail — relationships and linked memories" width="800" />
+</p>
+
+</details>
 
 ---
 
