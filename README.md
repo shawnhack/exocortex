@@ -143,14 +143,14 @@ User prompt → Agent reads/writes memories via MCP tools
 | `@exocortex/core` | Storage, retrieval, embedding, scoring, entity extraction, intelligence, ingestion |
 | `@exocortex/mcp` | MCP server — exposes all memory tools via stdio (works with any MCP client) |
 | `@exocortex/server` | Hono REST API on port 3210 + serves the React dashboard |
-| `@exocortex/cli` | CLI tool (`exo`) — add, search, import, export, serve, consolidate |
+| `@exocortex/cli` | CLI tool (`exo`) — add, search, import/export, serve, consolidate, retrieval-regression, backfill |
 | `@exocortex/dashboard` | React SPA with Neural Interface theme — search, chat, graph, timeline, trash, mobile-responsive |
 
 ---
 
 ## MCP Server
 
-The MCP server exposes all memory tools over stdio. See [Quick Start](#connect-an-ai-agent) for setup with your preferred tool.
+The MCP server exposes all Exocortex tools over stdio. See [Quick Start](#connect-an-ai-agent) for setup with your preferred tool.
 
 ### Tools
 
@@ -163,14 +163,25 @@ The MCP server exposes all memory tools over stdio. See [Quick Start](#connect-a
 | `memory_forget` | Delete a memory by ID |
 | `memory_context` | Load contextual memories for a topic (use at session start) |
 | `memory_browse` | Browse memories by tags, type, or date range without semantic search |
+| `memory_feedback` | Mark retrieved memories as useful to improve ranking |
 | `memory_entities` | List tracked entities with optional tag filtering |
+| `memory_timeline` | Query decision history, lineage, or topic evolution over time |
 | `memory_ingest` | Index markdown files — splits by `##` headers, deduplicates by `source_uri`, supports globs |
+| `memory_link` | Create/remove memory-to-memory links for graph-aware retrieval |
 | `memory_digest_session` | Digest a coding session transcript into a structured session summary |
 | `memory_maintenance` | Adjust importance scores, archive stale memories, health diagnostics, search friction signals |
 | `memory_consolidate` | Find and merge clusters of similar memories into summaries |
 | `memory_graph` | Entity graph analysis — full graph, bridge detection, community detection |
 | `memory_decay_preview` | Dry-run preview of what maintenance would archive |
 | `memory_ping` | Health check — memory counts, entity/tag stats, date range, uptime |
+| `goal_create` | Create a persistent goal |
+| `goal_list` | List goals by status |
+| `goal_get` | Get goal details with milestones and progress |
+| `goal_update` | Update goal fields/status/metadata |
+| `goal_log` | Log progress on a goal |
+| `goal_add_milestone` | Add a milestone to a goal |
+| `goal_update_milestone` | Update milestone title/status/order/deadline |
+| `goal_remove_milestone` | Remove a milestone from a goal |
 
 ### Search workflow
 
@@ -236,6 +247,8 @@ pnpm exec exo <command> [options]
 | `entities` | List and manage entities. Options: `--type`, `--search`, `--memories` |
 | `contradictions` | View and manage contradictions. Options: `--status`, `--detect`, `--resolve <id>`, `--dismiss <id>` |
 | `export` | Export JSON backup (memories, entities, goals, links, settings) |
+| `retrieval-regression` | Run golden-query retrieval drift checks and baseline management |
+| `backfill` | Backfill canonical memory state. Options: `--dry-run`, `--limit` |
 
 ---
 
@@ -255,10 +268,12 @@ GET    /api/memories/:id        — Get by ID
 PATCH  /api/memories/:id        — Update (content, tags, importance, is_active)
 DELETE /api/memories/:id        — Permanent delete
 POST   /api/memories/search     — Hybrid search
+POST   /api/memories/context-graph — Search + 1-hop linked context
 GET    /api/memories/recent     — Recent memories
 POST   /api/memories/import     — Bulk import
 GET    /api/memories/archived   — List archived/trashed memories
 POST   /api/memories/:id/restore — Restore an archived memory
+GET    /api/memories/:id/links  — List memory-to-memory links
 ```
 
 ### Entities
@@ -290,11 +305,22 @@ POST   /api/consolidate         — Find and consolidate memory clusters
 GET    /api/consolidations      — Consolidation history
 POST   /api/contradictions/detect — Scan for contradictions
 GET    /api/contradictions      — List contradictions
+GET    /api/contradictions/:id  — Get contradiction by ID
 PATCH  /api/contradictions/:id  — Update contradiction (resolve/dismiss)
 POST   /api/archive             — Archive stale memories
 POST   /api/importance-adjust   — Adjust importance from access patterns
 GET    /api/timeline            — Memory timeline with filters
 GET    /api/temporal-stats      — Temporal analysis (streaks, averages)
+```
+
+### Goals
+
+```
+GET    /api/goals              — List goals (default status=active)
+GET    /api/goals/:id          — Get goal with progress + milestones
+POST   /api/goals              — Create goal
+PATCH  /api/goals/:id          — Update goal
+DELETE /api/goals/:id          — Delete goal
 ```
 
 ### Data
@@ -419,7 +445,7 @@ Action on match depends on `dedup.skip_insert_on_match`:
 
 ## Database Schema
 
-9 tables + 1 virtual FTS5 table:
+17 tables + 1 virtual FTS5 table:
 
 | Table | Purpose |
 |-------|---------|
@@ -433,6 +459,12 @@ Action on match depends on `dedup.skip_insert_on_match`:
 | `contradictions` | Detected contradictions with status tracking (pending/resolved/dismissed) |
 | `entity_relationships` | Directed relationships between entities with labels and optional context phrases |
 | `search_misses` | Zero-result query log for friction analysis |
+| `observability_counters` | Lightweight operational counters |
+| `memory_links` | Memory-to-memory graph links (`related`, `supports`, etc.) |
+| `goals` | Persistent goals with status, priority, deadline, metadata |
+| `co_retrievals` | Co-retrieval history used to infer links |
+| `retrieval_regression_baselines` | Golden query baseline result IDs |
+| `retrieval_regression_runs` | Retrieval regression run history + drift metrics |
 | `settings` | Key-value configuration store |
 | `memories_fts` | FTS5 virtual table with auto-sync triggers on insert/update/delete |
 
