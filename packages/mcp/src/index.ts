@@ -854,6 +854,29 @@ server.tool(
       }
     }
 
+    // Dangling entities — entities with very few linked memories (structural knowledge gaps)
+    try {
+      const danglingRows = db.prepare(`
+        SELECT e.id, e.name, e.type, COUNT(me.memory_id) as memory_count
+        FROM entities e
+        LEFT JOIN memory_entities me ON e.id = me.entity_id
+        LEFT JOIN memories m ON me.memory_id = m.id AND m.is_active = 1
+        GROUP BY e.id
+        HAVING COUNT(CASE WHEN m.is_active = 1 THEN 1 END) <= 1
+        ORDER BY COUNT(CASE WHEN m.is_active = 1 THEN 1 END) ASC, e.name ASC
+        LIMIT 10
+      `).all() as unknown as Array<{ id: string; name: string; type: string; memory_count: number }>;
+
+      if (danglingRows.length > 0) {
+        parts.push(`\nDangling entities (${danglingRows.length} with 0-1 linked memories):`);
+        for (const row of danglingRows) {
+          parts.push(`  "${row.name}" [${row.type}] — ${row.memory_count} memory(ies)`);
+        }
+      }
+    } catch {
+      // Non-critical
+    }
+
     return { content: [{ type: "text", text: `Maintenance complete:\n\n${parts.join("\n")}` }] };
   }
 );
@@ -1210,7 +1233,8 @@ server.tool(
       meta.push(`created: ${goal.created_at}`);
       if (goal.completed_at) meta.push(`completed: ${goal.completed_at}`);
 
-      let line = `[${goal.id}] ${goal.title}\n  ${goal.description ?? "(no description)"}\n  (${meta.join(" | ")})`;
+      const autoBadge = goal.metadata?.mode === "autonomous" ? "[AUTO] " : "";
+      let line = `${autoBadge}[${goal.id}] ${goal.title}\n  ${goal.description ?? "(no description)"}\n  (${meta.join(" | ")})`;
 
       if (args.include_progress) {
         const withProgress = store.getWithProgress(goal.id, 5);
@@ -1343,6 +1367,17 @@ server.tool(
         const deadlineStr = m.deadline ? ` (deadline: ${m.deadline})` : "";
         parts.push(`  ${statusIcon} ${m.title}${deadlineStr}`);
       }
+    }
+
+    // Show autonomy info for autonomous goals
+    if (goal.metadata?.mode === "autonomous") {
+      const approvedTools = goal.metadata.approved_tools as string[] | undefined;
+      const maxActions = (goal.metadata.max_actions_per_cycle as number) ?? 10;
+      const strategy = goal.metadata.strategy as string | undefined;
+      parts.push(`\nAutonomy: ENABLED`);
+      parts.push(`  Tools: ${approvedTools?.length ? approvedTools.join(", ") : "all"}`);
+      parts.push(`  Max actions/cycle: ${maxActions}`);
+      if (strategy) parts.push(`  Strategy: "${strategy}"`);
     }
 
     if (goal.progress.length > 0) {
