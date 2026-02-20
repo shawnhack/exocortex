@@ -10,7 +10,7 @@ export interface SynthesisOptions {
 /**
  * Generate a synthesis of cluster members.
  * Always delegates to generateBasicSummary — LLM synthesis is handled
- * externally via Cortex's sentinel gardening job.
+ * externally via scheduled maintenance jobs.
  */
 export async function generateSynthesis(
   db: DatabaseSync,

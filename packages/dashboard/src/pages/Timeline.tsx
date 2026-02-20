@@ -195,7 +195,7 @@ export function Timeline() {
           </button>
           <button
             className="btn-ghost"
-            disabled={data.count < limit}
+            disabled={data.results.length < limit}
             onClick={() => setPage((p) => p + 1)}
           >
             Next

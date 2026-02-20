@@ -21,11 +21,7 @@ function rowToMemory(row: MemoryRow, tags?: string[]): Memory {
   let embedding: Float32Array | null = null;
   if (row.embedding) {
     const bytes = row.embedding as unknown as Uint8Array;
-    embedding = new Float32Array(
-      bytes.buffer,
-      bytes.byteOffset,
-      bytes.byteLength / 4
-    );
+    embedding = new Float32Array(new Uint8Array(bytes).buffer);
   }
 
   return {
@@ -81,7 +77,7 @@ export class MemoryStore {
       const provider = await getEmbeddingProvider();
       const embedding = await provider.embed(input.content);
       embeddingFloat = embedding;
-      embeddingBlob = new Uint8Array(embedding.buffer);
+      embeddingBlob = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
     } catch {
       // Embedding may fail on first run while model downloads; store without
     }
@@ -256,11 +252,7 @@ export class MemoryStore {
 
     for (const candidate of candidates) {
       const bytes = candidate.embedding as unknown as Uint8Array;
-      const candidateEmbedding = new Float32Array(
-        bytes.buffer,
-        bytes.byteOffset,
-        bytes.byteLength / 4
-      );
+      const candidateEmbedding = new Float32Array(new Uint8Array(bytes).buffer);
       const similarity = cosineSimilarity(newEmbedding, candidateEmbedding);
 
       if (similarity >= threshold) {
@@ -359,7 +351,7 @@ export class MemoryStore {
       try {
         const provider = await getEmbeddingProvider();
         const embedding = await provider.embed(chunks[i]);
-        chunkEmbeddingBlob = new Uint8Array(embedding.buffer);
+        chunkEmbeddingBlob = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
       } catch {
         // Skip embedding for this chunk
       }
@@ -551,7 +543,7 @@ export class MemoryStore {
         const provider = await getEmbeddingProvider();
         const embedding = await provider.embed(stripped);
         sets.push("embedding = ?");
-        params.push(new Uint8Array(embedding.buffer));
+        params.push(new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength));
       } catch {
         // Skip re-embedding on failure
       }

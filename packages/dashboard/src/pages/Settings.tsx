@@ -104,6 +104,14 @@ export function Settings() {
     },
   });
 
+  // Clear the "Saved" indicator after 3 seconds
+  useEffect(() => {
+    if (mutation.isSuccess) {
+      const timer = setTimeout(() => mutation.reset(), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [mutation.isSuccess]);
+
   const importMutation = useMutation({
     mutationFn: (memories: Array<{ content: string; tags?: string[] }>) =>
       api.importMemories(memories),

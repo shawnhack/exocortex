@@ -56,8 +56,8 @@ export async function reembedMissing(
     for (const row of batch) {
       try {
         const embedding = await provider.embed(row.content);
-        const buffer = new Uint8Array(embedding.buffer);
-        update.run(buffer, new Date().toISOString(), row.id);
+        const buffer = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
+        update.run(buffer, new Date().toISOString().replace("T", " ").replace("Z", ""), row.id);
         processed++;
       } catch {
         failed++;
@@ -176,6 +176,7 @@ function computeStats(values: number[]): { mean: number; stdDev: number } {
 }
 
 function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
   const idx = (p / 100) * (sorted.length - 1);
   const lo = Math.floor(idx);
   const hi = Math.ceil(idx);
@@ -242,7 +243,7 @@ export function recalibrateImportance(
     const update = db.prepare(
       "UPDATE memories SET importance = ?, updated_at = ? WHERE id = ?"
     );
-    const now = new Date().toISOString();
+    const now = new Date().toISOString().replace("T", " ").replace("Z", "");
     for (const { id, newImportance } of newValues) {
       update.run(newImportance, now, id);
     }
@@ -430,5 +431,39 @@ export function tuneWeights(
     notUsefulCount: notUseful.length,
     adjustments,
     dry_run: dryRun,
+  };
+}
+
+// --- A5: Prune Old Data ---
+
+export interface PruneResult {
+  access_log: number;
+  search_misses: number;
+  co_retrievals: number;
+}
+
+/**
+ * Delete old rows from access_log, search_misses, and co_retrievals
+ * to prevent unbounded table growth. Keeps last 90 days of data.
+ */
+export function pruneOldData(db: DatabaseSync, retentionDays = 90): PruneResult {
+  const deleteAccessLog = db.prepare(
+    `DELETE FROM access_log WHERE accessed_at < datetime('now', '-' || ? || ' days')`
+  );
+  const deleteSearchMisses = db.prepare(
+    `DELETE FROM search_misses WHERE created_at < datetime('now', '-' || ? || ' days')`
+  );
+  const deleteCoRetrievals = db.prepare(
+    `DELETE FROM co_retrievals WHERE created_at < datetime('now', '-' || ? || ' days')`
+  );
+
+  const r1 = deleteAccessLog.run(retentionDays) as { changes: number };
+  const r2 = deleteSearchMisses.run(retentionDays) as { changes: number };
+  const r3 = deleteCoRetrievals.run(retentionDays) as { changes: number };
+
+  return {
+    access_log: r1.changes,
+    search_misses: r2.changes,
+    co_retrievals: r3.changes,
   };
 }

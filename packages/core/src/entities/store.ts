@@ -12,11 +12,12 @@ interface EntityRow {
   updated_at: string;
 }
 
-function rowToEntity(row: EntityRow): Entity {
+function rowToEntity(row: EntityRow, tags: string[] = []): Entity {
   return {
     ...row,
     aliases: JSON.parse(row.aliases),
     metadata: JSON.parse(row.metadata),
+    tags,
   };
 }
 
@@ -41,6 +42,15 @@ export class EntityStore {
         now
       );
 
+    if (input.tags && input.tags.length > 0) {
+      const insertTag = this.db.prepare(
+        "INSERT OR IGNORE INTO entity_tags (entity_id, tag) VALUES (?, ?)"
+      );
+      for (const tag of input.tags) {
+        insertTag.run(id, tag);
+      }
+    }
+
     return this.getById(id)!;
   }
 
@@ -48,31 +58,54 @@ export class EntityStore {
     const row = this.db
       .prepare("SELECT * FROM entities WHERE id = ?")
       .get(id) as unknown as EntityRow | undefined;
-    return row ? rowToEntity(row) : null;
+    if (!row) return null;
+    const tags = (this.db.prepare("SELECT tag FROM entity_tags WHERE entity_id = ?").all(id) as Array<{ tag: string }>).map((t) => t.tag);
+    return rowToEntity(row, tags);
   }
 
   getByName(name: string): Entity | null {
     const row = this.db
       .prepare("SELECT * FROM entities WHERE name = ? COLLATE NOCASE")
       .get(name) as unknown as EntityRow | undefined;
-    return row ? rowToEntity(row) : null;
+    if (!row) return null;
+    const tags = (this.db.prepare("SELECT tag FROM entity_tags WHERE entity_id = ?").all(row.id) as Array<{ tag: string }>).map((t) => t.tag);
+    return rowToEntity(row, tags);
   }
 
-  list(type?: EntityType): Entity[] {
-    let sql = "SELECT * FROM entities";
+  list(options?: EntityType | { type?: EntityType; tags?: string[] }): Entity[] {
+    // Support legacy call signature: list("person")
+    const opts = typeof options === "string" ? { type: options } : (options ?? {});
+
+    let sql = "SELECT DISTINCT e.* FROM entities e";
+    const conditions: string[] = [];
     const params: string[] = [];
-    if (type) {
-      sql += " WHERE type = ?";
-      params.push(type);
+
+    if (opts.tags && opts.tags.length > 0) {
+      sql += " INNER JOIN entity_tags et ON e.id = et.entity_id";
+      conditions.push(`et.tag IN (${opts.tags.map(() => "?").join(", ")})`);
+      params.push(...opts.tags);
     }
-    sql += " ORDER BY name ASC";
+    if (opts.type) {
+      conditions.push("e.type = ?");
+      params.push(opts.type);
+    }
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(" AND ")}`;
+    }
+    sql += " ORDER BY e.name ASC";
     const rows = this.db.prepare(sql).all(...params) as unknown as EntityRow[];
-    return rows.map(rowToEntity);
+
+    // Batch-fetch tags for all results
+    const tagStmt = this.db.prepare("SELECT tag FROM entity_tags WHERE entity_id = ?");
+    return rows.map((row) => {
+      const tags = (tagStmt.all(row.id) as Array<{ tag: string }>).map((t) => t.tag);
+      return rowToEntity(row, tags);
+    });
   }
 
   update(
     id: string,
-    input: Partial<Pick<Entity, "name" | "type" | "aliases" | "metadata">>
+    input: Partial<Pick<Entity, "name" | "type" | "aliases" | "metadata" | "tags">>
   ): Entity | null {
     const existing = this.getById(id);
     if (!existing) return null;
@@ -102,6 +135,16 @@ export class EntityStore {
     this.db
       .prepare(`UPDATE entities SET ${sets.join(", ")} WHERE id = ?`)
       .run(...params);
+
+    if (input.tags !== undefined) {
+      this.db.prepare("DELETE FROM entity_tags WHERE entity_id = ?").run(id);
+      const insertTag = this.db.prepare(
+        "INSERT OR IGNORE INTO entity_tags (entity_id, tag) VALUES (?, ?)"
+      );
+      for (const tag of input.tags) {
+        insertTag.run(id, tag);
+      }
+    }
 
     return this.getById(id);
   }
@@ -165,6 +208,13 @@ export class EntityStore {
       )
       .all(entityId, entityId) as unknown as EntityRelationship[];
     return rows;
+  }
+
+  listTags(): string[] {
+    const rows = this.db
+      .prepare("SELECT DISTINCT tag FROM entity_tags ORDER BY tag")
+      .all() as Array<{ tag: string }>;
+    return rows.map((r) => r.tag);
   }
 
   getRelatedEntities(entityId: string): Array<{ entity: Entity; relationship: string; direction: "outgoing" | "incoming"; context: string | null }> {

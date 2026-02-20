@@ -130,7 +130,7 @@ async function main() {
       sections.push(`**Recent decisions:**\n${lines.join("\n")}`);
     }
 
-    // 4. Technique memories — reusable procedures learned by sentinel agents
+    // 4. Technique memories — reusable procedures learned by AI agents
     const techniques = db
       .prepare(
         `SELECT DISTINCT m.id, m.content, m.importance, m.created_at

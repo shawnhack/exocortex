@@ -39,7 +39,7 @@ export function findClusters(
   const rows = db
     .prepare(
       `SELECT id, content, embedding, created_at FROM memories
-       WHERE is_active = 1 AND embedding IS NOT NULL
+       WHERE is_active = 1 AND embedding IS NOT NULL AND parent_id IS NULL
        ORDER BY created_at DESC LIMIT ?`
     )
     .all(maxMemories) as unknown as MemoryRow[];
@@ -52,7 +52,7 @@ export function findClusters(
         id: r.id,
         content: r.content,
         created_at: r.created_at,
-        embedding: new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4),
+        embedding: new Float32Array(new Uint8Array(bytes).buffer),
       };
     });
 
@@ -118,7 +118,7 @@ export async function consolidateCluster(
   if (embeddingProvider) {
     try {
       const embedding = await embeddingProvider.embed(summaryContent);
-      embeddingBlob = new Uint8Array(embedding.buffer);
+      embeddingBlob = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
     } catch {
       // Non-critical — store without embedding
     }

@@ -91,10 +91,10 @@ export function Search() {
   };
 
   const removeTagFilter = (tag: string) => {
-    const params = new URLSearchParams();
-    for (const t of filterTags) {
-      if (t !== tag) params.append("tag", t);
-    }
+    const params = new URLSearchParams(searchParams);
+    params.delete("tag");
+    const remaining = filterTags.filter((t) => t !== tag);
+    remaining.forEach((t) => params.append("tag", t));
     setSearchParams(params);
     setPage(0);
   };
@@ -609,7 +609,7 @@ export function Search() {
             </button>
             <button
               className="btn-ghost"
-              disabled={data.count < limit}
+              disabled={data.results.length < limit}
               onClick={() => setPage((p) => p + 1)}
             >
               Next

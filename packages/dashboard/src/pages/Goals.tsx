@@ -45,7 +45,7 @@ export function Goals() {
     queryFn: () => api.getGoals(statusFilter),
   });
 
-  const { data: expandedGoal } = useQuery({
+  const { data: expandedGoal, isLoading: expandedLoading } = useQuery({
     queryKey: ["goal", expandedId],
     queryFn: () => api.getGoal(expandedId!),
     enabled: !!expandedId,
@@ -336,6 +336,14 @@ export function Goals() {
                 {/* Expanded detail */}
                 {isExpanded && (
                   <div style={{ padding: "0 18px 18px", borderTop: "1px solid #16163a", paddingTop: 14 }}>
+                    {/* Loading state for expanded detail */}
+                    {expandedLoading && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                        <div className="spinner" style={{ width: 14, height: 14 }} />
+                        <span style={{ color: "#8080a0", fontSize: 12 }}>Loading details...</span>
+                      </div>
+                    )}
+
                     {/* Description */}
                     {goal.description && (
                       <div style={{ fontSize: 13, color: "#d0d0e0", lineHeight: 1.6, marginBottom: 16, whiteSpace: "pre-wrap" }}>

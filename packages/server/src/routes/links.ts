@@ -12,6 +12,9 @@ links.get("/api/memories/:id/links", (c) => {
   const store = new MemoryLinkStore(db);
   const id = c.req.param("id");
 
+  const memory = db.prepare("SELECT id FROM memories WHERE id = ?").get(id);
+  if (!memory) return c.json({ error: "Memory not found" }, 404);
+
   const memoryLinks = store.getLinks(id);
 
   // For each link, resolve the "other" side's content preview

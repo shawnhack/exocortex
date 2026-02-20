@@ -88,7 +88,7 @@ const navItems = [
   },
 ];
 
-const EXPANDED_WIDTH = 232;
+const EXPANDED_WIDTH = 256;
 const COLLAPSED_WIDTH = 64;
 
 export function Layout() {

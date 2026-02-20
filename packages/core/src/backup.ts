@@ -35,6 +35,7 @@ export interface BackupData {
     type: string;
     aliases: string[];
     metadata: Record<string, unknown>;
+    tags?: string[];
     created_at: string;
     updated_at: string;
   }>;
@@ -94,10 +95,12 @@ export function exportData(db: DatabaseSync): BackupData {
     updated_at: string;
   }>;
 
+  const entityTagStmt = db.prepare("SELECT tag FROM entity_tags WHERE entity_id = ?");
   const parsedEntities = entities.map((e) => ({
     ...e,
     aliases: JSON.parse(e.aliases),
     metadata: JSON.parse(e.metadata),
+    tags: (entityTagStmt.all(e.id) as Array<{ tag: string }>).map((t) => t.tag),
   }));
 
   const memoryEntities = db
@@ -214,6 +217,9 @@ export function importData(db: DatabaseSync, data: BackupData): {
        (id, name, type, aliases, metadata, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
+    const insertEntityTag = db.prepare(
+      "INSERT OR IGNORE INTO entity_tags (entity_id, tag) VALUES (?, ?)"
+    );
 
     for (const e of data.entities) {
       const result = insertEntity.run(
@@ -223,6 +229,11 @@ export function importData(db: DatabaseSync, data: BackupData): {
       );
       if ((result as { changes: number }).changes > 0) {
         entitiesImported++;
+        if (e.tags) {
+          for (const tag of e.tags) {
+            insertEntityTag.run(e.id, tag);
+          }
+        }
       }
     }
 
@@ -291,7 +302,7 @@ export function backupDatabase(
 
   // VACUUM INTO creates an atomic, compact copy of the database.
   // Use forward slashes — SQLite handles them on all platforms.
-  const sqlPath = backupPath.replace(/\\/g, "/");
+  const sqlPath = backupPath.replace(/\\/g, "/").replace(/'/g, "''");
   db.exec(`VACUUM INTO '${sqlPath}'`);
 
   const sizeBytes = fs.statSync(backupPath).size;

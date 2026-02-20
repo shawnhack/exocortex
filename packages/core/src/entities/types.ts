@@ -11,6 +11,7 @@ export interface Entity {
   type: EntityType;
   aliases: string[];
   metadata: Record<string, unknown>;
+  tags: string[];
   created_at: string;
   updated_at: string;
 }
@@ -20,6 +21,7 @@ export interface CreateEntityInput {
   type?: EntityType;
   aliases?: string[];
   metadata?: Record<string, unknown>;
+  tags?: string[];
 }
 
 export interface EntityRelationship {

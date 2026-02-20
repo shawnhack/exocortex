@@ -12,24 +12,23 @@ describe("Entity Extractor", () => {
 
   it("extracts known organization names", () => {
     const entities = extractEntities("Google and Microsoft both released new AI models.");
-    const orgs = entities.filter((e) => e.type === "organization");
-    const names = orgs.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).toContain("Google");
     expect(names).toContain("Microsoft");
+    // All entities default to "concept" — users reclassify in the dashboard
+    entities.forEach((e) => expect(e.type).toBe("concept"));
   });
 
   it("extracts organization names with suffixes", () => {
     const entities = extractEntities("Acme Corp announced a new product.");
-    const orgs = entities.filter((e) => e.type === "organization");
-    expect(orgs.length).toBeGreaterThanOrEqual(1);
-    expect(orgs[0].name).toBe("Acme Corp");
+    const names = entities.map((e) => e.name);
+    expect(names).toContain("Acme Corp");
   });
 
   it("extracts project names from context", () => {
     const entities = extractEntities("Working on Exocortex, a personal memory system.");
-    const projects = entities.filter((e) => e.type === "project");
-    expect(projects.length).toBeGreaterThanOrEqual(1);
-    expect(projects[0].name).toBe("Exocortex");
+    const names = entities.map((e) => e.name);
+    expect(names).toContain("Exocortex");
   });
 
   it("extracts AI/ML concepts", () => {
@@ -61,121 +60,108 @@ describe("Entity Extractor", () => {
 
   it("extracts person names with attribution", () => {
     const entities = extractEntities("This library was created by John Smith and maintained by Jane Doe.");
-    const people = entities.filter((e) => e.type === "person");
-    const names = people.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).toContain("John Smith");
     expect(names).toContain("Jane Doe");
   });
 
   // Regression tests for false-positive extraction bugs
 
-  it("does not extract 'Neural Dark' as a person", () => {
+  it("does not extract 'Neural Dark' as an entity", () => {
     const entities = extractEntities("Switched to the Neural Dark theme for the dashboard.");
-    const people = entities.filter((e) => e.type === "person");
-    const names = people.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).not.toContain("Neural Dark");
   });
 
-  it("does not extract 'Building AI' as an organization", () => {
+  it("does not extract 'Building AI' as an entity", () => {
     const entities = extractEntities("Building AI-assisted apps with Claude.");
-    const orgs = entities.filter((e) => e.type === "organization");
-    const names = orgs.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names.some((n) => n.includes("Building"))).toBe(false);
   });
 
-  it("does not extract 'production-ready' as a project", () => {
+  it("does not extract 'production-ready' as an entity", () => {
     const entities = extractEntities("We need a production-ready deployment pipeline.");
-    const projects = entities.filter((e) => e.type === "project");
-    const names = projects.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).not.toContain("production-ready");
   });
 
-  it("does not extract 'status' as a project from 'project status'", () => {
+  it("does not extract 'status' from 'project status'", () => {
     const entities = extractEntities("Checking the project status before the meeting.");
-    const projects = entities.filter((e) => e.type === "project");
-    const names = projects.map((e) => e.name.toLowerCase());
+    const names = entities.map((e) => e.name.toLowerCase());
     expect(names).not.toContain("status");
   });
 
-  it("extracts 'Exocortex' as a project from 'Active projects: Exocortex'", () => {
+  it("extracts 'Exocortex' from 'Active projects: Exocortex'", () => {
     const entities = extractEntities("Active projects: Exocortex");
-    const projects = entities.filter((e) => e.type === "project");
-    const names = projects.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).toContain("Exocortex");
   });
 
-  it("extracts 'Exocortex' as a project from 'Exocortex project'", () => {
+  it("extracts 'Exocortex' from 'Exocortex project'", () => {
     const entities = extractEntities("The Exocortex project is progressing well.");
-    const projects = entities.filter((e) => e.type === "project");
-    const names = projects.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).toContain("Exocortex");
   });
 
-  // --- Fix 1: OpenAI/Anthropic classified as organization, not technology ---
+  // --- All entities default to "concept" — users reclassify in dashboard ---
 
-  it("classifies OpenAI as organization, not technology", () => {
+  it("extracts OpenAI as concept", () => {
     const entities = extractEntities("OpenAI released a new model today.");
     const openai = entities.find((e) => e.name === "OpenAI");
     expect(openai).toBeDefined();
-    expect(openai!.type).toBe("organization");
+    expect(openai!.type).toBe("concept");
   });
 
-  it("classifies Anthropic as organization, not technology", () => {
+  it("extracts Anthropic as concept", () => {
     const entities = extractEntities("Anthropic published their safety research.");
     const anthropic = entities.find((e) => e.name === "Anthropic");
     expect(anthropic).toBeDefined();
-    expect(anthropic!.type).toBe("organization");
+    expect(anthropic!.type).toBe("concept");
   });
 
-  it("still classifies Claude and GPT as technology", () => {
+  it("extracts Claude and GPT as entities", () => {
     const entities = extractEntities("Using Claude and GPT for code generation.");
-    const techs = entities.filter((e) => e.type === "technology");
-    const names = techs.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).toContain("Claude");
     expect(names).toContain("GPT");
+    entities.forEach((e) => expect(e.type).toBe("concept"));
   });
 
   // --- Fix 2: Case-sensitive tech matching ---
 
-  it("does not extract lowercase 'spring' as technology", () => {
+  it("does not extract lowercase 'spring' as entity", () => {
     const entities = extractEntities("The flowers bloom in spring.");
-    const techs = entities.filter((e) => e.type === "technology");
-    const names = techs.map((e) => e.name.toLowerCase());
+    const names = entities.map((e) => e.name.toLowerCase());
     expect(names).not.toContain("spring");
   });
 
-  it("extracts capitalized 'Spring' as technology", () => {
+  it("extracts capitalized 'Spring' as entity", () => {
     const entities = extractEntities("Built the backend with Spring Boot.");
-    const techs = entities.filter((e) => e.type === "technology");
-    const names = techs.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).toContain("Spring");
   });
 
-  it("does not extract lowercase 'go' as technology", () => {
+  it("does not extract lowercase 'go' as entity", () => {
     const entities = extractEntities("Let's go to the store.");
-    const techs = entities.filter((e) => e.type === "technology");
-    const names = techs.map((e) => e.name.toLowerCase());
+    const names = entities.map((e) => e.name.toLowerCase());
     expect(names).not.toContain("go");
   });
 
-  it("extracts capitalized 'Go' as technology", () => {
+  it("extracts capitalized 'Go' as entity", () => {
     const entities = extractEntities("Rewrote the service in Go for performance.");
-    const techs = entities.filter((e) => e.type === "technology");
-    const names = techs.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).toContain("Go");
   });
 
-  it("does not extract lowercase 'rust' as technology", () => {
+  it("does not extract lowercase 'rust' as entity", () => {
     const entities = extractEntities("The old pipe had rust on it.");
-    const techs = entities.filter((e) => e.type === "technology");
-    const names = techs.map((e) => e.name.toLowerCase());
+    const names = entities.map((e) => e.name.toLowerCase());
     expect(names).not.toContain("rust");
   });
 
-  it("does not extract lowercase 'rest' as technology", () => {
+  it("does not extract lowercase 'rest' as entity", () => {
     const entities = extractEntities("I need to rest before continuing.");
-    const techs = entities.filter((e) => e.type === "technology");
-    const names = techs.map((e) => e.name.toLowerCase());
+    const names = entities.map((e) => e.name.toLowerCase());
     expect(names).not.toContain("rest");
   });
 
@@ -219,24 +205,21 @@ describe("Entity Extractor", () => {
 
   // --- Fix 4: Org name prefix blocklist ---
 
-  it("does not extract 'Added Group' as an organization", () => {
+  it("does not extract 'Added Group' as an entity", () => {
     const entities = extractEntities("Added Group filtering to the dashboard.");
-    const orgs = entities.filter((e) => e.type === "organization");
-    const names = orgs.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).not.toContain("Added Group");
   });
 
-  it("does not extract 'New Tech' as an organization", () => {
+  it("does not extract 'New Tech' as an entity", () => {
     const entities = extractEntities("Exploring New Tech for the project.");
-    const orgs = entities.filter((e) => e.type === "organization");
-    const names = orgs.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).not.toContain("New Tech");
   });
 
-  it("still extracts legitimate org names with suffixes", () => {
+  it("extracts legitimate org names with suffixes", () => {
     const entities = extractEntities("Partnered with Horizon Labs on the project.");
-    const orgs = entities.filter((e) => e.type === "organization");
-    const names = orgs.map((e) => e.name);
+    const names = entities.map((e) => e.name);
     expect(names).toContain("Horizon Labs");
   });
 

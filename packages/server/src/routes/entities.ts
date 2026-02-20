@@ -13,6 +13,7 @@ const createSchema = z.object({
     .optional(),
   aliases: z.array(z.string()).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  tags: z.array(z.string()).optional(),
 });
 
 const updateSchema = z.object({
@@ -22,6 +23,7 @@ const updateSchema = z.object({
     .optional(),
   aliases: z.array(z.string()).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  tags: z.array(z.string()).optional(),
 });
 
 // GET /api/entities/graph — all entities + relationships in one call
@@ -46,12 +48,22 @@ entities.get("/api/entities/graph", (c) => {
   return c.json({ entities: allEntities, relationships });
 });
 
+// GET /api/entities/tags — distinct tags across all entities
+entities.get("/api/entities/tags", (c) => {
+  const db = getDb();
+  const store = new EntityStore(db);
+  const tags = store.listTags();
+  return c.json({ tags });
+});
+
 // GET /api/entities
 entities.get("/api/entities", (c) => {
   const type = c.req.query("type") as EntityType | undefined;
+  const tagsParam = c.req.query("tags");
+  const tags = tagsParam ? tagsParam.split(",").filter(Boolean) : undefined;
   const db = getDb();
   const store = new EntityStore(db);
-  const results = store.list(type);
+  const results = store.list({ type, tags });
   return c.json({ results, count: results.length });
 });
 

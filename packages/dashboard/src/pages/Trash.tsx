@@ -7,7 +7,7 @@ import { timeAgo } from "../utils/format";
 
 export function Trash() {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
+  const { toast, confirmToast } = useToast();
   const [page, setPage] = useState(0);
   const limit = 20;
 
@@ -29,15 +29,17 @@ export function Trash() {
     }
   };
 
-  const handlePermanentDelete = async (id: string) => {
-    try {
-      await api.deleteMemory(id);
-      toast("Memory permanently deleted", "success");
-      queryClient.invalidateQueries({ queryKey: ["archived"] });
-      queryClient.invalidateQueries({ queryKey: ["stats"] });
-    } catch {
-      toast("Failed to delete memory", "error");
-    }
+  const handlePermanentDelete = (id: string) => {
+    confirmToast("Permanently delete this memory?", async () => {
+      try {
+        await api.deleteMemory(id);
+        toast("Memory permanently deleted", "success");
+        queryClient.invalidateQueries({ queryKey: ["archived"] });
+        queryClient.invalidateQueries({ queryKey: ["stats"] });
+      } catch {
+        toast("Failed to delete memory", "error");
+      }
+    });
   };
 
   return (
@@ -152,7 +154,7 @@ export function Trash() {
             <button className="btn-ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
               Previous
             </button>
-            <button className="btn-ghost" disabled={data.count < limit} onClick={() => setPage((p) => p + 1)}>
+            <button className="btn-ghost" disabled={data.results.length < limit} onClick={() => setPage((p) => p + 1)}>
               Next
             </button>
             <span style={{ color: "#8080a0", fontSize: 12, fontFamily: "var(--font-mono)" }}>

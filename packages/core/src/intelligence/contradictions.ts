@@ -77,7 +77,7 @@ export function detectContradictions(
         id: r.id,
         content: r.content,
         created_at: r.created_at,
-        embedding: new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4),
+        embedding: new Float32Array(new Uint8Array(bytes).buffer),
       };
     });
 

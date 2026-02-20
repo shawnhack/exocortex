@@ -97,7 +97,7 @@ ${context || "(No relevant memories found)"}`;
         );
       }
       const data = (await res.json()) as any;
-      responseText = data.choices[0].message.content;
+      responseText = data.choices?.[0]?.message?.content ?? "No response from API";
     } else {
       // Anthropic (default)
       const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -124,7 +124,7 @@ ${context || "(No relevant memories found)"}`;
         );
       }
       const data = (await res.json()) as any;
-      responseText = data.content[0].text;
+      responseText = data.content?.[0]?.text ?? "No response from API";
     }
 
     return c.json({

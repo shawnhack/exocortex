@@ -108,11 +108,14 @@ const ORG_NAME_PREFIX_BLOCKLIST = new Set([
 export function extractEntities(text: string): ExtractedEntity[] {
   const entities = new Map<string, ExtractedEntity>();
 
-  function add(name: string, type: EntityType, confidence: number) {
+  function add(name: string, _type: EntityType, confidence: number) {
+    // All entities default to "concept" — users can reclassify in the dashboard.
+    // The extraction patterns still determine *what* to extract and confidence,
+    // but auto-typing was too unreliable (e.g. "React" as technology vs project).
     const key = name.toLowerCase();
     const existing = entities.get(key);
     if (!existing || existing.confidence < confidence) {
-      entities.set(key, { name, type, confidence });
+      entities.set(key, { name, type: "concept", confidence });
     }
   }
 

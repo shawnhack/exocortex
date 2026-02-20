@@ -114,7 +114,7 @@ export class MemorySearch {
     try {
       let ftsQuery = this.sanitizeFtsQuery(ftsText);
       if (extraFtsTerms.length > 0) {
-        const extraTermsStr = extraFtsTerms.map((t) => `"${t}"`).join(" OR ");
+        const extraTermsStr = extraFtsTerms.map((t) => `"${t.replace(/"/g, "")}"`).join(" OR ");
         ftsQuery = `${ftsQuery} OR ${extraTermsStr}`;
       }
       const ftsRows = this.db
@@ -236,11 +236,7 @@ export class MemorySearch {
       let vectorScore = 0;
       if (queryEmbedding && row.embedding) {
         const bytes = row.embedding as unknown as Uint8Array;
-        const memEmbedding = new Float32Array(
-          bytes.buffer,
-          bytes.byteOffset,
-          bytes.byteLength / 4
-        );
+        const memEmbedding = new Float32Array(new Uint8Array(bytes).buffer);
         vectorScore = Math.max(0, cosineSimilarity(queryEmbedding, memEmbedding));
       }
 

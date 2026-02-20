@@ -94,12 +94,13 @@ function maskSensitiveValue(value: string): string {
 }
 
 function maskSensitiveSettings(settings: Record<string, string>): Record<string, string> {
-  for (const key of Object.keys(settings)) {
+  const masked = { ...settings };
+  for (const key of Object.keys(masked)) {
     if (isSensitiveSettingKey(key)) {
-      settings[key] = maskSensitiveValue(settings[key] ?? "");
+      masked[key] = maskSensitiveValue(masked[key] ?? "");
     }
   }
-  return settings;
+  return masked;
 }
 
 // POST /api/memories — Create memory
@@ -126,10 +127,32 @@ memories.get("/api/memories/recent", async (c) => {
   const offset = parseIntQuery(c.req.query("offset"), 0, 0, 1_000_000);
   const tagsParam = c.req.query("tags");
   const tags = tagsParam ? tagsParam.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
+  const contentType = c.req.query("content_type");
+  const after = c.req.query("after");
+  const before = c.req.query("before");
+  const minImportanceParam = c.req.query("min_importance");
+  const minImportance = minImportanceParam !== undefined ? Number.parseFloat(minImportanceParam) : undefined;
 
   const db = getDb();
   const store = new MemoryStore(db);
-  const results = await store.getRecent(limit, offset, tags);
+  // Fetch extra rows to account for filtering, then trim to requested limit
+  const fetchLimit = (contentType || after || before || minImportance !== undefined) ? limit * 5 : limit;
+  let results = await store.getRecent(fetchLimit, offset, tags);
+
+  if (contentType) {
+    results = results.filter((m) => m.content_type === contentType);
+  }
+  if (after) {
+    results = results.filter((m) => m.created_at >= after);
+  }
+  if (before) {
+    results = results.filter((m) => m.created_at <= before);
+  }
+  if (minImportance !== undefined && Number.isFinite(minImportance)) {
+    results = results.filter((m) => m.importance >= minImportance);
+  }
+
+  results = results.slice(0, limit);
   return c.json({ results: results.map(stripEmbedding), count: results.length });
 });
 
@@ -162,7 +185,7 @@ memories.post("/api/memories/search", async (c) => {
     await store.recordAccess(result.memory.id, parsed.data.query);
   }
 
-  return c.json({ results, count: results.length });
+  return c.json({ results: results.map(r => ({ ...r, memory: stripEmbedding(r.memory) })), count: results.length });
 });
 
 const contextGraphSchema = z.object({

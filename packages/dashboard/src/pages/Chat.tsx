@@ -190,7 +190,7 @@ export function Chat() {
                       <span style={{ color: "#22d3ee", fontFamily: "var(--font-mono)", marginRight: 8 }}>
                         {source.id.slice(0, 10)}
                       </span>
-                      {source.content.slice(0, 80)}...
+                      {source.content.slice(0, 80)}{source.content.length > 80 ? "..." : ""}
                     </Link>
                   ))}
                 </div>

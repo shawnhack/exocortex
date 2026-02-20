@@ -40,6 +40,7 @@ const PROJECT_PATTERN = /\b([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b/g;
  * Uses tech keywords, topic patterns, and kebab-case project names.
  */
 export function autoGenerateTags(content: string): string[] {
+  PROJECT_PATTERN.lastIndex = 0;
   const tags = new Set<string>();
 
   // 1. Tech keywords

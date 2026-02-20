@@ -49,6 +49,7 @@ export interface Entity {
   type: string;
   aliases: string[];
   metadata: Record<string, unknown>;
+  tags: string[];
   created_at: string;
   updated_at: string;
 }
@@ -198,8 +199,11 @@ export const api = {
   },
 
   // Entities
-  getEntities(type?: string) {
-    const qs = type ? `?type=${type}` : "";
+  getEntities(options?: { type?: string; tags?: string[] }) {
+    const params = new URLSearchParams();
+    if (options?.type) params.set("type", options.type);
+    if (options?.tags && options.tags.length > 0) params.set("tags", options.tags.join(","));
+    const qs = params.toString() ? `?${params}` : "";
     return request<{ results: Entity[]; count: number }>(
       `/api/entities${qs}`
     );
@@ -215,11 +219,22 @@ export const api = {
     );
   },
 
+  getEntityTags() {
+    return request<{ tags: string[] }>("/api/entities/tags");
+  },
+
   getEntityRelationships(id: string) {
     return request<{
       results: Array<{ entity: Entity; relationship: string; direction: "outgoing" | "incoming" }>;
       count: number;
     }>(`/api/entities/${id}/relationships`);
+  },
+
+  updateEntity(id: string, data: Partial<Pick<Entity, "name" | "type" | "aliases" | "tags">>) {
+    return request<Entity>(`/api/entities/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
   },
 
   deleteEntity(id: string) {

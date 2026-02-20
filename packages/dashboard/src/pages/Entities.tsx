@@ -1,51 +1,62 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useToast } from "../components/Toast";
-
-const ENTITY_TYPES = ["", "person", "project", "technology", "organization", "concept"] as const;
-
-const TYPE_LABELS: Record<string, string> = {
-  "": "All",
-  person: "Person",
-  project: "Project",
-  technology: "Tech",
-  organization: "Org",
-  concept: "Concept",
-};
-
-const TYPE_COLORS: Record<string, { border: string; badge: string; badgeBg: string }> = {
-  person: { border: "#22d3ee", badge: "#22d3ee", badgeBg: "rgba(34, 211, 238, 0.15)" },
-  technology: { border: "#8b5cf6", badge: "#8b5cf6", badgeBg: "rgba(139, 92, 246, 0.15)" },
-  project: { border: "#34d399", badge: "#34d399", badgeBg: "rgba(52, 211, 153, 0.15)" },
-  organization: { border: "#fbbf24", badge: "#fbbf24", badgeBg: "rgba(251, 191, 36, 0.15)" },
-  concept: { border: "#f472b6", badge: "#f472b6", badgeBg: "rgba(244, 114, 182, 0.15)" },
-};
-
-const DEFAULT_COLOR = { border: "#16163a", badge: "#8080a0", badgeBg: "rgba(90, 90, 120, 0.15)" };
+import { tagColor } from "../utils/tagColor";
 
 export function Entities() {
   const queryClient = useQueryClient();
   const { toast, confirmToast } = useToast();
-  const [type, setType] = useState("");
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const lastClickedIdx = useRef<number | null>(null);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["entities", type],
-    queryFn: () => api.getEntities(type || undefined),
+  const { data: tagsData } = useQuery({
+    queryKey: ["entity-tags"],
+    queryFn: () => api.getEntityTags(),
   });
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["entities", selectedTags],
+    queryFn: () => api.getEntities(selectedTags.length > 0 ? { tags: selectedTags } : undefined),
+  });
+
+  const toggleTag = (tag: string) => {
+    setSelectedTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
   };
+
+  const handleCardClick = useCallback((id: string, idx: number, e: React.MouseEvent) => {
+    if (!selectMode) return;
+    const results = data?.results;
+    if (!results) return;
+
+    if (e.shiftKey && lastClickedIdx.current !== null) {
+      // Shift-click: range select between last clicked and current
+      const start = Math.min(lastClickedIdx.current, idx);
+      const end = Math.max(lastClickedIdx.current, idx);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (let i = start; i <= end; i++) {
+          next.add(results[i].id);
+        }
+        return next;
+      });
+    } else {
+      // Normal click: toggle single
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    }
+    lastClickedIdx.current = idx;
+  }, [selectMode, data]);
 
   const handleBulkDelete = () => {
     if (selectedIds.size === 0) return;
@@ -57,6 +68,7 @@ export function Entities() {
         setSelectedIds(new Set());
         setSelectMode(false);
         queryClient.invalidateQueries({ queryKey: ["entities"] });
+        queryClient.invalidateQueries({ queryKey: ["entity-tags"] });
         queryClient.invalidateQueries({ queryKey: ["stats"] });
       } catch {
         toast("Failed to delete entities", "error");
@@ -65,6 +77,8 @@ export function Entities() {
       }
     });
   };
+
+  const allTags = tagsData?.tags ?? [];
 
   return (
     <div>
@@ -81,6 +95,7 @@ export function Entities() {
             onClick={() => {
               setSelectMode(!selectMode);
               setSelectedIds(new Set());
+              lastClickedIdx.current = null;
             }}
           >
             {selectMode ? "Cancel" : "Select"}
@@ -88,18 +103,37 @@ export function Entities() {
         )}
       </div>
 
-      {/* Filter pills */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
-        {ENTITY_TYPES.map((t) => (
+      {/* Tag filter pills */}
+      {allTags.length > 0 && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
           <button
-            key={t}
-            className={`filter-pill${type === t ? " active" : ""}`}
-            onClick={() => setType(t)}
+            className={`filter-pill${selectedTags.length === 0 ? " active" : ""}`}
+            onClick={() => setSelectedTags([])}
           >
-            {TYPE_LABELS[t]}
+            All
           </button>
-        ))}
-      </div>
+          {allTags.map((tag) => {
+            const color = tagColor(tag);
+            const isActive = selectedTags.includes(tag);
+            return (
+              <button
+                key={tag}
+                className={`filter-pill${isActive ? " active" : ""}`}
+                onClick={() => toggleTag(tag)}
+                style={isActive ? { borderColor: color, color } : undefined}
+              >
+                {tag}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {selectMode && (
+        <p style={{ color: "#8080a0", fontSize: 12, marginBottom: 12, fontFamily: "var(--font-mono)" }}>
+          Click to select. Shift+click for range. Esc to cancel.
+        </p>
+      )}
 
       {isLoading && (
         <div className="loading">
@@ -123,94 +157,103 @@ export function Entities() {
 
       {/* Entity cards */}
       <div style={{ display: "grid", gap: 10, marginBottom: selectMode ? 80 : 0 }}>
-        {data?.results.map((entity) => {
-          const colors = TYPE_COLORS[entity.type] ?? DEFAULT_COLOR;
+        {data?.results.map((entity, idx) => {
+          const entityTags = entity.tags ?? [];
+          const borderColor = entityTags.length > 0 ? tagColor(entityTags[0]) : "#16163a";
           const selected = selectedIds.has(entity.id);
+          const CardWrapper = selectMode ? "div" : Link;
+          const cardProps = selectMode
+            ? { onClick: (e: React.MouseEvent) => handleCardClick(entity.id, idx, e) }
+            : { to: `/entities/${entity.id}`, style: { textDecoration: "none" } };
           return (
-            <div
+            <CardWrapper
               key={entity.id}
-              onClick={selectMode ? () => toggleSelect(entity.id) : undefined}
-              style={{
-                background: selected ? "rgba(139, 92, 246, 0.05)" : "#0c0c1d",
-                border: `1px solid ${selected ? "rgba(139, 92, 246, 0.35)" : "#16163a"}`,
-                borderLeft: `3px solid ${colors.border}`,
-                borderRadius: 10,
-                padding: "14px 16px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                transition: "all 0.15s",
-                cursor: selectMode ? "pointer" : undefined,
-              }}
+              {...(cardProps as any)}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {selectMode && (
-                  <div
-                    style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: 6,
-                      border: `2px solid ${selected ? "#8b5cf6" : "#16163a"}`,
-                      background: selected ? "#8b5cf6" : "transparent",
-                      transition: "all 0.2s",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {selected && (
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    )}
-                  </div>
-                )}
-                <div>
-                  {selectMode ? (
+              <div
+                style={{
+                  background: selected ? "rgba(139, 92, 246, 0.05)" : "#0c0c1d",
+                  border: `1px solid ${selected ? "rgba(139, 92, 246, 0.35)" : "#16163a"}`,
+                  borderLeft: `3px solid ${selected ? "#8b5cf6" : borderColor}`,
+                  borderRadius: 10,
+                  padding: "14px 16px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  transition: "all 0.15s",
+                  cursor: "pointer",
+                  userSelect: selectMode ? "none" : undefined,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {selectMode && (
+                    <div
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 6,
+                        border: `2px solid ${selected ? "#8b5cf6" : "#16163a"}`,
+                        background: selected ? "#8b5cf6" : "transparent",
+                        transition: "all 0.2s",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {selected && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </div>
+                  )}
+                  <div>
                     <span style={{ fontWeight: 600, color: "#e8e8f4", fontSize: 14 }}>
                       {entity.name}
                     </span>
+                    {entity.aliases.length > 0 && (
+                      <span
+                        style={{
+                          color: "#8080a0",
+                          fontSize: 12,
+                          marginLeft: 8,
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        ({entity.aliases.join(", ")})
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {entityTags.length > 0 ? (
+                    entityTags.map((tag) => {
+                      const color = tagColor(tag);
+                      return (
+                        <span
+                          key={tag}
+                          style={{
+                            background: `${color}20`,
+                            color,
+                            padding: "3px 10px",
+                            borderRadius: 20,
+                            fontSize: 11,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {tag}
+                        </span>
+                      );
+                    })
                   ) : (
-                    <Link
-                      to={`/entities/${entity.id}`}
-                      style={{
-                        fontWeight: 600,
-                        color: "#e8e8f4",
-                        textDecoration: "none",
-                        fontSize: 14,
-                      }}
-                    >
-                      {entity.name}
-                    </Link>
-                  )}
-                  {entity.aliases.length > 0 && (
-                    <span
-                      style={{
-                        color: "#8080a0",
-                        fontSize: 12,
-                        marginLeft: 8,
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    >
-                      ({entity.aliases.join(", ")})
+                    <span style={{ color: "#5a5a78", fontSize: 11, fontStyle: "italic" }}>
+                      no tags
                     </span>
                   )}
                 </div>
               </div>
-              <span
-                style={{
-                  background: colors.badgeBg,
-                  color: colors.badge,
-                  padding: "3px 10px",
-                  borderRadius: 20,
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              >
-                {entity.type}
-              </span>
-            </div>
+            </CardWrapper>
           );
         })}
       </div>
@@ -279,6 +322,7 @@ export function Entities() {
             onClick={() => {
               setSelectMode(false);
               setSelectedIds(new Set());
+              lastClickedIdx.current = null;
             }}
             style={{ color: "#8080a0" }}
           >

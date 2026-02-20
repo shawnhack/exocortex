@@ -292,6 +292,16 @@ export function initializeSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_co_retrievals_created ON co_retrievals(created_at);
   `);
 
+  // Entity tags (multi-label classification)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS entity_tags (
+      entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+      tag TEXT NOT NULL,
+      PRIMARY KEY (entity_id, tag)
+    );
+    CREATE INDEX IF NOT EXISTS idx_entity_tags_tag ON entity_tags(tag);
+  `);
+
   // Context phrases on entity relationships
   const relColumns = db
     .prepare("PRAGMA table_info(entity_relationships)")

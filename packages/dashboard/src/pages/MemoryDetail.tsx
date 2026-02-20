@@ -714,12 +714,12 @@ function LinkedMemories({ memoryId }: { memoryId: string }) {
               borderLeft: `3px solid ${LINK_TYPE_COLORS[link.link_type] ?? "#8b5cf6"}`,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "rgba(139, 92, 246, 0.3)";
               e.currentTarget.style.background = "#0a0a18";
+              e.currentTarget.style.boxShadow = "0 0 8px rgba(139, 92, 246, 0.1)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = "#16163a";
               e.currentTarget.style.background = "#06060e";
+              e.currentTarget.style.boxShadow = "none";
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
@@ -752,7 +752,7 @@ function LinkedMemories({ memoryId }: { memoryId: string }) {
 
 function SupersessionView({ memory }: { memory: Memory }) {
   // Check if this memory was superseded by another
-  const { data: supersededBy } = useQuery({
+  const { data: supersededBy, isLoading } = useQuery({
     queryKey: ["memory", memory.superseded_by],
     queryFn: () => api.getMemory(memory.superseded_by!),
     enabled: !!memory.superseded_by,
@@ -761,7 +761,25 @@ function SupersessionView({ memory }: { memory: Memory }) {
   // Check if this memory supersedes another (look for memories that have superseded_by = this id)
   // We just show what we know from the current memory's data
 
-  if (!memory.superseded_by && !supersededBy) return null;
+  if (!memory.superseded_by) return null;
+  if (isLoading) return (
+    <div
+      style={{
+        background: "#0c0c1d",
+        border: "1px solid #16163a",
+        borderRadius: 12,
+        padding: 20,
+        marginBottom: 24,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      <div className="spinner" />
+      <span style={{ color: "#8080a0", fontSize: 13 }}>Loading supersession data...</span>
+    </div>
+  );
+  if (!supersededBy) return null;
 
   return (
     <div

@@ -426,7 +426,7 @@ export class GoalStore {
         const bytes = row.embedding as unknown as Uint8Array;
         embeddings.set(
           goal.id,
-          new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4)
+          new Float32Array(new Uint8Array(bytes).buffer)
         );
       } else {
         toEmbed.push(goal);
@@ -441,7 +441,7 @@ export class GoalStore {
             ? `${goal.title}: ${goal.description}`
             : goal.title;
           const embedding = await provider.embed(text);
-          const blob = new Uint8Array(embedding.buffer);
+          const blob = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
           this.db
             .prepare("UPDATE goals SET embedding = ? WHERE id = ?")
             .run(blob, goal.id);

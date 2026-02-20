@@ -39,6 +39,7 @@ export default function App() {
 
               <Route path="/chat" element={<Chat />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="*" element={<div style={{ padding: 40 }}><h1 style={{ color: "#e8e8f4", fontSize: 22 }}>Page not found</h1><p style={{ color: "#8080a0" }}>The page you're looking for doesn't exist.</p></div>} />
             </Route>
           </Routes>
         </BrowserRouter>

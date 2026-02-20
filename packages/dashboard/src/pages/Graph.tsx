@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, type Entity } from "../api/client";
+import { tagColor } from "../utils/tagColor";
 
 interface Node {
   id: string;
   name: string;
-  type: string;
+  tags: string[];
   x: number;
   y: number;
   vx: number;
@@ -20,12 +21,13 @@ interface Edge {
   label: string;
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  technology: "#8b5cf6",
-  organization: "#22d3ee",
-  person: "#34d399",
-  project: "#f472b6",
-  concept: "#fbbf24",
+const DEFAULT_COLOR = "#8b5cf6";
+
+const hexToRgba = (hex: string, alpha: number): string => {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
 export function Graph() {
@@ -35,16 +37,19 @@ export function Graph() {
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
   const animRef = useRef<number>(0);
+  const animRunningRef = useRef(false);
   const dragRef = useRef<{ node: Node | null; offsetX: number; offsetY: number }>({ node: null, offsetX: 0, offsetY: 0 });
   const panRef = useRef({ x: 0, y: 0 });
   const scaleRef = useRef(1);
   const isPanningRef = useRef(false);
   const lastMouseRef = useRef({ x: 0, y: 0 });
+  const alphaRef = useRef(1);
   const hoveredRef = useRef<Node | null>(null);
   const [nodeCount, setNodeCount] = useState(0);
   const [edgeCount, setEdgeCount] = useState(0);
+  const [legendTags, setLegendTags] = useState<string[]>([]);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["entity-graph"],
     queryFn: () => api.getEntityGraph(),
   });
@@ -63,7 +68,7 @@ export function Graph() {
       return {
         id: e.id,
         name: e.name,
-        type: e.type,
+        tags: e.tags ?? [],
         x: w / 2 + r * Math.cos(angle) + (Math.random() - 0.5) * 40,
         y: h / 2 + r * Math.sin(angle) + (Math.random() - 0.5) * 40,
         vx: 0,
@@ -86,6 +91,13 @@ export function Graph() {
     setNodeCount(nodes.length);
     setEdgeCount(edges.length);
 
+    // Build legend from distinct first tags
+    const distinctTags = new Set<string>();
+    for (const node of nodes) {
+      if (node.tags.length > 0) distinctTags.add(node.tags[0]);
+    }
+    setLegendTags([...distinctTags].sort());
+
     // Center pan
     panRef.current = { x: 0, y: 0 };
     scaleRef.current = 1;
@@ -98,7 +110,9 @@ export function Graph() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let settled = 0;
+    alphaRef.current = 1;
+    const ALPHA_DECAY = 0.998;
+    const ALPHA_MIN = 0.001;
 
     function tick() {
       const nodes = nodesRef.current;
@@ -108,71 +122,69 @@ export function Graph() {
         return;
       }
 
-      const w = canvas!.width / 2;
-      const h = canvas!.height / 2;
+      const w = canvas!.clientWidth / 2;
+      const h = canvas!.clientHeight / 2;
       const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
-      // Forces
-      const REPULSION = 800;
-      const ATTRACTION = 0.005;
-      const DAMPING = 0.85;
-      const CENTER_PULL = 0.001;
-      const TARGET_LEN = 120;
+      // Only run physics while simulation is warm
+      const alpha = alphaRef.current;
+      if (alpha > ALPHA_MIN) {
+        const REPULSION = 600;
+        const ATTRACTION = 0.008;
+        const DAMPING = 0.7;
+        const CENTER_PULL = 0.0008;
+        const TARGET_LEN = 140;
 
-      // Repulsion (N^2 but capped at 500 nodes)
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const dx = nodes[j].x - nodes[i].x;
-          const dy = nodes[j].y - nodes[i].y;
+        // Repulsion
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            let dx = nodes[j].x - nodes[i].x;
+            let dy = nodes[j].y - nodes[i].y;
+            const distSq = dx * dx + dy * dy;
+            if (distSq === 0) {
+              dx = (Math.random() - 0.5) * 0.1;
+              dy = (Math.random() - 0.5) * 0.1;
+            }
+            const dist = Math.sqrt(distSq) || 0.1;
+            const force = (REPULSION * alpha) / (distSq || 0.01);
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+            nodes[i].vx -= fx;
+            nodes[i].vy -= fy;
+            nodes[j].vx += fx;
+            nodes[j].vy += fy;
+          }
+        }
+
+        // Attraction along edges
+        for (const edge of edges) {
+          const s = nodeMap.get(edge.source);
+          const t = nodeMap.get(edge.target);
+          if (!s || !t) continue;
+          const dx = t.x - s.x;
+          const dy = t.y - s.y;
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          const force = REPULSION / (dist * dist);
+          const force = (dist - TARGET_LEN) * ATTRACTION * alpha;
           const fx = (dx / dist) * force;
           const fy = (dy / dist) * force;
-          nodes[i].vx -= fx;
-          nodes[i].vy -= fy;
-          nodes[j].vx += fx;
-          nodes[j].vy += fy;
+          s.vx += fx;
+          s.vy += fy;
+          t.vx -= fx;
+          t.vy -= fy;
         }
-      }
 
-      // Attraction along edges
-      for (const edge of edges) {
-        const s = nodeMap.get(edge.source);
-        const t = nodeMap.get(edge.target);
-        if (!s || !t) continue;
-        const dx = t.x - s.x;
-        const dy = t.y - s.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const force = (dist - TARGET_LEN) * ATTRACTION;
-        const fx = (dx / dist) * force;
-        const fy = (dy / dist) * force;
-        s.vx += fx;
-        s.vy += fy;
-        t.vx -= fx;
-        t.vy -= fy;
-      }
-
-      // Center pull + damping + integration
-      let totalMotion = 0;
-      for (const node of nodes) {
-        if (dragRef.current.node === node) continue;
-        node.vx += (w - node.x) * CENTER_PULL;
-        node.vy += (h - node.y) * CENTER_PULL;
-        node.vx *= DAMPING;
-        node.vy *= DAMPING;
-        node.x += node.vx;
-        node.y += node.vy;
-        totalMotion += Math.abs(node.vx) + Math.abs(node.vy);
-      }
-
-      // Auto-pause when settled
-      if (totalMotion < 0.5) {
-        settled++;
-        if (settled > 60) {
-          // Still render but skip physics
+        // Center pull + damping + integration
+        for (const node of nodes) {
+          if (dragRef.current.node === node) continue;
+          node.vx += (w - node.x) * CENTER_PULL * alpha;
+          node.vy += (h - node.y) * CENTER_PULL * alpha;
+          node.vx *= DAMPING;
+          node.vy *= DAMPING;
+          node.x += node.vx;
+          node.y += node.vy;
         }
-      } else {
-        settled = 0;
+
+        alphaRef.current = alpha * ALPHA_DECAY;
       }
 
       // Render
@@ -207,7 +219,7 @@ export function Graph() {
       // Draw nodes
       const hovered = hoveredRef.current;
       for (const node of nodes) {
-        const color = TYPE_COLORS[node.type] ?? "#8b5cf6";
+        const color = node.tags.length > 0 ? tagColor(node.tags[0]) : DEFAULT_COLOR;
         const isHovered = hovered === node;
         const r = isHovered ? 9 : node.radius;
 
@@ -215,7 +227,7 @@ export function Graph() {
         if (isHovered) {
           ctx!.beginPath();
           ctx!.arc(node.x, node.y, r + 6, 0, Math.PI * 2);
-          ctx!.fillStyle = color.replace(")", ", 0.15)").replace("rgb", "rgba");
+          ctx!.fillStyle = hexToRgba(color, 0.15);
           ctx!.fill();
         }
 
@@ -232,12 +244,56 @@ export function Graph() {
       }
 
       ctx!.restore();
+
+      if (alphaRef.current > ALPHA_MIN) {
+        animRef.current = requestAnimationFrame(tick);
+      } else {
+        animRunningRef.current = false;
+      }
+    }
+
+    function startAnimation() {
+      if (animRunningRef.current) return;
+      animRunningRef.current = true;
       animRef.current = requestAnimationFrame(tick);
     }
 
-    animRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animRef.current);
+    // Expose startAnimation via a ref-accessible mechanism
+    (canvasRef.current as any).__startAnimation = startAnimation;
+
+    startAnimation();
+    return () => {
+      animRunningRef.current = false;
+      cancelAnimationFrame(animRef.current);
+    };
   }, [data]);
+
+  // Passive-false wheel listener
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const zoom = e.deltaY > 0 ? 0.9 : 1.1;
+      const newScale = Math.max(0.2, Math.min(5, scaleRef.current * zoom));
+      panRef.current.x = mx - (mx - panRef.current.x) * (newScale / scaleRef.current);
+      panRef.current.y = my - (my - panRef.current.y) * (newScale / scaleRef.current);
+      scaleRef.current = newScale;
+    };
+    canvas.addEventListener("wheel", handler, { passive: false });
+    return () => canvas.removeEventListener("wheel", handler);
+  }, []);
+
+  // Helper to restart animation on interaction
+  const startAnimation = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (canvas && (canvas as any).__startAnimation) {
+      (canvas as any).__startAnimation();
+    }
+  }, []);
 
   // Mouse interaction handlers
   const screenToWorld = useCallback((sx: number, sy: number) => {
@@ -265,11 +321,13 @@ export function Graph() {
 
     if (node) {
       dragRef.current = { node, offsetX: node.x - x, offsetY: node.y - y };
+      alphaRef.current = Math.max(alphaRef.current, 0.3);
+      startAnimation();
     } else {
       isPanningRef.current = true;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
     }
-  }, [screenToWorld, findNode]);
+  }, [screenToWorld, findNode, startAnimation]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -297,20 +355,6 @@ export function Graph() {
     isPanningRef.current = false;
   }, []);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-
-    const zoom = e.deltaY > 0 ? 0.9 : 1.1;
-    const newScale = Math.max(0.2, Math.min(5, scaleRef.current * zoom));
-
-    panRef.current.x = mx - (mx - panRef.current.x) * (newScale / scaleRef.current);
-    panRef.current.y = my - (my - panRef.current.y) * (newScale / scaleRef.current);
-    scaleRef.current = newScale;
-  }, []);
-
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -325,6 +369,14 @@ export function Graph() {
       <div className="loading">
         <div className="spinner" />
         <span>Loading graph...</span>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="loading">
+        <span>Failed to load graph data</span>
       </div>
     );
   }
@@ -346,15 +398,21 @@ export function Graph() {
         </div>
       </div>
 
-      {/* Legend */}
-      <div style={{ display: "flex", gap: 16, marginBottom: 12, flexWrap: "wrap" }}>
-        {Object.entries(TYPE_COLORS).map(([type, color]) => (
-          <div key={type} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#a0a0be" }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: color }} />
-            {type}
+      {/* Legend — dynamic from tags */}
+      {legendTags.length > 0 && (
+        <div style={{ display: "flex", gap: 16, marginBottom: 12, flexWrap: "wrap" }}>
+          {legendTags.map((tag) => (
+            <div key={tag} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#a0a0be" }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: tagColor(tag) }} />
+              {tag}
+            </div>
+          ))}
+          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#a0a0be" }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: DEFAULT_COLOR }} />
+            untagged
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
       <div
         ref={containerRef}
@@ -374,7 +432,6 @@ export function Graph() {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          onWheel={handleWheel}
           onDoubleClick={handleDoubleClick}
         />
       </div>

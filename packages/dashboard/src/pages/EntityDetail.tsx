@@ -1,27 +1,20 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { MemoryCard } from "../components/MemoryCard";
+import { tagColor } from "../utils/tagColor";
 
-const TYPE_COLORS: Record<string, { border: string; badge: string; badgeBg: string }> = {
-  person: { border: "#22d3ee", badge: "#22d3ee", badgeBg: "rgba(34, 211, 238, 0.15)" },
-  technology: { border: "#8b5cf6", badge: "#8b5cf6", badgeBg: "rgba(139, 92, 246, 0.15)" },
-  project: { border: "#34d399", badge: "#34d399", badgeBg: "rgba(52, 211, 153, 0.15)" },
-  organization: { border: "#fbbf24", badge: "#fbbf24", badgeBg: "rgba(251, 191, 36, 0.15)" },
-  concept: { border: "#f472b6", badge: "#f472b6", badgeBg: "rgba(244, 114, 182, 0.15)" },
-};
-
-const DEFAULT_COLOR = { border: "#16163a", badge: "#8080a0", badgeBg: "rgba(90, 90, 120, 0.15)" };
+const DEFAULT_COLOR = "#16163a";
 
 function RelationshipGraph({
   entityName,
-  entityType,
+  entityTags,
   relationships,
 }: {
   entityName: string;
-  entityType: string;
-  relationships: Array<{ entity: { id: string; name: string; type: string }; relationship: string; direction: "outgoing" | "incoming" }>;
+  entityTags: string[];
+  relationships: Array<{ entity: { id: string; name: string; type: string; tags?: string[] }; relationship: string; direction: "outgoing" | "incoming" }>;
 }) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const width = 520;
@@ -29,16 +22,23 @@ function RelationshipGraph({
   const cx = width / 2;
   const cy = height / 2;
   const radius = 155;
-  const centerColors = TYPE_COLORS[entityType] ?? DEFAULT_COLOR;
+  const centerColor = entityTags.length > 0 ? tagColor(entityTags[0]) : "#8b5cf6";
+
+  // Collect distinct tags for glow filters
+  const allColors = new Set<string>();
+  allColors.add(centerColor);
+  for (const rel of relationships) {
+    const relTags = (rel.entity as any).tags ?? [];
+    allColors.add(relTags.length > 0 ? tagColor(relTags[0]) : "#8080a0");
+  }
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxWidth: 520, height: "auto" }}>
       <defs>
-        {/* Glow filters per color */}
-        {Object.entries(TYPE_COLORS).map(([type, c]) => (
-          <filter key={type} id={`glow-${type}`} x="-50%" y="-50%" width="200%" height="200%">
+        {[...allColors].map((color, i) => (
+          <filter key={i} id={`glow-${i}`} x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
-            <feFlood floodColor={c.border} floodOpacity="0.3" />
+            <feFlood floodColor={color} floodOpacity="0.3" />
             <feComposite in2="blur" operator="in" />
             <feMerge>
               <feMergeNode />
@@ -46,15 +46,6 @@ function RelationshipGraph({
             </feMerge>
           </filter>
         ))}
-        <filter id="glow-default" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
-          <feFlood floodColor="#8080a0" floodOpacity="0.3" />
-          <feComposite in2="blur" operator="in" />
-          <feMerge>
-            <feMergeNode />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
       </defs>
 
       {/* Subtle grid */}
@@ -69,12 +60,13 @@ function RelationshipGraph({
         const x = cx + radius * Math.cos(angle);
         const y = cy + radius * Math.sin(angle);
         const isHovered = hoveredNode === rel.entity.id;
-        const colors = TYPE_COLORS[rel.entity.type] ?? DEFAULT_COLOR;
+        const relTags = (rel.entity as any).tags ?? [];
+        const nodeColor = relTags.length > 0 ? tagColor(relTags[0]) : "#8080a0";
         return (
           <g key={`line-${rel.entity.id}`}>
             <line
               x1={cx} y1={cy} x2={x} y2={y}
-              stroke={isHovered ? colors.border : "#16163a"}
+              stroke={isHovered ? nodeColor : "#16163a"}
               strokeWidth={isHovered ? 2 : 1}
               strokeDasharray={isHovered ? "none" : "4 4"}
               style={{
@@ -91,12 +83,12 @@ function RelationshipGraph({
                   x={mx}
                   y={my - 7}
                   textAnchor="middle"
-                  fill={isHovered ? colors.badge : "#8080a0"}
+                  fill={isHovered ? nodeColor : "#8080a0"}
                   fontSize={9}
                   fontFamily="var(--font-mono)"
                   style={{ transition: "fill 0.2s" }}
                 >
-                  {rel.direction === "outgoing" ? rel.relationship : rel.relationship}
+                  {rel.relationship}
                 </text>
               );
             })()}
@@ -109,9 +101,11 @@ function RelationshipGraph({
         const angle = (2 * Math.PI * i) / relationships.length - Math.PI / 2;
         const x = cx + radius * Math.cos(angle);
         const y = cy + radius * Math.sin(angle);
-        const colors = TYPE_COLORS[rel.entity.type] ?? DEFAULT_COLOR;
+        const relTags = (rel.entity as any).tags ?? [];
+        const nodeColor = relTags.length > 0 ? tagColor(relTags[0]) : "#8080a0";
         const isHovered = hoveredNode === rel.entity.id;
-        const filterName = TYPE_COLORS[rel.entity.type] ? `glow-${rel.entity.type}` : "glow-default";
+        const colorArr = [...allColors];
+        const filterIdx = colorArr.indexOf(nodeColor);
         return (
           <Link key={rel.entity.id} to={`/entities/${rel.entity.id}`}>
             <g
@@ -123,31 +117,33 @@ function RelationshipGraph({
                 cx={x} cy={y}
                 r={isHovered ? 32 : 28}
                 fill="#08081a"
-                stroke={colors.border}
+                stroke={nodeColor}
                 strokeWidth={isHovered ? 2 : 1.5}
-                filter={isHovered ? `url(#${filterName})` : undefined}
+                filter={isHovered && filterIdx >= 0 ? `url(#glow-${filterIdx})` : undefined}
                 style={{ transition: "r 0.2s, stroke-width 0.2s" }}
               />
               <text
                 x={x} y={y + 1}
                 textAnchor="middle"
                 dominantBaseline="middle"
-                fill={colors.badge}
+                fill={nodeColor}
                 fontSize={isHovered ? 11 : 10}
                 fontWeight={600}
                 style={{ transition: "font-size 0.2s" }}
               >
                 {rel.entity.name.length > 10 ? rel.entity.name.slice(0, 9) + "\u2026" : rel.entity.name}
               </text>
-              <text
-                x={x} y={y + 42}
-                textAnchor="middle"
-                fill="#8080a0"
-                fontSize={8}
-                fontFamily="var(--font-mono)"
-              >
-                {rel.entity.type}
-              </text>
+              {relTags.length > 0 && (
+                <text
+                  x={x} y={y + 42}
+                  textAnchor="middle"
+                  fill="#8080a0"
+                  fontSize={8}
+                  fontFamily="var(--font-mono)"
+                >
+                  {relTags[0]}
+                </text>
+              )}
             </g>
           </Link>
         );
@@ -157,14 +153,14 @@ function RelationshipGraph({
       <circle
         cx={cx} cy={cy} r={40}
         fill="#08081a"
-        stroke={centerColors.border}
+        stroke={centerColor}
         strokeWidth={2.5}
-        filter={`url(#${TYPE_COLORS[entityType] ? `glow-${entityType}` : "glow-default"})`}
+        filter={`url(#glow-${[...allColors].indexOf(centerColor)})`}
       />
       <circle
         cx={cx} cy={cy} r={38}
         fill="none"
-        stroke={centerColors.border}
+        stroke={centerColor}
         strokeWidth={0.5}
         opacity={0.3}
       />
@@ -172,7 +168,7 @@ function RelationshipGraph({
         x={cx} y={cy + 1}
         textAnchor="middle"
         dominantBaseline="middle"
-        fill={centerColors.badge}
+        fill={centerColor}
         fontSize={13}
         fontWeight={700}
       >
@@ -185,10 +181,11 @@ function RelationshipGraph({
 function RelationshipRow({
   rel,
 }: {
-  rel: { entity: { id: string; name: string; type: string }; relationship: string; direction: "outgoing" | "incoming" };
+  rel: { entity: { id: string; name: string; type: string; tags?: string[] }; relationship: string; direction: "outgoing" | "incoming" };
 }) {
   const [hovered, setHovered] = useState(false);
-  const relColors = TYPE_COLORS[rel.entity.type] ?? DEFAULT_COLOR;
+  const relTags = (rel.entity as any).tags ?? [];
+  const nodeColor = relTags.length > 0 ? tagColor(relTags[0]) : "#8080a0";
 
   return (
     <div
@@ -214,13 +211,13 @@ function RelationshipRow({
       }}>
         {rel.direction === "outgoing" ? rel.relationship : ""}
       </span>
-      <span style={{ color: hovered ? relColors.badge : "#8080a0", transition: "color 0.15s", fontSize: 11 }}>
+      <span style={{ color: hovered ? nodeColor : "#8080a0", transition: "color 0.15s", fontSize: 11 }}>
         {rel.direction === "outgoing" ? "\u2192" : "\u2190"}
       </span>
       <Link
         to={`/entities/${rel.entity.id}`}
         style={{
-          color: relColors.badge,
+          color: nodeColor,
           textDecoration: "none",
           fontWeight: 600,
           transition: "opacity 0.15s",
@@ -229,18 +226,28 @@ function RelationshipRow({
       >
         {rel.entity.name}
       </Link>
-      <span
-        style={{
-          background: relColors.badgeBg,
-          color: relColors.badge,
-          padding: "1px 8px",
-          borderRadius: 20,
-          fontSize: 10,
-          fontWeight: 600,
-        }}
-      >
-        {rel.entity.type}
-      </span>
+      {relTags.length > 0 && (
+        <div style={{ display: "flex", gap: 4 }}>
+          {relTags.map((tag: string) => {
+            const c = tagColor(tag);
+            return (
+              <span
+                key={tag}
+                style={{
+                  background: `${c}20`,
+                  color: c,
+                  padding: "1px 8px",
+                  borderRadius: 20,
+                  fontSize: 10,
+                  fontWeight: 600,
+                }}
+              >
+                {tag}
+              </span>
+            );
+          })}
+        </div>
+      )}
       <span style={{
         color: "#8080a0",
         fontFamily: "var(--font-mono)",
@@ -253,9 +260,91 @@ function RelationshipRow({
   );
 }
 
+function TagEditor({ tags, onSave, isPending }: { tags: string[]; onSave: (tags: string[]) => void; isPending: boolean }) {
+  const [newTag, setNewTag] = useState("");
+
+  const addTag = () => {
+    const tag = newTag.trim().toLowerCase();
+    if (tag && !tags.includes(tag)) {
+      onSave([...tags, tag]);
+    }
+    setNewTag("");
+  };
+
+  const removeTag = (tag: string) => {
+    onSave(tags.filter((t) => t !== tag));
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      {tags.map((tag) => {
+        const color = tagColor(tag);
+        return (
+          <span
+            key={tag}
+            style={{
+              background: `${color}20`,
+              color,
+              padding: "4px 10px",
+              borderRadius: 20,
+              fontSize: 12,
+              fontWeight: 600,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {tag}
+            <button
+              onClick={() => removeTag(tag)}
+              disabled={isPending}
+              style={{
+                background: "none",
+                border: "none",
+                color,
+                cursor: "pointer",
+                padding: 0,
+                fontSize: 14,
+                lineHeight: 1,
+                opacity: 0.7,
+              }}
+              aria-label={`Remove ${tag}`}
+            >
+              &times;
+            </button>
+          </span>
+        );
+      })}
+      <form
+        onSubmit={(e) => { e.preventDefault(); addTag(); }}
+        style={{ display: "inline-flex", alignItems: "center" }}
+      >
+        <input
+          type="text"
+          value={newTag}
+          onChange={(e) => setNewTag(e.target.value)}
+          placeholder="add tag..."
+          disabled={isPending}
+          style={{
+            background: "transparent",
+            border: "1px solid #16163a",
+            borderRadius: 20,
+            padding: "4px 12px",
+            fontSize: 12,
+            color: "#e8e8f4",
+            outline: "none",
+            width: 100,
+          }}
+        />
+      </form>
+    </div>
+  );
+}
+
 export function EntityDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["entity-memories", id],
@@ -267,6 +356,17 @@ export function EntityDetail() {
     queryKey: ["entity-relationships", id],
     queryFn: () => api.getEntityRelationships(id!),
     enabled: !!id,
+  });
+
+  const tagsMutation = useMutation({
+    mutationFn: ({ id: eid, tags }: { id: string; tags: string[] }) => api.updateEntity(eid, { tags }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entity-memories", id] });
+      queryClient.invalidateQueries({ queryKey: ["entity-relationships", id] });
+      queryClient.invalidateQueries({ queryKey: ["entity-graph"] });
+      queryClient.invalidateQueries({ queryKey: ["entity-tags"] });
+      queryClient.invalidateQueries({ queryKey: ["entities"] });
+    },
   });
 
   if (isLoading) {
@@ -289,7 +389,8 @@ export function EntityDetail() {
   if (!data) return null;
 
   const { entity, memories, count } = data;
-  const colors = TYPE_COLORS[entity.type] ?? DEFAULT_COLOR;
+  const entityTags = entity.tags ?? [];
+  const borderColor = entityTags.length > 0 ? tagColor(entityTags[0]) : DEFAULT_COLOR;
   const relationships = relData?.results ?? [];
 
   return (
@@ -320,31 +421,25 @@ export function EntityDetail() {
         style={{
           background: "#0c0c1d",
           border: "1px solid #16163a",
-          borderLeft: `3px solid ${colors.border}`,
+          borderLeft: `3px solid ${borderColor}`,
           borderRadius: 10,
           padding: 20,
           marginBottom: 24,
           animation: "slideUp 0.3s ease-out both",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <h1 style={{ margin: 0 }}>{entity.name}</h1>
-          <span
-            style={{
-              background: colors.badgeBg,
-              color: colors.badge,
-              padding: "3px 10px",
-              borderRadius: 20,
-              fontSize: 11,
-              fontWeight: 600,
-            }}
-          >
-            {entity.type}
-          </span>
-        </div>
+        <h1 style={{ margin: "0 0 12px 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {entity.name}
+        </h1>
+
+        <TagEditor
+          tags={entityTags}
+          onSave={(tags) => tagsMutation.mutate({ id: entity.id, tags })}
+          isPending={tagsMutation.isPending}
+        />
 
         {entity.aliases.length > 0 && (
-          <p style={{ color: "#8080a0", fontSize: 13, fontFamily: "var(--font-mono)" }}>
+          <p style={{ color: "#8080a0", fontSize: 13, fontFamily: "var(--font-mono)", marginTop: 12 }}>
             Aliases: {entity.aliases.join(", ")}
           </p>
         )}
@@ -401,7 +496,7 @@ export function EntityDetail() {
           >
             <RelationshipGraph
               entityName={entity.name}
-              entityType={entity.type}
+              entityTags={entity.tags}
               relationships={relationships}
             />
           </div>

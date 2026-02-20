@@ -101,9 +101,12 @@ const contradictionUpdateSchema = z.object({
 
 // PATCH /api/contradictions/:id
 intelligence.patch("/api/contradictions/:id", async (c) => {
-  const body = contradictionUpdateSchema.parse(await c.req.json());
+  const parsed = contradictionUpdateSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten() }, 400);
+  }
   const db = getDb();
-  const updated = updateContradiction(db, c.req.param("id"), body);
+  const updated = updateContradiction(db, c.req.param("id"), parsed.data);
   if (!updated) return c.json({ error: "Not found" }, 404);
   return c.json(updated);
 });
