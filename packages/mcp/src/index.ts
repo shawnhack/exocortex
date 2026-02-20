@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, backfillEntities, recalibrateImportance, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks } from "@exocortex/core";
+import { getDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks } from "@exocortex/core";
 import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 
@@ -110,6 +110,50 @@ function checkAndSignalUsefulness(ids: string[]): string[] {
     }
   }
   return useful;
+}
+
+// --- Multi-hop context expansion: follow 1-hop links from search results ---
+
+interface LinkedExpansion {
+  id: string;
+  content: string;
+  tags: string[];
+  created_at: string;
+  importance: number;
+  linked_from: string;
+  link_type: string;
+  strength: number;
+}
+
+function expandViaLinks(resultIds: string[], maxExpansion: number = 5): LinkedExpansion[] {
+  if (resultIds.length === 0) return [];
+  const linkStore = new MemoryLinkStore(db);
+  const store = new MemoryStore(db);
+  const refs = linkStore.getLinkedRefs(resultIds);
+
+  const expanded: LinkedExpansion[] = [];
+  for (const ref of refs) {
+    if (expanded.length >= maxExpansion) break;
+    try {
+      const mem = db
+        .prepare("SELECT id, content, importance, created_at FROM memories WHERE id = ? AND is_active = 1")
+        .get(ref.id) as { id: string; content: string; importance: number; created_at: string } | undefined;
+      if (!mem) continue;
+
+      const tags = (db
+        .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
+        .all(ref.id) as Array<{ tag: string }>).map((t) => t.tag);
+
+      expanded.push({
+        ...mem,
+        tags,
+        linked_from: ref.linked_from,
+        link_type: ref.link_type,
+        strength: ref.strength,
+      });
+    } catch { /* skip bad refs */ }
+  }
+  return expanded;
 }
 
 // memory_store
@@ -279,8 +323,21 @@ server.tool(
 
     const lines = results.map(formatFull);
 
+    // Multi-hop: append linked memories not already in results
+    const resultIds = results.map((r) => r.memory.id);
+    const linked = expandViaLinks(resultIds, 3);
+    let linkSection = "";
+    if (linked.length > 0) {
+      recordSearchResults(linked.map((l) => l.id));
+      const linkLines = linked.map((l) => {
+        const tagStr = l.tags.length ? ` | tags: ${l.tags.join(", ")}` : "";
+        return `[${l.id}] ${l.content.substring(0, 200)}${l.content.length > 200 ? "..." : ""}\n  (via ${l.link_type} link, strength: ${l.strength}${tagStr})`;
+      });
+      linkSection = `\n\n--- Linked (1-hop) ---\n\n${linkLines.join("\n\n")}`;
+    }
+
     return {
-      content: [{ type: "text", text: `Found ${results.length} memories (${scoringMode}):\n\n${lines.join("\n\n")}` }],
+      content: [{ type: "text", text: `Found ${results.length} memories (${scoringMode}):\n\n${lines.join("\n\n")}${linkSection}` }],
     };
   }
 );
@@ -377,8 +434,21 @@ server.tool(
 
     const lines = results.map(formatFull);
 
+    // Multi-hop: append linked memories not already in results
+    const resultIds = results.map((r) => r.memory.id);
+    const linked = expandViaLinks(resultIds, 3);
+    let linkSection = "";
+    if (linked.length > 0) {
+      recordSearchResults(linked.map((l) => l.id));
+      const linkLines = linked.map((l) => {
+        const tagStr = l.tags.length ? ` [${l.tags.join(", ")}]` : "";
+        return `- ${l.content.substring(0, 200)}${l.content.length > 200 ? "..." : ""}${tagStr} (via ${l.link_type})`;
+      });
+      linkSection = `\n\n--- Linked ---\n${linkLines.join("\n")}`;
+    }
+
     return {
-      content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories):\n\n${lines.join("\n")}` }],
+      content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories):\n\n${lines.join("\n")}${linkSection}` }],
     };
   }
 );
@@ -805,6 +875,7 @@ server.tool(
     recalibrate: z.boolean().optional().describe("Normalize importance distribution via percentile-rank mapping"),
     densify_graph: z.boolean().optional().describe("Create co_occurs relationships between entities sharing memories"),
     build_co_retrieval_links: z.boolean().optional().describe("Build memory links from co-retrieval patterns"),
+    tune_weights: z.boolean().optional().describe("Auto-adjust scoring weights based on usefulness feedback data"),
   },
   async (args) => {
     const importanceResult = adjustImportance(db);
@@ -939,6 +1010,23 @@ server.tool(
         parts.push(`\nCo-retrieval links: ${coRetResult.pairsAnalyzed} pairs analyzed, ${coRetResult.linksCreated} created, ${coRetResult.linksStrengthened} strengthened`);
       } catch (err) {
         parts.push(`\nCo-retrieval links: error — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Adaptive weight tuning
+    if (args.tune_weights) {
+      try {
+        const tuneResult = tuneWeights(db);
+        if (tuneResult.adjusted) {
+          const adj = Object.entries(tuneResult.adjustments)
+            .map(([k, v]) => `${k}: ${v.old} → ${v.new}`)
+            .join(", ");
+          parts.push(`\nWeight tuning: adjusted (${tuneResult.usefulCount} useful, ${tuneResult.notUsefulCount} not useful)\n  ${adj}`);
+        } else {
+          parts.push(`\nWeight tuning: ${tuneResult.reason}`);
+        }
+      } catch (err) {
+        parts.push(`\nWeight tuning: error — ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 

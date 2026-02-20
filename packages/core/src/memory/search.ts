@@ -14,6 +14,7 @@ import {
   reciprocalRankFusion,
 } from "./scoring.js";
 import { EntityStore } from "../entities/store.js";
+import { MemoryLinkStore } from "./links.js";
 
 interface FtsMatch {
   rowid: number;
@@ -220,9 +221,14 @@ export class MemorySearch {
     }
 
     // Graph-proximity scores (if weight > 0)
-    const graphScores = weights.graph > 0
-      ? this.getGraphProximityScores(query.query, candidates.map((c) => c.row.id))
-      : new Map<string, number>();
+    // Use a pre-pass: sort candidates by vector+fts to find top seeds for link proximity
+    let graphScores = new Map<string, number>();
+    if (weights.graph > 0) {
+      const preSorted = [...candidates]
+        .sort((a, b) => (b.vectorScore + b.ftsScore) - (a.vectorScore + a.ftsScore));
+      const topSeedIds = preSorted.slice(0, 20).filter((c) => c.vectorScore > 0 || c.ftsScore > 0).map((c) => c.row.id);
+      graphScores = this.getGraphProximityScores(query.query, candidates.map((c) => c.row.id), topSeedIds);
+    }
 
     // RRF or legacy scoring
     const rrfConfig = getRRFConfig(this.db);
@@ -404,49 +410,64 @@ export class MemorySearch {
 
   private getGraphProximityScores(
     query: string,
-    candidateIds: string[]
+    candidateIds: string[],
+    topScoredIds: string[]
   ): Map<string, number> {
     const scores = new Map<string, number>();
     const candidateSet = new Set(candidateIds);
 
+    // --- Entity-graph proximity ---
     const entityStore = new EntityStore(this.db);
     const words = query
       .split(/\s+/)
       .filter((w) => w.length > 2)
       .map((w) => w.toLowerCase());
 
-    // Find entities mentioned in query
     const queryEntities: string[] = [];
     for (const word of words) {
       const entity = entityStore.getByName(word);
       if (entity) queryEntities.push(entity.id);
     }
 
-    if (queryEntities.length === 0) return scores;
+    if (queryEntities.length > 0) {
+      // Direct-linked memories (1-hop) score 1.0
+      for (const entityId of queryEntities) {
+        const memoryIds = entityStore.getMemoriesForEntity(entityId);
+        for (const mid of memoryIds) {
+          if (candidateSet.has(mid)) {
+            scores.set(mid, Math.max(scores.get(mid) ?? 0, 1.0));
+          }
+        }
+      }
 
-    // Direct-linked memories (1-hop) score 1.0
-    for (const entityId of queryEntities) {
-      const memoryIds = entityStore.getMemoriesForEntity(entityId);
-      for (const mid of memoryIds) {
-        if (candidateSet.has(mid)) {
-          scores.set(mid, Math.max(scores.get(mid) ?? 0, 1.0));
+      // Indirect memories (2-hop via related entities) score 0.5
+      for (const entityId of queryEntities) {
+        const related = entityStore.getRelatedEntities(entityId);
+        let count = 0;
+        for (const rel of related) {
+          if (count >= 10) break;
+          const memoryIds = entityStore.getMemoriesForEntity(rel.entity.id);
+          for (const mid of memoryIds) {
+            if (candidateSet.has(mid) && !scores.has(mid)) {
+              scores.set(mid, 0.5);
+            }
+          }
+          count++;
         }
       }
     }
 
-    // Indirect memories (2-hop via related entities) score 0.5
-    for (const entityId of queryEntities) {
-      const related = entityStore.getRelatedEntities(entityId);
-      let count = 0;
-      for (const rel of related) {
-        if (count >= 10) break;
-        const memoryIds = entityStore.getMemoriesForEntity(rel.entity.id);
-        for (const mid of memoryIds) {
-          if (candidateSet.has(mid) && !scores.has(mid)) {
-            scores.set(mid, 0.5);
-          }
+    // --- Memory-link proximity ---
+    // Candidates linked to top-scoring results get a boost
+    if (topScoredIds.length > 0) {
+      const linkStore = new MemoryLinkStore(this.db);
+      const refs = linkStore.getLinkedRefs(topScoredIds);
+      for (const ref of refs) {
+        if (candidateSet.has(ref.id)) {
+          // Strength-weighted score (0.3-0.8 range based on link strength)
+          const linkScore = 0.3 + ref.strength * 0.5;
+          scores.set(ref.id, Math.max(scores.get(ref.id) ?? 0, linkScore));
         }
-        count++;
       }
     }
 

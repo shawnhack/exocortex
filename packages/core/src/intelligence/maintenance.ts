@@ -3,12 +3,14 @@
  * - Re-embedding: fill missing embeddings
  * - Entity backfill: process memories without entity links
  * - Importance recalibration: normalize importance distribution
+ * - Weight tuning: adaptive scoring weight adjustment based on feedback
  */
 
 import type { DatabaseSync } from "node:sqlite";
 import type { EmbeddingProvider } from "../embedding/types.js";
 import { EntityStore } from "../entities/store.js";
 import { extractEntities, extractRelationships } from "../entities/extractor.js";
+import { setSetting, getSetting } from "../db/schema.js";
 
 // --- A1: Re-embedding Pass ---
 
@@ -268,5 +270,165 @@ export function recalibrateImportance(
       p75: percentile(sorted, 75),
       max: sorted[sorted.length - 1] ?? 0,
     },
+  };
+}
+
+// --- A4: Adaptive Scoring Weight Tuning ---
+
+export interface TuneWeightsResult {
+  adjusted: boolean;
+  reason?: string;
+  usefulCount: number;
+  notUsefulCount: number;
+  adjustments: Record<string, { old: number; new: number }>;
+  dry_run: boolean;
+}
+
+/**
+ * Analyze correlation between memory properties and usefulness feedback,
+ * then nudge scoring weights to favor signals that predict usefulness.
+ *
+ * Compares memories that proved useful (useful_count > 0) vs those retrieved
+ * but not useful (access_count > 0, useful_count = 0). Adjusts weights by
+ * ±0.02 per cycle, keeping total in a valid range.
+ */
+export function tuneWeights(
+  db: DatabaseSync,
+  opts?: { dryRun?: boolean; maxNudge?: number }
+): TuneWeightsResult {
+  const dryRun = opts?.dryRun ?? false;
+  const maxNudge = opts?.maxNudge ?? 0.02;
+
+  // Get memories that have been retrieved
+  const rows = db
+    .prepare(
+      `SELECT id, access_count, useful_count, importance, created_at
+       FROM memories WHERE is_active = 1 AND access_count > 0`
+    )
+    .all() as unknown as Array<{
+      id: string;
+      access_count: number;
+      useful_count: number;
+      importance: number;
+      created_at: string;
+    }>;
+
+  const useful = rows.filter((m) => m.useful_count > 0);
+  const notUseful = rows.filter((m) => m.useful_count === 0);
+
+  if (useful.length < 5 || notUseful.length < 5) {
+    return {
+      adjusted: false,
+      reason: `Insufficient data: ${useful.length} useful, ${notUseful.length} not useful (need 5+ each)`,
+      usefulCount: useful.length,
+      notUsefulCount: notUseful.length,
+      adjustments: {},
+      dry_run: dryRun,
+    };
+  }
+
+  const now = Date.now();
+  const daysSince = (createdAt: string) => {
+    const ts = new Date(createdAt + (createdAt.includes("Z") ? "" : "Z")).getTime();
+    return (now - ts) / (1000 * 60 * 60 * 24);
+  };
+
+  // Compute average properties for each group
+  const mean = (arr: number[]) => arr.reduce((s, v) => s + v, 0) / arr.length;
+
+  const usefulAvgAge = mean(useful.map((m) => daysSince(m.created_at)));
+  const notUsefulAvgAge = mean(notUseful.map((m) => daysSince(m.created_at)));
+
+  const usefulAvgAccess = mean(useful.map((m) => m.access_count));
+  const notUsefulAvgAccess = mean(notUseful.map((m) => m.access_count));
+
+  const usefulAvgImportance = mean(useful.map((m) => m.importance));
+  const notUsefulAvgImportance = mean(notUseful.map((m) => m.importance));
+
+  // Count links per memory
+  const countLinks = (id: string): number => {
+    const row = db
+      .prepare(
+        "SELECT COUNT(*) as cnt FROM memory_links WHERE source_id = ? OR target_id = ?"
+      )
+      .get(id, id) as { cnt: number };
+    return row.cnt;
+  };
+
+  const usefulAvgLinks = mean(useful.map((m) => countLinks(m.id)));
+  const notUsefulAvgLinks = mean(notUseful.map((m) => countLinks(m.id)));
+
+  // Current weights
+  const currentWeights = {
+    recency: parseFloat(getSetting(db, "scoring.recency_weight") ?? "0.20"),
+    frequency: parseFloat(getSetting(db, "scoring.frequency_weight") ?? "0.10"),
+    graph: parseFloat(getSetting(db, "scoring.graph_weight") ?? "0.10"),
+    usefulness: parseFloat(getSetting(db, "scoring.usefulness_weight") ?? "0.05"),
+  };
+
+  // Compute nudges based on property differences
+  const adjustments: Record<string, { old: number; new: number }> = {};
+
+  // Recency: if useful memories are newer, boost recency weight
+  const ageDiff = notUsefulAvgAge - usefulAvgAge; // positive = useful are newer
+  const recencyNudge = Math.max(-maxNudge, Math.min(maxNudge, ageDiff > 5 ? maxNudge : ageDiff < -5 ? -maxNudge : 0));
+
+  // Frequency: if useful memories are more frequently accessed, boost frequency
+  const freqRatio = usefulAvgAccess / Math.max(1, notUsefulAvgAccess);
+  const freqNudge = freqRatio > 1.5 ? maxNudge : freqRatio < 0.67 ? -maxNudge : 0;
+
+  // Graph: if useful memories have more links, boost graph weight
+  const linkDiff = usefulAvgLinks - notUsefulAvgLinks;
+  const graphNudge = linkDiff > 0.5 ? maxNudge : linkDiff < -0.5 ? -maxNudge : 0;
+
+  // Usefulness: self-reinforcing — if feedback is accumulating, slightly boost
+  const usefulnessNudge = useful.length > 20 ? maxNudge : 0;
+
+  // Apply nudges with bounds [0.02, 0.40]
+  const clamp = (v: number) => Math.round(Math.max(0.02, Math.min(0.40, v)) * 100) / 100;
+
+  const newWeights = {
+    recency: clamp(currentWeights.recency + recencyNudge),
+    frequency: clamp(currentWeights.frequency + freqNudge),
+    graph: clamp(currentWeights.graph + graphNudge),
+    usefulness: clamp(currentWeights.usefulness + usefulnessNudge),
+  };
+
+  for (const key of Object.keys(newWeights) as Array<keyof typeof newWeights>) {
+    if (newWeights[key] !== currentWeights[key]) {
+      adjustments[key] = { old: currentWeights[key], new: newWeights[key] };
+    }
+  }
+
+  if (Object.keys(adjustments).length === 0) {
+    return {
+      adjusted: false,
+      reason: "No adjustments needed — signals balanced",
+      usefulCount: useful.length,
+      notUsefulCount: notUseful.length,
+      adjustments: {},
+      dry_run: dryRun,
+    };
+  }
+
+  if (!dryRun) {
+    const settingMap: Record<string, string> = {
+      recency: "scoring.recency_weight",
+      frequency: "scoring.frequency_weight",
+      graph: "scoring.graph_weight",
+      usefulness: "scoring.usefulness_weight",
+    };
+
+    for (const [key, { new: val }] of Object.entries(adjustments)) {
+      setSetting(db, settingMap[key], val.toString());
+    }
+  }
+
+  return {
+    adjusted: true,
+    usefulCount: useful.length,
+    notUsefulCount: notUseful.length,
+    adjustments,
+    dry_run: dryRun,
   };
 }

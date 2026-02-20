@@ -148,6 +148,32 @@ async function main() {
       );
       sections.push(`**Learned techniques:**\n${lines.join("\n")}`);
     }
+
+    // 5. Open threads — recent plan/todo/in-progress memories not yet resolved
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+
+    const openThreads = db
+      .prepare(
+        `SELECT DISTINCT m.id, m.content, m.created_at
+         FROM memories m
+         INNER JOIN memory_tags mt ON m.id = mt.memory_id
+         WHERE mt.tag IN ('plan', 'todo', 'next-steps', 'in-progress')
+           AND m.is_active = 1
+           AND m.superseded_by IS NULL
+           AND m.created_at >= ?
+         ORDER BY m.created_at DESC
+         LIMIT 3`
+      )
+      .all(fourteenDaysAgo);
+
+    if (openThreads.length > 0) {
+      const lines = openThreads.map(
+        (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
+      );
+      sections.push(`**Open threads:**\n${lines.join("\n")}`);
+    }
   } catch {
     // Query failures are non-critical — just skip
   } finally {

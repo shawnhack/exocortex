@@ -18,7 +18,7 @@ export function getWeights(db: DatabaseSync): ScoringWeights {
     recency: parseFloat(getSetting(db, "scoring.recency_weight") ?? "0.20"),
     frequency: parseFloat(getSetting(db, "scoring.frequency_weight") ?? "0.10"),
     recencyDecay: parseFloat(getSetting(db, "scoring.recency_decay") ?? "0.05"),
-    graph: parseFloat(getSetting(db, "scoring.graph_weight") ?? "0"),
+    graph: parseFloat(getSetting(db, "scoring.graph_weight") ?? "0.10"),
     usefulness: parseFloat(getSetting(db, "scoring.usefulness_weight") ?? "0.05"),
   };
 }

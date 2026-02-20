@@ -66,6 +66,10 @@ All data stored in `~/.exocortex/` (DB + cached embedding models). Override mode
 - Retrieval feedback loop: memories track `useful_count` — incremented when a memory retrieved by search is later accessed via `memory_get` within 5 minutes (implicit signal), or explicitly via `memory_feedback` tool. Usefulness factors into hybrid scoring with configurable weight (`scoring.usefulness_weight`, default 0.05). Scoring function: `min(1.0, log(1 + count) / log(6))` — saturates at 5 signals
 - Store-time relation discovery: when `memory_store` creates a memory, scans 200 recent memories by embedding cosine similarity and auto-links those with similarity >= 0.75 (max 5 links, type "related", strength = similarity score)
 - Temporal evolution query: `memory_timeline` supports `mode: "evolution"` with required `topic` parameter — searches memories matching the topic, sorts chronologically, enriches with supersession chains and cross-reference links to show how knowledge evolved over time
+- Graph-aware retrieval: memory-link proximity boosts search results linked to top candidates (1-hop via MemoryLinkStore). Default graph weight: 0.10. Entity-graph proximity also factors in when entities are found in query
+- Multi-hop context loading: `memory_search` and `memory_context` append up to 3 linked memories (1-hop) after main results in a "Linked" section. Linked memories also get implicit usefulness tracking
+- Adaptive scoring weights: `tuneWeights()` in maintenance.ts analyzes useful vs not-useful memories, nudges weights (±0.02/cycle, bounds [0.02, 0.40]) based on property correlations (recency, frequency, graph links, usefulness). Exposed via `memory_maintenance` with `tune_weights: true`
+- Open threads: session-orient hook surfaces recent memories tagged plan/todo/next-steps/in-progress (14 days, not superseded) as "Open threads" section
 - Memories are stored with ULID IDs, importance scores, tags, and content types
 - `memory_ingest` splits markdown files by `##` headers, deduplicates by `source_uri`, supports glob patterns
 - Fact-type tags (`decision`, `discovery`, `architecture`, `learning`) render with distinct colors in memory cards

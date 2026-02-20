@@ -177,7 +177,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "auto_tagging.enabled": "true",
   "trash.auto_purge_days": "30",
   "search.query_expansion": "false",
-  "scoring.graph_weight": "0",
+  "scoring.graph_weight": "0.10",
   "scoring.usefulness_weight": "0.05",
 };
 
