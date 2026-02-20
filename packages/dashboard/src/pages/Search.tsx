@@ -269,6 +269,7 @@ export function Search() {
       {/* Enhanced Filters */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
         <button
+          data-testid="search-filters-toggle"
           className="btn-ghost btn-sm"
           onClick={() => setShowFilters(!showFilters)}
           style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
@@ -314,6 +315,7 @@ export function Search() {
               Content Type
             </div>
             <select
+              data-testid="search-filter-content-type"
               value={filterContentType}
               onChange={(e) => setFilterParam("content_type", e.target.value)}
               style={{ padding: "6px 10px", fontSize: 12 }}

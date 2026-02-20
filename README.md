@@ -264,11 +264,11 @@ POST   /api/memories/:id/restore — Restore an archived memory
 ### Entities
 
 ```
-GET    /api/entities            — List entities (filter by type or tags)
+GET    /api/entities            — List entities (filter by tags; optional type for manually classified entities)
 POST   /api/entities            — Create entity
 GET    /api/entities/tags       — List all distinct entity tags
 GET    /api/entities/:id        — Get by ID
-PATCH  /api/entities/:id        — Update (name, type, aliases, tags)
+PATCH  /api/entities/:id        — Update (name, aliases, tags, optional manual type)
 DELETE /api/entities/:id        — Delete
 GET    /api/entities/:id/memories       — Linked memories
 GET    /api/entities/:id/relationships  — Entity relationships
@@ -384,32 +384,36 @@ Timeline view of memories grouped by date, with statistics: total active days, a
 
 ## Automatic Enrichment
 
-Every memory stored goes through three enrichment steps (all non-blocking — failures don't prevent storage):
+Memory writes apply three enrichment behaviors. Extraction/tagging are non-blocking (failures don't prevent storage).
 
 ### Entity extraction
 
-Regex-based NER extracts five entity types from memory content (an optional LLM-based extractor is also available at `packages/core/src/entities/llm-extractor.ts`):
+Regex-based extraction scans memory content with keyword/context heuristics (an optional LLM-based extractor exists at `packages/core/src/entities/llm-extractor.ts`, but is not integrated by default).
 
-| Type | Examples | Confidence |
-|------|----------|------------|
-| Technology | React, TypeScript, PostgreSQL, Docker, AWS | 0.9 |
-| Organization | Google, Anthropic, OpenAI + suffix patterns (Inc, LLC, Labs) | 0.85 |
-| Person | Capitalized name pairs, attribution patterns ("by X", "X said") | 0.6–0.75 |
-| Project | "working on X", "building X", kebab-case package names | 0.5–0.65 |
-| Concept | "machine learning", "RAG", quoted terms | 0.4–0.8 |
+Automatic category assignment is disabled: extracted entities are stored as type `concept` by default. The `type` field is manual/editable metadata (API/dashboard), not an automatic classifier at ingest time.
 
 Entities are linked to memories with relevance scores and can be queried independently. Relationships include optional context phrases extracted from memory content (e.g. "uses -> for real-time event streaming").
 
 ### Auto-tagging
 
-Up to 5 tags generated per memory by matching against:
+When `auto_tagging.enabled = true`, up to 5 tags are generated per memory by matching against:
 1. **Tech keywords** — languages, frameworks, databases, tools, platforms
 2. **Topic patterns** — decision, bug, architecture, lesson, config, performance, deployment, testing, refactor, security
 3. **Project names** — kebab-case identifiers (filtered against a blocklist of common compounds)
 
+Generated tags are normalized through the alias map and merged with user-supplied tags (duplicates ignored).
+
 ### Deduplication
 
-New memories are compared against the 50 most recent active memories of the same content type. If cosine similarity exceeds 0.85 (configurable) and tags overlap, the old memory is superseded — marked inactive with `superseded_by` pointing to the new one.
+Dedup uses two checks:
+1. **Hash dedup** — compares against active root memories with the same `content_type` + `content_hash`
+2. **Semantic dedup** — for content >= 50 chars with an embedding available, compares against the most recent `dedup.candidate_pool` active root memories (default `200`) of the same content type
+
+Semantic dedup requires cosine similarity >= `dedup.similarity_threshold` (default `0.85`). If incoming tags are provided, at least one tag must overlap the candidate.
+
+Action on match depends on `dedup.skip_insert_on_match`:
+- `true` (default): skip insert, return existing memory (`dedup_action = "skipped"`)
+- `false`: insert new memory and supersede old one (`is_active = 0`, `superseded_by = new_id`)
 
 ---
 
@@ -473,7 +477,11 @@ All settings are stored in the `settings` table and can be changed via the REST 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `dedup.enabled` | `true` | Enable semantic deduplication |
-| `dedup.similarity_threshold` | `0.85` | Cosine similarity threshold for dedup |
+| `dedup.hash_enabled` | `true` | Enable hash-based deduplication by `content_type` + `content_hash` |
+| `dedup.similarity_threshold` | `0.85` | Cosine similarity threshold for semantic dedup |
+| `dedup.candidate_pool` | `200` | Number of recent active root memories scanned for semantic dedup |
+| `dedup.skip_insert_on_match` | `true` | Reuse existing memory on match instead of inserting + superseding |
+| `dedup.hash_normalize_whitespace` | `true` | Normalize whitespace before computing content hash |
 
 ### Chunking
 
@@ -552,11 +560,20 @@ pnpm build
 # Run all tests
 pnpm test
 
+# Run UI regression checks (layout + interaction flows on desktop/mobile)
+pnpm test:ui
+
 # Type-check
 pnpm lint
 
 # Dev server with watch mode
 pnpm dev
+```
+
+If this is your first Playwright run on the machine, install Chromium once:
+
+```bash
+pnpm exec playwright install chromium
 ```
 
 ---

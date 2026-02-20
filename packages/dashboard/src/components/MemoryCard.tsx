@@ -85,10 +85,13 @@ export function MemoryCard({
 
       {/* Content */}
       <div
+        data-testid="memory-card-content"
         style={{
           color: "#d0d0e0",
           lineHeight: 1.65,
           whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
           display: "-webkit-box",
           WebkitLineClamp: 4,
           WebkitBoxOrient: "vertical",
@@ -168,6 +171,8 @@ export function MemoryCard({
             marginLeft: "auto",
             fontFamily: "var(--font-mono)",
             letterSpacing: "0.02em",
+            overflowWrap: "anywhere",
+            wordBreak: "break-word",
           }}
         >
           {memory.content_type} / {memory.source}
@@ -238,6 +243,7 @@ export function MemoryCard({
   if (selectable) {
     return (
       <div
+        data-testid="memory-card"
         onClick={() => onToggle?.(memory.id)}
         style={cardStyle}
         onMouseEnter={handleMouseEnter}
@@ -274,6 +280,7 @@ export function MemoryCard({
 
   return (
     <Link
+      data-testid="memory-card"
       to={`/memory/${memory.id}`}
       style={cardStyle}
       onMouseEnter={handleMouseEnter}

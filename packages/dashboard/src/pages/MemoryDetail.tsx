@@ -214,40 +214,40 @@ export function MemoryDetail() {
         }}
       >
         {!isEditing && (
-          <button
-            onClick={startEditing}
-            style={{
-              position: "absolute",
-              top: 16,
-              right: 16,
-              background: "rgba(139, 92, 246, 0.15)",
-              color: "#8b5cf6",
-              border: "1px solid rgba(139, 92, 246, 0.3)",
-              borderRadius: 6,
-              padding: "5px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              transition: "all 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(139, 92, 246, 0.25)";
-              e.currentTarget.style.boxShadow = "0 0 12px rgba(139, 92, 246, 0.15)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(139, 92, 246, 0.15)";
-              e.currentTarget.style.boxShadow = "none";
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-            Edit
-          </button>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+            <button
+              data-testid="memory-edit-button"
+              onClick={startEditing}
+              style={{
+                background: "rgba(139, 92, 246, 0.15)",
+                color: "#8b5cf6",
+                border: "1px solid rgba(139, 92, 246, 0.3)",
+                borderRadius: 6,
+                padding: "5px 14px",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(139, 92, 246, 0.25)";
+                e.currentTarget.style.boxShadow = "0 0 12px rgba(139, 92, 246, 0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(139, 92, 246, 0.15)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              Edit
+            </button>
+          </div>
         )}
 
         {isEditing ? (
@@ -265,6 +265,7 @@ export function MemoryDetail() {
             </div>
 
             <textarea
+              data-testid="memory-edit-textarea"
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               style={{
@@ -336,6 +337,7 @@ export function MemoryDetail() {
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <input
+                  data-testid="memory-edit-tag-input"
                   type="text"
                   value={newTag}
                   onChange={(e) => setNewTag(e.target.value)}
@@ -438,6 +440,7 @@ export function MemoryDetail() {
             {/* Save / Cancel */}
             <div style={{ display: "flex", gap: 8, marginTop: 20, alignItems: "center" }}>
               <button
+                data-testid="memory-edit-save"
                 onClick={handleSave}
                 disabled={updateMutation.isPending}
                 style={{
@@ -464,6 +467,7 @@ export function MemoryDetail() {
                 {updateMutation.isPending ? "Saving..." : "Save"}
               </button>
               <button
+                data-testid="memory-edit-cancel"
                 onClick={() => setIsEditing(false)}
                 style={{
                   background: "transparent",
@@ -491,7 +495,16 @@ export function MemoryDetail() {
             </div>
           </div>
         ) : (
-          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.7, color: "#d0d0e0" }}>
+          <div
+            data-testid="memory-content"
+            style={{
+              whiteSpace: "pre-wrap",
+              lineHeight: 1.7,
+              color: "#d0d0e0",
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
+            }}
+          >
             {memory.content}
           </div>
         )}
@@ -559,10 +572,13 @@ export function MemoryDetail() {
                 {label}
               </div>
               <div
+                data-testid="memory-metadata-value"
                 style={{
                   fontSize: 13,
                   color: "#e8e8f4",
                   fontFamily: "var(--font-mono)",
+                  overflowWrap: "anywhere",
+                  wordBreak: "break-word",
                 }}
               >
                 {value}
@@ -594,7 +610,16 @@ export function MemoryDetail() {
             {Object.entries(memory.metadata).map(([key, value]) => (
               <div key={key}>
                 <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 2 }}>{key}</div>
-                <div style={{ fontSize: 13, color: "#e8e8f4", fontFamily: "var(--font-mono)" }}>
+                <div
+                  data-testid="memory-metadata-value"
+                  style={{
+                    fontSize: 13,
+                    color: "#e8e8f4",
+                    fontFamily: "var(--font-mono)",
+                    overflowWrap: "anywhere",
+                    wordBreak: "break-word",
+                  }}
+                >
                   {typeof value === "object" ? JSON.stringify(value) : String(value)}
                 </div>
               </div>
