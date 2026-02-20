@@ -8,7 +8,7 @@ Personal unified memory system — SQLite-backed, local-first, hybrid RAG retrie
 - Packages: `core`, `cli`, `server`, `mcp`, `dashboard`
 - DB: Node built-in SQLite (`node:sqlite`)
 - Embeddings: HuggingFace `all-MiniLM-L6-v2` (local, no API key)
-- Scoring: Reciprocal Rank Fusion (RRF) by default, fusing vector + FTS ranked lists with recency/frequency boost. Legacy weighted-average mode available via `scoring.use_rrf=false`.
+- Scoring: Reciprocal Rank Fusion (RRF) by default, fusing vector + FTS + graph ranked lists with recency/frequency/usefulness boost. Legacy weighted-average mode available via `scoring.use_rrf=false`.
 - Dashboard: React + Vite, Neural Interface theme
 - Tests: Vitest
 
@@ -27,7 +27,14 @@ The MCP server works with any MCP-compatible tool (Claude Code, Codex, Gemini, C
 claude mcp add --scope user exocortex node /path/to/exocortex/packages/mcp/dist/index.js
 ```
 
-**Codex CLI** (`~/.codex/config.json`) / **Gemini CLI** (`~/.gemini/settings.json`):
+**Codex CLI** (`~/.codex/config.toml`):
+```toml
+[mcp_servers.exocortex]
+command = "node"
+args = ["/path/to/exocortex/packages/mcp/dist/index.js"]
+```
+
+**Gemini CLI** (`~/.gemini/settings.json`):
 ```json
 { "mcpServers": { "exocortex": { "command": "node", "args": ["/path/to/exocortex/packages/mcp/dist/index.js"] } } }
 ```
@@ -69,6 +76,7 @@ All data stored in `~/.exocortex/` (DB + cached embedding models). Override mode
 - Graph-aware retrieval: memory-link proximity boosts search results linked to top candidates (1-hop via MemoryLinkStore). Default graph weight: 0.10. Entity-graph proximity also factors in when entities are found in query
 - Multi-hop context loading: `memory_search` and `memory_context` append up to 3 linked memories (1-hop) after main results in a "Linked" section. Linked memories also get implicit usefulness tracking
 - Adaptive scoring weights: `tuneWeights()` in maintenance.ts analyzes useful vs not-useful memories, nudges weights (±0.02/cycle, bounds [0.02, 0.40]) based on property correlations (recency, frequency, graph links, usefulness). Exposed via `memory_maintenance` with `tune_weights: true`
+- `memory_maintenance` optional flags: `reembed` (fill missing embeddings), `backfill_entities` (extract entities + relationships for unprocessed memories), `recalibrate` (normalize importance distribution), `densify_graph` (create co_occurs relationships between entities sharing memories), `build_co_retrieval_links` (build memory links from co-retrieval patterns), `tune_weights` (adaptive scoring weight adjustment). Always runs: importance adjustment, archival, health checks, search friction, dangling entity detection
 - Open threads: session-orient hook surfaces recent memories tagged plan/todo/next-steps/in-progress (14 days, not superseded) as "Open threads" section
 - Memories are stored with ULID IDs, importance scores, tags, and content types
 - `memory_ingest` splits markdown files by `##` headers, deduplicates by `source_uri`, supports glob patterns
@@ -82,5 +90,5 @@ All data stored in `~/.exocortex/` (DB + cached embedding models). Override mode
 - Dashboard is mobile-responsive (hamburger sidebar at <=768px) with a toast notification system replacing native `alert()`/`confirm()`
 - Auto-start: Windows scheduled task `ExocortexServer` starts the HTTP server at logon (30s delay, hidden window). Launcher files in `~/.exocortex/`: `start-server.vbs` → `start-server.ps1`. Log output: `~/.exocortex/server.log`
 - Automatic maintenance: importance adjustment + archival run on server startup (5s delay), after every 50 memory stores, and via nightly cron jobs. Database backup runs nightly at 1:30 AM (SQLite `VACUUM INTO`, rotates to `~/.exocortex/backups/`, keeps last `backup.max_count` copies, default 7). Consolidation + contradiction detection run nightly only (2:00 AM / 2:30 AM). Entity extraction runs nightly at 3:00 AM. Trash auto-purge runs nightly at 4:30 AM — permanently deletes memories in trash for more than `trash.auto_purge_days` (default 30). Set to `"0"` to disable. Superseded memories are preserved while their superseding target is still active.
-- Session orient hook (`packages/mcp/src/hooks/session-orient.js`) — fires on SessionStart, queries SQLite directly (no HTTP dependency) for recent project memories, active goals, and recent decisions. Outputs compact context via `additionalContext`. Registered in `~/.claude/settings.json` with 3s timeout. Detects project from CWD basename.
+- Session orient hook (`packages/mcp/src/hooks/session-orient.js`) — fires on SessionStart, queries SQLite directly (no HTTP dependency) for: (1) recent project memories (7 days, tag-filtered by CWD project name), (2) active goals with milestone progress, (3) recent decisions (30 days), (4) learned techniques (by importance), (5) open threads (plan/todo/in-progress memories from 14 days, not superseded). Outputs compact context via `additionalContext`. Registered in `~/.claude/settings.json` with 3s timeout.
 - Stop hook (`packages/mcp/src/hooks/stop.js`) is available but not enabled by default. Can be added to `~/.claude/settings.json` hooks if session summary reminders are desired.
