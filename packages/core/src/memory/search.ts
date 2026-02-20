@@ -101,32 +101,16 @@ export class MemorySearch {
     // Candidate pool: fetch enough rows for scoring, but cap proportionally
     const candidateLimit = Math.min(1000, Math.max(100, (offset + limit) * 10));
 
-    // Get filtered memories with rowid for FTS matching (avoids separate rowid query)
-    const rows = this.db
-      .prepare(
-        `SELECT m.*, m.rowid as _rowid FROM memories m WHERE ${whereClause} ORDER BY created_at DESC LIMIT ${candidateLimit}`
-      )
-      .all(...params) as unknown as (MemoryRow & { _rowid: number })[];
-
-    if (rows.length === 0) return [];
-
     // Query expansion via entity graph
     const expansion = this.expandQuery(query.query);
     const embeddingText = expansion ? expansion.expandedText : query.query;
     const ftsText = query.query;
     const extraFtsTerms = expansion ? expansion.expandedTerms : [];
 
-    // Get query embedding (use expanded text if available)
-    let queryEmbedding: Float32Array | null = null;
-    try {
-      const provider = await getEmbeddingProvider();
-      queryEmbedding = await provider.embed(embeddingText);
-    } catch {
-      // Fall back to FTS-only if embedding fails
-    }
-
-    // Get FTS matches (original query + expanded terms)
-    const ftsMatches = new Map<number, number>();
+    // Get FTS matches FIRST (so we can include them in candidate pool)
+    // Uses String() keys to avoid BigInt/Number mismatch from node:sqlite
+    const ftsMatches = new Map<string, number>();
+    const ftsRowids: number[] = [];
     try {
       let ftsQuery = this.sanitizeFtsQuery(ftsText);
       if (extraFtsTerms.length > 0) {
@@ -147,11 +131,59 @@ export class MemorySearch {
 
         for (const row of ftsRows) {
           // Invert: most negative (best) → 1.0, least negative → 0.0
-          ftsMatches.set(row.rowid, (maxRank - row.rank) / range);
+          ftsMatches.set(String(row.rowid), (maxRank - row.rank) / range);
+          ftsRowids.push(Number(row.rowid));
         }
       }
     } catch {
       // FTS query may fail on unusual input; continue with vector-only
+    }
+
+    // Build candidate pool: FTS matches + recent memories
+    // This ensures keyword-matched older memories are always included
+    let rows: (MemoryRow & { _rowid: number })[];
+
+    if (ftsRowids.length > 0) {
+      // Fetch FTS-matched rows that pass filters
+      const ftsPlaceholders = ftsRowids.map(() => "?").join(", ");
+      const ftsMatchRows = this.db
+        .prepare(
+          `SELECT m.*, m.rowid as _rowid FROM memories m WHERE ${whereClause} AND m.rowid IN (${ftsPlaceholders})`
+        )
+        .all(...params, ...ftsRowids) as unknown as (MemoryRow & { _rowid: number })[];
+
+      const ftsIds = new Set(ftsMatchRows.map((r) => r.id));
+
+      // Fill remaining pool with recent memories (excluding FTS matches)
+      const recentLimit = Math.max(0, candidateLimit - ftsMatchRows.length);
+      let recentRows: (MemoryRow & { _rowid: number })[] = [];
+      if (recentLimit > 0) {
+        recentRows = this.db
+          .prepare(
+            `SELECT m.*, m.rowid as _rowid FROM memories m WHERE ${whereClause} ORDER BY created_at DESC LIMIT ${recentLimit}`
+          )
+          .all(...params) as unknown as (MemoryRow & { _rowid: number })[];
+        recentRows = recentRows.filter((r) => !ftsIds.has(r.id));
+      }
+
+      rows = [...ftsMatchRows, ...recentRows];
+    } else {
+      rows = this.db
+        .prepare(
+          `SELECT m.*, m.rowid as _rowid FROM memories m WHERE ${whereClause} ORDER BY created_at DESC LIMIT ${candidateLimit}`
+        )
+        .all(...params) as unknown as (MemoryRow & { _rowid: number })[];
+    }
+
+    if (rows.length === 0) return [];
+
+    // Get query embedding (use expanded text if available)
+    let queryEmbedding: Float32Array | null = null;
+    try {
+      const provider = await getEmbeddingProvider();
+      queryEmbedding = await provider.embed(embeddingText);
+    } catch {
+      // Fall back to FTS-only if embedding fails
     }
 
     // Configurable min_score threshold (query param overrides setting)
@@ -212,7 +244,7 @@ export class MemorySearch {
         vectorScore = Math.max(0, cosineSimilarity(queryEmbedding, memEmbedding));
       }
 
-      const ftsScore = ftsMatches.get(row._rowid) ?? 0;
+      const ftsScore = ftsMatches.get(String(row._rowid)) ?? 0;
       const recency = recencyScore(row.created_at, weights.recencyDecay, row.importance);
       const freq = frequencyScore(row.access_count, maxAccessCount);
       const usefulness = usefulnessScore((row as any).useful_count ?? 0);
