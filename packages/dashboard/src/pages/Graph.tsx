@@ -268,25 +268,6 @@ export function Graph() {
     };
   }, [data]);
 
-  // Passive-false wheel listener
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const handler = (e: WheelEvent) => {
-      e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const zoom = e.deltaY > 0 ? 0.9 : 1.1;
-      const newScale = Math.max(0.2, Math.min(5, scaleRef.current * zoom));
-      panRef.current.x = mx - (mx - panRef.current.x) * (newScale / scaleRef.current);
-      panRef.current.y = my - (my - panRef.current.y) * (newScale / scaleRef.current);
-      scaleRef.current = newScale;
-    };
-    canvas.addEventListener("wheel", handler, { passive: false });
-    return () => canvas.removeEventListener("wheel", handler);
-  }, []);
-
   // Helper to restart animation on interaction
   const startAnimation = useCallback(() => {
     const canvas = canvasRef.current;
@@ -312,6 +293,21 @@ export function Graph() {
     return null;
   }, []);
 
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const canvas = e.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const zoom = e.deltaY > 0 ? 0.9 : 1.1;
+    const prevScale = scaleRef.current;
+    const newScale = Math.max(0.2, Math.min(5, prevScale * zoom));
+    panRef.current.x = mx - (mx - panRef.current.x) * (newScale / prevScale);
+    panRef.current.y = my - (my - panRef.current.y) * (newScale / prevScale);
+    scaleRef.current = newScale;
+    startAnimation();
+  }, [startAnimation]);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -326,6 +322,7 @@ export function Graph() {
     } else {
       isPanningRef.current = true;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
+      startAnimation();
     }
   }, [screenToWorld, findNode, startAnimation]);
 
@@ -340,15 +337,23 @@ export function Graph() {
       dragRef.current.node.y = y + dragRef.current.offsetY;
       dragRef.current.node.vx = 0;
       dragRef.current.node.vy = 0;
+      startAnimation();
     } else if (isPanningRef.current) {
       panRef.current.x += e.clientX - lastMouseRef.current.x;
       panRef.current.y += e.clientY - lastMouseRef.current.y;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
+      startAnimation();
     } else {
-      hoveredRef.current = findNode(x, y);
+      const nextHovered = findNode(x, y);
+      if (hoveredRef.current !== nextHovered) {
+        hoveredRef.current = nextHovered;
+        startAnimation();
+      } else {
+        hoveredRef.current = nextHovered;
+      }
       canvasRef.current!.style.cursor = hoveredRef.current ? "pointer" : "grab";
     }
-  }, [screenToWorld, findNode]);
+  }, [screenToWorld, findNode, startAnimation]);
 
   const handleMouseUp = useCallback(() => {
     dragRef.current = { node: null, offsetX: 0, offsetY: 0 };
@@ -428,6 +433,7 @@ export function Graph() {
         <canvas
           ref={canvasRef}
           style={{ width: "100%", height: "100%", cursor: "grab" }}
+          onWheel={handleWheel}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
