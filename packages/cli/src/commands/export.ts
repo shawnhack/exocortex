@@ -25,6 +25,12 @@ export function registerExport(program: Command): void {
       console.log(`  Memories: ${chalk.cyan(String(data.memories.length))}`);
       console.log(`  Entities: ${chalk.cyan(String(data.entities.length))}`);
       console.log(`  Entity links: ${chalk.cyan(String(data.memory_entities.length))}`);
+      if (data.goals) {
+        console.log(`  Goals: ${chalk.cyan(String(data.goals.length))}`);
+      }
+      if (data.memory_links) {
+        console.log(`  Memory links: ${chalk.cyan(String(data.memory_links.length))}`);
+      }
 
       if (opts.encrypt) {
         const { createInterface } = await import("node:readline");

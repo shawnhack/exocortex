@@ -1596,17 +1596,24 @@ server.tool(
   {
     id: z.string().describe("Goal ID"),
     title: z.string().optional().describe("New title"),
-    description: z.string().optional().describe("New description"),
+    description: z.string().nullable().optional().describe("New description"),
     status: z.enum(["active", "completed", "stalled", "abandoned"]).optional().describe("New status"),
     priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("New priority"),
-    deadline: z.string().optional().describe("New deadline (ISO date YYYY-MM-DD)"),
+    deadline: z.string().nullable().optional().describe("New deadline (ISO date YYYY-MM-DD)"),
     metadata: z.record(z.string(), z.any()).optional().describe("Merge metadata (set value to null to delete a key)"),
   },
   async (args) => {
     try {
       const { id, ...updates } = args;
 
-      if (!updates.title && !updates.description && !updates.status && !updates.priority && !updates.deadline && !updates.metadata) {
+      if (
+        updates.title === undefined &&
+        updates.description === undefined &&
+        updates.status === undefined &&
+        updates.priority === undefined &&
+        updates.deadline === undefined &&
+        updates.metadata === undefined
+      ) {
         return { content: [{ type: "text", text: "No update fields provided." }] };
       }
 

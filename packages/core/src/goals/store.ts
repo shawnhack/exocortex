@@ -130,6 +130,8 @@ export class GoalStore {
       if (input.status === "completed") {
         sets.push("completed_at = ?");
         params.push(now);
+      } else {
+        sets.push("completed_at = NULL");
       }
     }
 

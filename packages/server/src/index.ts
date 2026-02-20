@@ -16,10 +16,33 @@ import { startScheduler } from "./scheduler.js";
 import path from "node:path";
 import fs from "node:fs";
 
+function getAllowedCorsOrigins(): string[] {
+  const raw = process.env.EXOCORTEX_CORS_ORIGINS;
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+}
+
 export function createApp(): Hono {
   const app = new Hono();
 
-  app.use("*", cors());
+  const allowedCorsOrigins = getAllowedCorsOrigins();
+  if (allowedCorsOrigins.length > 0) {
+    const allowSet = new Set(allowedCorsOrigins);
+    app.use(
+      "*",
+      cors({
+        origin: (origin) => {
+          if (!origin) return undefined;
+          return allowSet.has(origin) ? origin : undefined;
+        },
+        allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allowHeaders: ["Content-Type", "Authorization", "X-Exocortex-Token"],
+      })
+    );
+  }
   app.use("*", errorHandler);
 
   app.route("/", healthRoutes);
@@ -79,7 +102,10 @@ export function createApp(): Hono {
   return app;
 }
 
-export function startServer(port = 3210): void {
+export function startServer(
+  port = 3210,
+  host = process.env.EXOCORTEX_HOST ?? "127.0.0.1"
+): void {
   const db = getDb();
   initializeSchema(db);
 
@@ -87,12 +113,13 @@ export function startServer(port = 3210): void {
 
   startScheduler();
 
-  console.log(`Exocortex server starting on http://localhost:${port}`);
+  console.log(`Exocortex server starting on http://${host}:${port}`);
 
   serve({
     fetch: app.fetch,
     port,
+    hostname: host,
   }, (info) => {
-    console.log(`Exocortex server listening on http://localhost:${info.port}`);
+    console.log(`Exocortex server listening on http://${host}:${info.port}`);
   });
 }

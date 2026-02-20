@@ -113,10 +113,10 @@ goals.patch("/api/goals/:id", async (c) => {
 
   const updated = store.update(id, {
     title: parsed.data.title,
-    description: parsed.data.description ?? undefined,
+    description: parsed.data.description,
     status: parsed.data.status,
     priority: parsed.data.priority,
-    deadline: parsed.data.deadline ?? undefined,
+    deadline: parsed.data.deadline,
     metadata: parsed.data.metadata,
   });
 

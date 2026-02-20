@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   initializeSchema,
   MemoryStore,
+  setSetting,
   setEmbeddingProvider,
   resetEmbeddingProvider,
 } from "@exocortex/core";
@@ -104,6 +105,30 @@ describe("MemoryStore", () => {
       const { memory: b } = await store.create({ content: "Second" });
       expect(a.id).not.toBe(b.id);
     });
+
+    it("does not deactivate an existing memory when a dedup-candidate insert fails", async () => {
+      setSetting(db, "dedup.enabled", "true");
+      setSetting(db, "dedup.similarity_threshold", "0.7");
+
+      const content =
+        "This is a sufficiently long memory content for dedup testing and should stay active.";
+      const { memory: first } = await store.create({ content });
+
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+
+      await expect(
+        store.create({
+          content,
+          metadata: circular,
+        })
+      ).rejects.toThrow();
+
+      const existing = await store.getById(first.id);
+      expect(existing).not.toBeNull();
+      expect(existing!.is_active).toBe(true);
+      expect(existing!.superseded_by).toBeNull();
+    });
   });
 
   describe("getById", () => {
@@ -188,6 +213,30 @@ describe("MemoryStore", () => {
       });
       expect(updated!.metadata).toEqual({ keep: true });
     });
+
+    it("dechunks a chunked parent when new content is short", async () => {
+      setSetting(db, "chunking.enabled", "true");
+      setSetting(db, "chunking.max_length", "30");
+      setSetting(db, "chunking.target_size", "10");
+
+      const { memory: parent } = await store.create({
+        content: "Sentence. ".repeat(200),
+      });
+
+      const childrenBefore = db
+        .prepare("SELECT COUNT(*) as count FROM memories WHERE parent_id = ?")
+        .get(parent.id) as { count: number };
+      expect(childrenBefore.count).toBeGreaterThan(0);
+
+      const updated = await store.update(parent.id, { content: "Short replacement" });
+      const childrenAfter = db
+        .prepare("SELECT COUNT(*) as count FROM memories WHERE parent_id = ?")
+        .get(parent.id) as { count: number };
+
+      expect(childrenAfter.count).toBe(0);
+      expect(updated).not.toBeNull();
+      expect(updated!.embedding).toBeInstanceOf(Float32Array);
+    });
   });
 
   describe("delete", () => {
@@ -202,6 +251,31 @@ describe("MemoryStore", () => {
     it("returns false for non-existent ID", async () => {
       const result = await store.delete("nonexistent");
       expect(result).toBe(false);
+    });
+
+    it("deletes child chunks when deleting a chunked parent", async () => {
+      setSetting(db, "chunking.enabled", "true");
+      setSetting(db, "chunking.max_length", "30");
+      setSetting(db, "chunking.target_size", "10");
+
+      const { memory: parent } = await store.create({
+        content: "Sentence. ".repeat(200),
+      });
+
+      const before = db
+        .prepare("SELECT COUNT(*) as count FROM memories WHERE parent_id = ?")
+        .get(parent.id) as { count: number };
+      expect(before.count).toBeGreaterThan(0);
+
+      const deleted = await store.delete(parent.id);
+      expect(deleted).toBe(true);
+
+      const afterChildren = db
+        .prepare("SELECT COUNT(*) as count FROM memories WHERE parent_id = ?")
+        .get(parent.id) as { count: number };
+      const afterParent = await store.getById(parent.id);
+      expect(afterChildren.count).toBe(0);
+      expect(afterParent).toBeNull();
     });
   });
 

@@ -44,6 +44,45 @@ export interface BackupData {
     entity_id: string;
     relevance: number;
   }>;
+  goals?: Array<{
+    id: string;
+    title: string;
+    description: string | null;
+    status: string;
+    priority: string;
+    deadline: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+    completed_at: string | null;
+  }>;
+  memory_links?: Array<{
+    source_id: string;
+    target_id: string;
+    link_type: string;
+    strength: number;
+    created_at: string;
+  }>;
+  entity_relationships?: Array<{
+    id: string;
+    source_entity_id: string;
+    target_entity_id: string;
+    relationship: string;
+    confidence: number;
+    memory_id: string | null;
+    context: string | null;
+    created_at: string;
+  }>;
+  contradictions?: Array<{
+    id: string;
+    memory_a_id: string;
+    memory_b_id: string;
+    description: string;
+    status: string;
+    resolution: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
   settings: Record<string, string>;
 }
 
@@ -111,6 +150,70 @@ export function exportData(db: DatabaseSync): BackupData {
     relevance: number;
   }>;
 
+  const goals = db
+    .prepare(
+      "SELECT id, title, description, status, priority, deadline, metadata, created_at, updated_at, completed_at FROM goals ORDER BY created_at ASC"
+    )
+    .all() as unknown as Array<{
+    id: string;
+    title: string;
+    description: string | null;
+    status: string;
+    priority: string;
+    deadline: string | null;
+    metadata: string;
+    created_at: string;
+    updated_at: string;
+    completed_at: string | null;
+  }>;
+
+  const parsedGoals = goals.map((g) => ({
+    ...g,
+    metadata: JSON.parse(g.metadata),
+  }));
+
+  const memoryLinks = db
+    .prepare(
+      "SELECT source_id, target_id, link_type, strength, created_at FROM memory_links ORDER BY created_at ASC"
+    )
+    .all() as unknown as Array<{
+    source_id: string;
+    target_id: string;
+    link_type: string;
+    strength: number;
+    created_at: string;
+  }>;
+
+  const entityRelationships = db
+    .prepare(
+      "SELECT id, source_entity_id, target_entity_id, relationship, confidence, memory_id, context, created_at FROM entity_relationships ORDER BY created_at ASC"
+    )
+    .all() as unknown as Array<{
+    id: string;
+    source_entity_id: string;
+    target_entity_id: string;
+    relationship: string;
+    confidence: number;
+    memory_id: string | null;
+    context: string | null;
+    created_at: string;
+  }>;
+
+  const contradictions = db
+    .prepare(
+      "SELECT id, memory_a_id, memory_b_id, description, status, resolution, created_at, updated_at FROM contradictions ORDER BY created_at ASC"
+    )
+    .all() as unknown as Array<{
+    id: string;
+    memory_a_id: string;
+    memory_b_id: string;
+    description: string;
+    status: string;
+    resolution: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+
   const settingsRows = db
     .prepare("SELECT key, value FROM settings")
     .all() as Array<{ key: string; value: string }>;
@@ -125,6 +228,10 @@ export function exportData(db: DatabaseSync): BackupData {
     memories: memoriesWithTags,
     entities: parsedEntities,
     memory_entities: memoryEntities,
+    goals: parsedGoals,
+    memory_links: memoryLinks,
+    entity_relationships: entityRelationships,
+    contradictions,
     settings,
   };
 }
@@ -246,6 +353,89 @@ export function importData(db: DatabaseSync, data: BackupData): {
       const result = insertLink.run(link.memory_id, link.entity_id, link.relevance);
       if ((result as { changes: number }).changes > 0) {
         linksImported++;
+      }
+    }
+
+    // Import goals
+    if (data.goals && data.goals.length > 0) {
+      const insertGoal = db.prepare(
+        `INSERT OR IGNORE INTO goals
+         (id, title, description, status, priority, deadline, metadata, created_at, updated_at, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const goal of data.goals) {
+        insertGoal.run(
+          goal.id,
+          goal.title,
+          goal.description,
+          goal.status,
+          goal.priority,
+          goal.deadline,
+          JSON.stringify(goal.metadata ?? {}),
+          goal.created_at,
+          goal.updated_at,
+          goal.completed_at
+        );
+      }
+    }
+
+    // Import memory links
+    if (data.memory_links && data.memory_links.length > 0) {
+      const insertMemoryLink = db.prepare(
+        `INSERT OR IGNORE INTO memory_links
+         (source_id, target_id, link_type, strength, created_at)
+         VALUES (?, ?, ?, ?, ?)`
+      );
+      for (const link of data.memory_links) {
+        insertMemoryLink.run(
+          link.source_id,
+          link.target_id,
+          link.link_type,
+          link.strength,
+          link.created_at
+        );
+      }
+    }
+
+    // Import entity relationships
+    if (data.entity_relationships && data.entity_relationships.length > 0) {
+      const insertEntityRel = db.prepare(
+        `INSERT OR IGNORE INTO entity_relationships
+         (id, source_entity_id, target_entity_id, relationship, confidence, memory_id, context, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const rel of data.entity_relationships) {
+        insertEntityRel.run(
+          rel.id,
+          rel.source_entity_id,
+          rel.target_entity_id,
+          rel.relationship,
+          rel.confidence,
+          rel.memory_id,
+          rel.context,
+          rel.created_at
+        );
+      }
+    }
+
+    // Import contradictions
+    if (data.contradictions && data.contradictions.length > 0) {
+      const insertContradiction = db.prepare(
+        `INSERT OR IGNORE INTO contradictions
+         (id, memory_a_id, memory_b_id, description, status, resolution, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const contradiction of data.contradictions) {
+        insertContradiction.run(
+          contradiction.id,
+          contradiction.memory_a_id,
+          contradiction.memory_b_id,
+          contradiction.description,
+          contradiction.status,
+          contradiction.resolution,
+          contradiction.created_at,
+          contradiction.updated_at
+        );
       }
     }
 

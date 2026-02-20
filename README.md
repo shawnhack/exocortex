@@ -228,14 +228,14 @@ pnpm exec exo <command> [options]
 |---------|-------------|
 | `add <content>` | Add a new memory. Options: `-t/--tags`, `-i/--importance`, `--type`, `--source` |
 | `search <query>` | Hybrid retrieval search. Options: `-l/--limit`, `--after`, `--before`, `-t/--tags`, `--type`, `-v/--verbose` |
-| `import <file>` | Import from file. Options: `-f/--format` (json\|markdown\|chatexport), `--dry-run`, `-d/--decrypt` |
+| `import <file>` | Import from file. Options: `-f/--format` (json\|markdown\|chatexport), `--dry-run`, `-d/--decrypt`. Structured Exocortex backup JSON is auto-detected and restored directly. |
 | `stats` | Show memory statistics — counts, breakdowns by type/source, date range |
-| `serve` | Start HTTP server + dashboard. Options: `-p/--port` (default 3210) |
+| `serve` | Start HTTP server + dashboard. Options: `-p/--port` (default 3210), `-H/--host` (default 127.0.0.1) |
 | `mcp` | Start MCP server on stdio |
 | `consolidate` | Find and merge similar memories. Options: `--dry-run`, `--similarity`, `--min-size`, `--history` |
 | `entities` | List and manage entities. Options: `--type`, `--search`, `--memories` |
 | `contradictions` | View and manage contradictions. Options: `--status`, `--detect`, `--resolve <id>`, `--dismiss <id>` |
-| `export` | Export all data as JSON backup |
+| `export` | Export JSON backup (memories, entities, goals, links, settings) |
 
 ---
 
@@ -300,11 +300,15 @@ GET    /api/temporal-stats      — Temporal analysis (streaks, averages)
 ### Data
 
 ```
-GET    /api/export              — Export all data as JSON
+GET    /api/export              — Export JSON backup (memories, entities, goals, links, settings)
 GET    /api/stats               — Memory statistics
 GET    /api/settings            — Get all settings (API keys masked)
 PATCH  /api/settings            — Update settings (masked values skipped)
 ```
+
+Server security defaults:
+- Binds to `127.0.0.1` by default.
+- CORS is disabled by default. To allow browser cross-origin access, set `EXOCORTEX_CORS_ORIGINS` (comma-separated exact origins).
 
 ---
 

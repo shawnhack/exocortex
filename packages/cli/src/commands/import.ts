@@ -17,6 +17,26 @@ interface JsonMemory {
   tags?: string[];
 }
 
+function isBackupData(value: unknown): value is {
+  version: 1;
+  exported_at?: string;
+  memories: unknown[];
+  entities: unknown[];
+  memory_entities: unknown[];
+  settings: Record<string, string>;
+} {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    v.version === 1 &&
+    Array.isArray(v.memories) &&
+    Array.isArray(v.entities) &&
+    Array.isArray(v.memory_entities) &&
+    typeof v.settings === "object" &&
+    v.settings !== null
+  );
+}
+
 export function registerImport(program: Command): void {
   program
     .command("import <file>")
@@ -79,6 +99,35 @@ export function registerImport(program: Command): void {
 
       if (opts.format === "json") {
         const parsed = JSON.parse(raw);
+
+        if (isBackupData(parsed)) {
+          const db = getDb();
+          initializeSchema(db);
+
+          console.log(chalk.bold("\nImporting structured Exocortex backup...\n"));
+          if (parsed.exported_at) {
+            console.log(`  Backup date: ${chalk.dim(parsed.exported_at)}`);
+          }
+          console.log(`  Memories: ${parsed.memories.length}`);
+          console.log(`  Entities: ${parsed.entities.length}`);
+          if (Array.isArray((parsed as any).goals)) {
+            console.log(`  Goals: ${(parsed as any).goals.length}`);
+          }
+
+          if (opts.dryRun) {
+            console.log(chalk.yellow("\n  Dry run — no changes made."));
+            return;
+          }
+
+          const result = importData(db, parsed);
+          console.log(
+            chalk.green(
+              `\n  Restored: ${result.memories} memories, ${result.entities} entities, ${result.links} links`
+            )
+          );
+          return;
+        }
+
         items = Array.isArray(parsed) ? parsed : [parsed];
       } else if (opts.format === "markdown") {
         // Split markdown by ## headers or --- separators
@@ -96,9 +145,31 @@ export function registerImport(program: Command): void {
         }));
       }
 
+      const normalized: JsonMemory[] = [];
+      let invalid = 0;
+      for (const item of items) {
+        if (
+          item &&
+          typeof item.content === "string" &&
+          item.content.trim().length > 0
+        ) {
+          normalized.push(item);
+        } else {
+          invalid++;
+        }
+      }
+      items = normalized;
+
       console.log(
         `Found ${chalk.bold(String(items.length))} memories to import.`
       );
+      if (invalid > 0) {
+        console.log(
+          chalk.yellow(
+            `Skipped ${invalid} invalid item(s) with missing or empty content.`
+          )
+        );
+      }
 
       if (opts.dryRun) {
         for (const item of items.slice(0, 5)) {

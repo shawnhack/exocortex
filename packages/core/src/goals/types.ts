@@ -24,10 +24,10 @@ export interface CreateGoalInput {
 
 export interface UpdateGoalInput {
   title?: string;
-  description?: string;
+  description?: string | null;
   status?: GoalStatus;
   priority?: GoalPriority;
-  deadline?: string;
+  deadline?: string | null;
   metadata?: Record<string, unknown>;
 }
 

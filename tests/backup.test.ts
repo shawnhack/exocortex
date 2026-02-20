@@ -12,6 +12,8 @@ import {
   backupDatabase,
   MemoryStore,
   EntityStore,
+  GoalStore,
+  MemoryLinkStore,
 } from "@exocortex/core";
 import { setEmbeddingProvider, resetEmbeddingProvider } from "@exocortex/core";
 import type { DatabaseSync, BackupData } from "@exocortex/core";
@@ -157,6 +159,47 @@ describe("Backup Import", () => {
     const second = db.prepare("SELECT COUNT(*) as count FROM memories").get() as { count: number };
 
     expect(second.count).toBe(first.count);
+  });
+
+  it("restores goals (including milestones) and memory links", async () => {
+    const goalStore = new GoalStore(db);
+    const goal = goalStore.create({
+      title: "Ship backup parity",
+      description: "Ensure backup/import restores goals",
+    });
+    goalStore.addMilestone(goal.id, { title: "Add backup coverage" });
+
+    const first = await store.create({ content: "Link source" });
+    const second = await store.create({ content: "Link target" });
+    const linkStore = new MemoryLinkStore(db);
+    linkStore.link(first.memory.id, second.memory.id, "related", 0.8);
+
+    const data = exportData(db);
+    expect(data.goals?.length ?? 0).toBeGreaterThanOrEqual(1);
+    expect(data.memory_links?.length ?? 0).toBeGreaterThanOrEqual(1);
+
+    const db2 = getDbForTesting();
+    initializeSchema(db2);
+    importData(db2, data);
+
+    const goals = db2
+      .prepare("SELECT COUNT(*) as count FROM goals")
+      .get() as { count: number };
+    const links = db2
+      .prepare("SELECT COUNT(*) as count FROM memory_links")
+      .get() as { count: number };
+    const restoredGoal = db2
+      .prepare("SELECT metadata FROM goals WHERE id = ?")
+      .get(goal.id) as { metadata: string } | undefined;
+
+    expect(goals.count).toBeGreaterThanOrEqual(1);
+    expect(links.count).toBeGreaterThanOrEqual(1);
+    expect(restoredGoal).toBeTruthy();
+    expect(
+      ((JSON.parse(restoredGoal!.metadata).milestones as Array<unknown>) ?? []).length
+    ).toBe(1);
+
+    db2.close();
   });
 });
 

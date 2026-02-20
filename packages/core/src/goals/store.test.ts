@@ -108,6 +108,32 @@ describe("GoalStore", () => {
       expect(completed!.status).toBe("completed");
     });
 
+    it("should clear completed_at when reopening a completed goal", () => {
+      const goal = store.create({ title: "Goal" });
+      const completed = store.update(goal.id, { status: "completed" });
+      expect(completed!.completed_at).not.toBeNull();
+
+      const reopened = store.update(goal.id, { status: "active" });
+      expect(reopened!.status).toBe("active");
+      expect(reopened!.completed_at).toBeNull();
+    });
+
+    it("should allow clearing nullable fields", () => {
+      const goal = store.create({
+        title: "Goal",
+        description: "temporary",
+        deadline: "2026-12-31",
+      });
+
+      const updated = store.update(goal.id, {
+        description: null,
+        deadline: null,
+      });
+
+      expect(updated!.description).toBeNull();
+      expect(updated!.deadline).toBeNull();
+    });
+
     it("should merge metadata", () => {
       const goal = store.create({
         title: "Goal",

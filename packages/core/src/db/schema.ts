@@ -16,7 +16,7 @@ const CREATE_TABLES = `
       CHECK(importance >= 0 AND importance <= 1),
     access_count INTEGER NOT NULL DEFAULT 0,
     last_accessed_at TEXT,
-    parent_id TEXT REFERENCES memories(id) ON DELETE SET NULL,
+    parent_id TEXT REFERENCES memories(id) ON DELETE CASCADE,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -332,6 +332,13 @@ export function initializeSchema(db: DatabaseSync): void {
     db.exec(CREATE_FTS_TRIGGERS_WITH_KEYWORDS);
     db.exec("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')");
   }
+
+  // Legacy cleanup: older schemas used ON DELETE SET NULL for parent_id, which
+  // could leave orphaned chunk rows (chunk_index set, parent_id null) after
+  // parent deletion. Remove those stale rows once at startup.
+  db.prepare(
+    "DELETE FROM memories WHERE chunk_index IS NOT NULL AND parent_id IS NULL"
+  ).run();
 
   initializedDbs.add(db);
 }

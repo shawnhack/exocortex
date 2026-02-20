@@ -82,11 +82,13 @@ export class MemoryStore {
       // Embedding may fail on first run while model downloads; store without
     }
 
-    // Dedup check: find and supersede semantically similar memory
+    // Dedup check: find semantically similar existing memory.
+    // Actual supersede update happens inside the insert transaction so
+    // dedup cannot deactivate data if the insert later fails.
     let dedupInfo: { superseded_id: string; similarity: number } | null = null;
     if (embeddingFloat && !input.parent_id) {
       try {
-        dedupInfo = this.findAndSupersede(id, input, embeddingFloat);
+        dedupInfo = this.findDedupCandidate(input, embeddingFloat);
       } catch {
         // Dedup is non-critical
       }
@@ -120,6 +122,20 @@ export class MemoryStore {
       if (input.tags) {
         for (const tag of input.tags) {
           insertTag.run(id, tag.toLowerCase().trim());
+        }
+      }
+
+      if (dedupInfo) {
+        const dedupUpdate = this.db.prepare(
+          "UPDATE memories SET is_active = 0, superseded_by = ?, updated_at = ? WHERE id = ? AND is_active = 1"
+        );
+        const dedupResult = dedupUpdate.run(
+          id,
+          now,
+          dedupInfo.superseded_id
+        ) as { changes: number };
+        if (dedupResult.changes === 0) {
+          dedupInfo = null;
         }
       }
       this.db.exec("COMMIT");
@@ -214,12 +230,11 @@ export class MemoryStore {
   }
 
   /**
-   * Find and supersede a semantically similar existing memory.
-   * Marks the old memory as inactive with superseded_by pointing to the new ID.
-   * Returns dedup info if a memory was superseded.
+   * Find a semantically similar existing memory candidate for superseding.
+   * Returns dedup info when a candidate is found; caller performs the
+   * supersede update transactionally with the new insert.
    */
-  private findAndSupersede(
-    newId: string,
+  private findDedupCandidate(
     input: CreateMemoryInput,
     newEmbedding: Float32Array
   ): { superseded_id: string; similarity: number } | null {
@@ -268,13 +283,6 @@ export class MemoryStore {
           if (!hasOverlap) continue;
         }
 
-        // Supersede: deactivate old memory
-        const now = new Date().toISOString().replace("T", " ").replace("Z", "");
-        this.db
-          .prepare(
-            "UPDATE memories SET is_active = 0, superseded_by = ?, updated_at = ? WHERE id = ?"
-          )
-          .run(newId, now, candidate.id);
         return { superseded_id: candidate.id, similarity };
       }
     }
@@ -529,6 +537,9 @@ export class MemoryStore {
     const now = new Date().toISOString().replace("T", " ").replace("Z", "");
     const sets: string[] = ["updated_at = ?"];
     const params: (string | number | Uint8Array | null)[] = [now];
+    let replaceChunksContent: string | null = null;
+    let shouldReplaceChunks = false;
+    let shouldDeleteExistingChunks = false;
 
     if (input.content !== undefined) {
       const stripped = stripPrivateContent(input.content);
@@ -538,14 +549,61 @@ export class MemoryStore {
       sets.push("content = ?");
       params.push(stripped);
 
-      // Re-embed on content change
-      try {
-        const provider = await getEmbeddingProvider();
-        const embedding = await provider.embed(stripped);
-        sets.push("embedding = ?");
-        params.push(new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength));
-      } catch {
-        // Skip re-embedding on failure
+      const hasChildren = Boolean(
+        this.db
+          .prepare("SELECT 1 FROM memories WHERE parent_id = ? LIMIT 1")
+          .get(id)
+      );
+      const isChunkParent = existing.parent_id === null && hasChildren;
+
+      if (isChunkParent) {
+        shouldDeleteExistingChunks = true;
+
+        const chunkingEnabled = getSetting(this.db, "chunking.enabled") !== "false";
+        const maxLength = parseInt(
+          getSetting(this.db, "chunking.max_length") ?? "1500",
+          10
+        );
+
+        if (chunkingEnabled && stripped.length > maxLength) {
+          shouldReplaceChunks = true;
+          replaceChunksContent = stripped;
+          // Parent rows in chunked mode keep no embedding.
+          sets.push("embedding = ?");
+          params.push(null);
+        } else {
+          // Dechunk: short content should live only on parent.
+          try {
+            const provider = await getEmbeddingProvider();
+            const embedding = await provider.embed(stripped);
+            sets.push("embedding = ?");
+            params.push(
+              new Uint8Array(
+                embedding.buffer,
+                embedding.byteOffset,
+                embedding.byteLength
+              )
+            );
+          } catch {
+            // Skip re-embedding on failure
+          }
+        }
+      } else {
+        // Re-embed on content change
+        try {
+          const provider = await getEmbeddingProvider();
+          const embedding = await provider.embed(stripped);
+          sets.push("embedding = ?");
+          params.push(
+            new Uint8Array(
+              embedding.buffer,
+              embedding.byteOffset,
+              embedding.byteLength
+            )
+          );
+        } catch {
+          // Skip re-embedding on failure
+        }
       }
     }
 
@@ -602,6 +660,83 @@ export class MemoryStore {
           insertTag.run(id, tag.toLowerCase().trim());
         }
       }
+
+      if (shouldDeleteExistingChunks) {
+        this.db
+          .prepare("DELETE FROM memories WHERE parent_id = ?")
+          .run(id);
+      }
+
+      if (shouldReplaceChunks && replaceChunksContent !== null) {
+        const targetSize = parseInt(
+          getSetting(this.db, "chunking.target_size") ?? "500",
+          10
+        );
+        const chunks = splitIntoChunks(replaceChunksContent, { targetSize });
+        const parentRow = this.db
+          .prepare(
+            "SELECT content_type, source, source_uri, importance, metadata FROM memories WHERE id = ?"
+          )
+          .get(id) as
+          | {
+              content_type: string;
+              source: string;
+              source_uri: string | null;
+              importance: number;
+              metadata: string | null;
+            }
+          | undefined;
+
+        if (parentRow) {
+          const parentTags = this.db
+            .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
+            .all(id) as Array<{ tag: string }>;
+
+          const insertChunk = this.db.prepare(`
+            INSERT INTO memories (id, content, content_type, source, source_uri, embedding, importance, parent_id, chunk_index, metadata, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+          const insertTag = this.db.prepare(
+            "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
+          );
+
+          for (let i = 0; i < chunks.length; i++) {
+            const chunkId = ulid();
+            let chunkEmbeddingBlob: Uint8Array | null = null;
+
+            try {
+              const provider = await getEmbeddingProvider();
+              const embedding = await provider.embed(chunks[i]);
+              chunkEmbeddingBlob = new Uint8Array(
+                embedding.buffer,
+                embedding.byteOffset,
+                embedding.byteLength
+              );
+            } catch {
+              // Keep chunk even if embedding generation fails.
+            }
+
+            insertChunk.run(
+              chunkId,
+              chunks[i],
+              parentRow.content_type,
+              parentRow.source,
+              parentRow.source_uri,
+              chunkEmbeddingBlob,
+              parentRow.importance,
+              id,
+              i,
+              parentRow.metadata,
+              now,
+              now
+            );
+
+            for (const tag of parentTags) {
+              insertTag.run(chunkId, tag.tag);
+            }
+          }
+        }
+      }
       this.db.exec("COMMIT");
     } catch (err) {
       this.db.exec("ROLLBACK");
@@ -641,10 +776,27 @@ export class MemoryStore {
   }
 
   async delete(id: string): Promise<boolean> {
-    const result = this.db
-      .prepare("DELETE FROM memories WHERE id = ?")
-      .run(id);
-    return (result as { changes: number }).changes > 0;
+    const existing = this.db
+      .prepare("SELECT id FROM memories WHERE id = ?")
+      .get(id) as { id: string } | undefined;
+    if (!existing) return false;
+
+    this.db.exec("BEGIN");
+    try {
+      // Explicitly delete child chunks first. parent_id uses ON DELETE SET NULL
+      // in existing schemas, so parent delete alone would orphan chunks.
+      this.db
+        .prepare("DELETE FROM memories WHERE parent_id = ?")
+        .run(id);
+      this.db
+        .prepare("DELETE FROM memories WHERE id = ?")
+        .run(id);
+      this.db.exec("COMMIT");
+      return true;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   async getArchived(limit = 20, offset = 0): Promise<Memory[]> {
