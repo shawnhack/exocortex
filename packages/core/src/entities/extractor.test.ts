@@ -7,7 +7,7 @@ describe("extractRelationships", () => {
     { name: "Exocortex", type: "project", confidence: 0.9 },
     { name: "SQLite", type: "technology", confidence: 0.9 },
     { name: "React", type: "technology", confidence: 0.9 },
-    { name: "Shawn", type: "person", confidence: 0.75 },
+    { name: "Alice", type: "person", confidence: 0.75 },
     { name: "Anthropic", type: "organization", confidence: 0.85 },
   ];
 
@@ -27,15 +27,15 @@ describe("extractRelationships", () => {
   });
 
   it("extracts 'works_at' relationships", () => {
-    const text = "Shawn works at Anthropic on AI tools.";
+    const text = "Alice works at Anthropic on AI tools.";
     const rels = extractRelationships(text, entities);
-    expect(rels.some((r) => r.relationship === "works_at" && r.source === "Shawn" && r.target === "Anthropic")).toBe(true);
+    expect(rels.some((r) => r.relationship === "works_at" && r.source === "Alice" && r.target === "Anthropic")).toBe(true);
   });
 
   it("extracts 'created' relationships", () => {
-    const text = "Shawn created Exocortex as a memory system.";
+    const text = "Alice created Exocortex as a memory system.";
     const rels = extractRelationships(text, entities);
-    expect(rels.some((r) => r.relationship === "created" && r.source === "Shawn" && r.target === "Exocortex")).toBe(true);
+    expect(rels.some((r) => r.relationship === "created" && r.source === "Alice" && r.target === "Exocortex")).toBe(true);
   });
 
   it("extracts 'replaces' relationships", () => {

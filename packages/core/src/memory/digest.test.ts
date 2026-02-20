@@ -84,9 +84,9 @@ describe("digestTranscript", () => {
 
   it("detects project from file paths", async () => {
     const p = tmpFile([
-      assistantEntry([toolUse("Edit", { file_path: "D:/Apps/myproject/src/a.ts", old_string: "a", new_string: "b" })]),
-      assistantEntry([toolUse("Edit", { file_path: "D:/Apps/myproject/src/b.ts", old_string: "c", new_string: "d" })]),
-      assistantEntry([toolUse("Write", { file_path: "D:/Apps/myproject/README.md", content: "x" })]),
+      assistantEntry([toolUse("Edit", { file_path: "/home/user/myproject/src/a.ts", old_string: "a", new_string: "b" })]),
+      assistantEntry([toolUse("Edit", { file_path: "/home/user/myproject/src/b.ts", old_string: "c", new_string: "d" })]),
+      assistantEntry([toolUse("Write", { file_path: "/home/user/myproject/README.md", content: "x" })]),
     ]);
     files.push(p);
 
