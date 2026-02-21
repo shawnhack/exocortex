@@ -22,6 +22,12 @@ export interface Memory {
   content_type: string;
   source: string;
   source_uri: string | null;
+  provider: string | null;
+  model_id: string | null;
+  model_name: string | null;
+  agent: string | null;
+  session_id: string | null;
+  conversation_id: string | null;
   importance: number;
   access_count: number;
   last_accessed_at: string | null;
@@ -157,6 +163,14 @@ export const api = {
     content_type?: string;
     tags?: string[];
     importance?: number;
+    source_uri?: string;
+    provider?: string;
+    model_id?: string;
+    model_name?: string;
+    agent?: string;
+    session_id?: string;
+    conversation_id?: string;
+    metadata?: Record<string, unknown>;
   }) {
     return request<Memory>("/api/memories", {
       method: "POST",

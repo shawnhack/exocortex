@@ -4,7 +4,7 @@ import { getSetting } from "../db/schema.js";
 export const DEFAULT_TAG_ALIAS_MAP: Record<string, string> = {
   nextjs: "next.js",
   "next-js": "next.js",
-  clawworld: "claw-world",
+  reactjs: "react",
 };
 
 function canonicalize(raw: string): string {

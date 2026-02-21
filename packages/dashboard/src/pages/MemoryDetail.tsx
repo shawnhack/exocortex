@@ -62,6 +62,9 @@ export function MemoryDetail() {
   const [editContent, setEditContent] = useState("");
   const [editTags, setEditTags] = useState<string[]>([]);
   const [editImportance, setEditImportance] = useState(0.5);
+  const [editSourceUri, setEditSourceUri] = useState("");
+  const [editModel, setEditModel] = useState("");
+  const [editProvider, setEditProvider] = useState("");
   const [newTag, setNewTag] = useState("");
 
   const { data: memory, isLoading, error } = useQuery({
@@ -85,7 +88,14 @@ export function MemoryDetail() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: { content: string; tags: string[]; importance: number }) =>
+    mutationFn: (data: {
+      content: string;
+      tags: string[];
+      importance: number;
+      source_uri: string | null;
+      provider: string | null;
+      model_name: string | null;
+    }) =>
       api.updateMemory(id!, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["memory", id] });
@@ -98,14 +108,29 @@ export function MemoryDetail() {
     setEditContent(memory.content);
     setEditTags(memory.tags ?? []);
     setEditImportance(memory.importance);
+    setEditSourceUri(memory.source_uri ?? "");
+    setEditModel(
+      memory.model_name ??
+      (typeof memory.metadata?.model_name === "string" ? memory.metadata.model_name : null) ??
+      (typeof memory.metadata?.model === "string" ? memory.metadata.model : "")
+    );
+    setEditProvider(
+      memory.provider ??
+      (typeof memory.metadata?.provider === "string" ? memory.metadata.provider : "")
+    );
     setIsEditing(true);
   };
 
   const handleSave = () => {
+    const model = editModel.trim();
+    const provider = editProvider.trim();
     updateMutation.mutate({
       content: editContent,
       tags: editTags,
       importance: editImportance,
+      source_uri: editSourceUri.trim() || null,
+      provider: provider || null,
+      model_name: model || null,
     });
   };
 
@@ -144,11 +169,36 @@ export function MemoryDetail() {
     return new Date(normalized).toLocaleString();
   };
 
+  const modelName =
+    memory.model_name ??
+    (typeof memory.metadata?.model_name === "string" ? memory.metadata.model_name : null) ??
+    (typeof memory.metadata?.model === "string" ? memory.metadata.model : null);
+  const providerName =
+    memory.provider ??
+    (typeof memory.metadata?.provider === "string" ? memory.metadata.provider : null);
+  const modelId =
+    memory.model_id ??
+    (typeof memory.metadata?.model_id === "string" ? memory.metadata.model_id : null);
+  const agentName =
+    memory.agent ??
+    (typeof memory.metadata?.agent === "string" ? memory.metadata.agent : null);
+  const sessionId =
+    memory.session_id ??
+    (typeof memory.metadata?.session_id === "string" ? memory.metadata.session_id : null);
+  const conversationId =
+    memory.conversation_id ??
+    (typeof memory.metadata?.conversation_id === "string" ? memory.metadata.conversation_id : null);
+
   const metadataRows: [string, string][] = [
     ["Type", memory.content_type],
     ["Source", memory.source],
     ["Source URI", memory.source_uri ?? "\u2014"],
-    ...(memory.metadata?.model ? [["Model", String(memory.metadata.model)] as [string, string]] : []),
+    ...(modelName ? [["Model", modelName] as [string, string]] : []),
+    ...(modelId ? [["Model ID", modelId] as [string, string]] : []),
+    ...(providerName ? [["Provider", providerName] as [string, string]] : []),
+    ...(agentName ? [["Agent", agentName] as [string, string]] : []),
+    ...(sessionId ? [["Session", sessionId] as [string, string]] : []),
+    ...(conversationId ? [["Conversation", conversationId] as [string, string]] : []),
     ["Importance", String(memory.importance)],
     ["Access Count", String(memory.access_count)],
     ["Last Accessed", memory.last_accessed_at ? fmtDate(memory.last_accessed_at) : "\u2014"],
@@ -156,6 +206,18 @@ export function MemoryDetail() {
     ["Created", fmtDate(memory.created_at)],
     ["Updated", fmtDate(memory.updated_at)],
   ];
+  const metadataHiddenKeys = new Set([
+    "model",
+    "model_name",
+    "model_id",
+    "provider",
+    "agent",
+    "session_id",
+    "conversation_id",
+  ]);
+  const filteredMetadataEntries = memory.metadata
+    ? Object.entries(memory.metadata).filter(([key]) => !metadataHiddenKeys.has(key))
+    : [];
 
   const importanceColor = editImportance >= 0.8 ? "#f472b6" : editImportance >= 0.5 ? "#8b5cf6" : editImportance >= 0.3 ? "#22d3ee" : "#8080a0";
 
@@ -292,6 +354,84 @@ export function MemoryDetail() {
                 e.currentTarget.style.boxShadow = "none";
               }}
             />
+
+            <div style={{ marginTop: 16, display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ minWidth: 260, flex: 1 }}>
+                <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 6, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+                  Source URI
+                </div>
+                <input
+                  data-testid="memory-edit-source-uri"
+                  type="text"
+                  value={editSourceUri}
+                  onChange={(e) => setEditSourceUri(e.target.value)}
+                  placeholder="Optional source URI..."
+                  style={{
+                    width: "100%",
+                    background: "#06060e",
+                    border: "1px solid #16163a",
+                    borderRadius: 6,
+                    color: "#d0d0e0",
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    outline: "none",
+                    transition: "border-color 0.2s",
+                  }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "#8b5cf6"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
+                />
+              </div>
+              <div style={{ minWidth: 170, flex: 1 }}>
+                <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 6, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+                  Model
+                </div>
+                <input
+                  data-testid="memory-edit-model"
+                  type="text"
+                  value={editModel}
+                  onChange={(e) => setEditModel(e.target.value)}
+                  placeholder="gpt-5"
+                  style={{
+                    width: "100%",
+                    background: "#06060e",
+                    border: "1px solid #16163a",
+                    borderRadius: 6,
+                    color: "#d0d0e0",
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    outline: "none",
+                    transition: "border-color 0.2s",
+                  }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "#8b5cf6"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
+                />
+              </div>
+              <div style={{ minWidth: 170, flex: 1 }}>
+                <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 6, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+                  Provider
+                </div>
+                <input
+                  data-testid="memory-edit-provider"
+                  type="text"
+                  value={editProvider}
+                  onChange={(e) => setEditProvider(e.target.value)}
+                  placeholder="openai"
+                  style={{
+                    width: "100%",
+                    background: "#06060e",
+                    border: "1px solid #16163a",
+                    borderRadius: 6,
+                    color: "#d0d0e0",
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    outline: "none",
+                    transition: "border-color 0.2s",
+                  }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "#8b5cf6"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
+                />
+              </div>
+            </div>
 
             {/* Editable tags */}
             <div style={{ marginTop: 20 }}>
@@ -589,7 +729,7 @@ export function MemoryDetail() {
       </div>
 
       {/* Custom metadata */}
-      {memory.metadata && Object.keys(memory.metadata).length > 0 && (
+      {filteredMetadataEntries.length > 0 && (
         <div
           style={{
             background: "#0c0c1d",
@@ -607,7 +747,7 @@ export function MemoryDetail() {
             Metadata
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 32px" }}>
-            {Object.entries(memory.metadata).map(([key, value]) => (
+            {filteredMetadataEntries.map(([key, value]) => (
               <div key={key}>
                 <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 2 }}>{key}</div>
                 <div

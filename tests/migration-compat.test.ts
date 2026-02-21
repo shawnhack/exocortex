@@ -161,4 +161,94 @@ describe("migration and backward compatibility", () => {
 
     db.close();
   });
+
+  it("backfills first-class attribution columns from legacy metadata keys", () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
+
+    db.exec(`
+      CREATE TABLE memories (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        content_type TEXT NOT NULL DEFAULT 'text',
+        source TEXT NOT NULL DEFAULT 'manual',
+        source_uri TEXT,
+        embedding BLOB,
+        content_hash TEXT,
+        is_indexed INTEGER NOT NULL DEFAULT 1,
+        is_metadata INTEGER NOT NULL DEFAULT 0,
+        importance REAL NOT NULL DEFAULT 0.5,
+        access_count INTEGER NOT NULL DEFAULT 0,
+        last_accessed_at TEXT,
+        parent_id TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE memory_tags (
+        memory_id TEXT NOT NULL,
+        tag TEXT NOT NULL,
+        PRIMARY KEY (memory_id, tag)
+      );
+    `);
+
+    db.prepare(`
+      INSERT INTO memories
+      (id, content, content_type, source, source_uri, embedding, content_hash, is_indexed, is_metadata, importance, access_count, last_accessed_at, parent_id, is_active, metadata, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "legacy-meta-1",
+      "Legacy metadata attribution row",
+      "text",
+      "mcp",
+      null,
+      null,
+      null,
+      1,
+      0,
+      0.5,
+      0,
+      null,
+      null,
+      1,
+      JSON.stringify({
+        model: "GPT-5.3-Codex",
+        model_id: "gpt-5-codex",
+        provider: "openai",
+        agent: "codex",
+        session_id: "session-legacy",
+        conversation_id: "conversation-legacy",
+      }),
+      "2026-02-01 00:00:00",
+      "2026-02-01 00:00:00"
+    );
+
+    initializeSchema(db);
+
+    const row = db
+      .prepare(
+        "SELECT provider, model_id, model_name, agent, session_id, conversation_id FROM memories WHERE id = ?"
+      )
+      .get("legacy-meta-1") as
+      | {
+          provider: string | null;
+          model_id: string | null;
+          model_name: string | null;
+          agent: string | null;
+          session_id: string | null;
+          conversation_id: string | null;
+        }
+      | undefined;
+
+    expect(row).toBeTruthy();
+    expect(row!.provider).toBe("openai");
+    expect(row!.model_id).toBe("gpt-5-codex");
+    expect(row!.model_name).toBe("GPT-5.3-Codex");
+    expect(row!.agent).toBe("codex");
+    expect(row!.session_id).toBe("session-legacy");
+    expect(row!.conversation_id).toBe("conversation-legacy");
+
+    db.close();
+  });
 });

@@ -293,19 +293,26 @@ export function Graph() {
     return null;
   }, []);
 
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const canvas = e.currentTarget;
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const zoom = e.deltaY > 0 ? 0.9 : 1.1;
-    const prevScale = scaleRef.current;
-    const newScale = Math.max(0.2, Math.min(5, prevScale * zoom));
-    panRef.current.x = mx - (mx - panRef.current.x) * (newScale / prevScale);
-    panRef.current.y = my - (my - panRef.current.y) * (newScale / prevScale);
-    scaleRef.current = newScale;
-    startAnimation();
+  // Attach wheel handler via ref with { passive: false } to reliably
+  // prevent page scroll. React's synthetic onWheel is passive by default.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const zoom = e.deltaY > 0 ? 0.9 : 1.1;
+      const prevScale = scaleRef.current;
+      const newScale = Math.max(0.2, Math.min(5, prevScale * zoom));
+      panRef.current.x = mx - (mx - panRef.current.x) * (newScale / prevScale);
+      panRef.current.y = my - (my - panRef.current.y) * (newScale / prevScale);
+      scaleRef.current = newScale;
+      startAnimation();
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
   }, [startAnimation]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -433,7 +440,6 @@ export function Graph() {
         <canvas
           ref={canvasRef}
           style={{ width: "100%", height: "100%", cursor: "grab" }}
-          onWheel={handleWheel}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}

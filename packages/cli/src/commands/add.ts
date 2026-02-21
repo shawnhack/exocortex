@@ -18,6 +18,12 @@ export function registerAdd(program: Command): void {
       "text"
     )
     .option("--source <source>", "Source: manual|cli|api|mcp|import", "cli")
+    .option("--provider <provider>", "Model provider (e.g. openai)")
+    .option("--model-id <id>", "Canonical model identifier (e.g. gpt-5-codex)")
+    .option("--model-name <name>", "Model display name (e.g. GPT-5.3-Codex)")
+    .option("--agent <agent>", "Agent/runtime identifier (e.g. codex)")
+    .option("--session-id <id>", "Optional session/thread identifier")
+    .option("--conversation-id <id>", "Optional conversation identifier")
     .option("--metadata", "Mark memory as metadata/system artifact")
     .option("--benchmark", "Store as benchmark artifact (low importance, reduced indexing)")
     .action(async (content: string, opts) => {
@@ -36,6 +42,12 @@ export function registerAdd(program: Command): void {
           content_type: opts.type,
           source: opts.source as MemorySource,
           importance: opts.importance,
+          provider: opts.provider,
+          model_id: opts.modelId,
+          model_name: opts.modelName,
+          agent: opts.agent,
+          session_id: opts.sessionId,
+          conversation_id: opts.conversationId,
           tags: opts.tags
             ? opts.tags.split(",").map((t: string) => t.trim())
             : undefined,

@@ -14,6 +14,13 @@ interface JsonMemory {
   content_type?: string;
   source?: string;
   source_uri?: string;
+  provider?: string;
+  model_id?: string;
+  model_name?: string;
+  agent?: string;
+  session_id?: string;
+  conversation_id?: string;
+  metadata?: Record<string, unknown>;
   importance?: number;
   tags?: string[];
 }
@@ -204,7 +211,14 @@ export function registerImport(program: Command): void {
             content: item.content,
             content_type: (item.content_type as any) ?? "text",
             source: "import",
-            source_uri: file,
+            source_uri: item.source_uri ?? file,
+            provider: item.provider,
+            model_id: item.model_id,
+            model_name: item.model_name,
+            agent: item.agent,
+            session_id: item.session_id,
+            conversation_id: item.conversation_id,
+            metadata: item.metadata,
             importance: item.importance,
             tags: item.tags,
           });

@@ -125,15 +125,24 @@ export function Search() {
   const [newTagInput, setNewTagInput] = useState("");
   const [newImportance, setNewImportance] = useState(0.5);
   const [newContentType, setNewContentType] = useState("text");
+  const [newSourceUri, setNewSourceUri] = useState("");
+  const [newModel, setNewModel] = useState("");
+  const [newProvider, setNewProvider] = useState("");
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      api.createMemory({
+    mutationFn: () => {
+      const model = newModel.trim();
+      const provider = newProvider.trim();
+      return api.createMemory({
         content: newContent,
         content_type: newContentType,
         tags: newTags.length > 0 ? newTags : undefined,
         importance: newImportance,
-      }),
+        source_uri: newSourceUri.trim() || undefined,
+        model_name: model || undefined,
+        provider: provider || undefined,
+      });
+    },
     onSuccess: () => {
       toast("Memory created", "success");
       setNewContent("");
@@ -141,6 +150,9 @@ export function Search() {
       setNewTagInput("");
       setNewImportance(0.5);
       setNewContentType("text");
+      setNewSourceUri("");
+      setNewModel("");
+      setNewProvider("");
       setShowNewForm(false);
       queryClient.invalidateQueries({ queryKey: ["search"] });
       queryClient.invalidateQueries({ queryKey: ["browse-tags"] });
@@ -468,6 +480,71 @@ export function Search() {
               />
             </div>
           </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+            <div style={{ minWidth: 280, flex: 1 }}>
+              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>
+                Source URI
+              </div>
+              <input
+                type="text"
+                value={newSourceUri}
+                onChange={(e) => setNewSourceUri(e.target.value)}
+                placeholder="Optional source URI..."
+                style={{
+                  width: "100%",
+                  background: "#06060e",
+                  border: "1px solid #16163a",
+                  borderRadius: 6,
+                  color: "#d0d0e0",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  outline: "none",
+                }}
+              />
+            </div>
+            <div style={{ minWidth: 180, flex: 1 }}>
+              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>
+                Model
+              </div>
+              <input
+                type="text"
+                value={newModel}
+                onChange={(e) => setNewModel(e.target.value)}
+                placeholder="gpt-5"
+                style={{
+                  width: "100%",
+                  background: "#06060e",
+                  border: "1px solid #16163a",
+                  borderRadius: 6,
+                  color: "#d0d0e0",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  outline: "none",
+                }}
+              />
+            </div>
+            <div style={{ minWidth: 180, flex: 1 }}>
+              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>
+                Provider
+              </div>
+              <input
+                type="text"
+                value={newProvider}
+                onChange={(e) => setNewProvider(e.target.value)}
+                placeholder="openai"
+                style={{
+                  width: "100%",
+                  background: "#06060e",
+                  border: "1px solid #16163a",
+                  borderRadius: 6,
+                  color: "#d0d0e0",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  outline: "none",
+                }}
+              />
+            </div>
+          </div>
           {/* Tags */}
           <div style={{ marginBottom: 12 }}>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
@@ -529,7 +606,17 @@ export function Search() {
               {createMutation.isPending && <span className="spinner" style={{ width: 12, height: 12 }} />}
               {createMutation.isPending ? "Creating..." : "Create"}
             </button>
-            <button className="btn-ghost btn-sm" onClick={() => setShowNewForm(false)}>Cancel</button>
+            <button
+              className="btn-ghost btn-sm"
+              onClick={() => {
+                setShowNewForm(false);
+                setNewSourceUri("");
+                setNewModel("");
+                setNewProvider("");
+              }}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

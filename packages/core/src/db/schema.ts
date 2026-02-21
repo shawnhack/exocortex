@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 5;
 
 const CREATE_TABLES = `
   CREATE TABLE IF NOT EXISTS memories (
@@ -11,6 +12,12 @@ const CREATE_TABLES = `
     source TEXT NOT NULL DEFAULT 'manual'
       CHECK(source IN ('manual', 'cli', 'api', 'mcp', 'browser', 'import', 'consolidation')),
     source_uri TEXT,
+    provider TEXT,
+    model_id TEXT,
+    model_name TEXT,
+    agent TEXT,
+    session_id TEXT,
+    conversation_id TEXT,
     embedding BLOB,
     content_hash TEXT,
     is_indexed INTEGER NOT NULL DEFAULT 1,
@@ -198,7 +205,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "search.metadata_mode": "penalize",
   "search.metadata_penalty": "0.35",
   "search.metadata_tags": "benchmark-artifact,golden-queries,retrieval-regression,goal-progress,goal-progress-implicit",
-  "tags.alias_map": "{\"nextjs\":\"next.js\",\"next-js\":\"next.js\",\"clawworld\":\"claw-world\"}",
+  "tags.alias_map": "{\"nextjs\":\"next.js\",\"next-js\":\"next.js\",\"reactjs\":\"react\"}",
   "benchmark.default_importance": "0.15",
   "benchmark.indexed": "false",
   "benchmark.chunking": "false",
@@ -213,6 +220,100 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "scoring.graph_weight": "0.10",
   "scoring.usefulness_weight": "0.05",
 };
+
+function toNormalizedString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function readMetadataString(
+  metadata: Record<string, unknown>,
+  key: string
+): string | null {
+  return toNormalizedString(metadata[key]);
+}
+
+function backfillMemoryAttributionColumns(db: DatabaseSync): void {
+  const rows = db
+    .prepare(
+      "SELECT id, metadata, provider, model_id, model_name, agent, session_id, conversation_id FROM memories"
+    )
+    .all() as Array<{
+    id: string;
+    metadata: string | null;
+    provider: string | null;
+    model_id: string | null;
+    model_name: string | null;
+    agent: string | null;
+    session_id: string | null;
+    conversation_id: string | null;
+  }>;
+  if (rows.length === 0) return;
+
+  const update = db.prepare(`
+    UPDATE memories
+    SET provider = ?, model_id = ?, model_name = ?, agent = ?, session_id = ?, conversation_id = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+
+  db.exec("BEGIN");
+  try {
+    for (const row of rows) {
+      let parsed: Record<string, unknown> = {};
+      if (row.metadata) {
+        try {
+          parsed = JSON.parse(row.metadata) as Record<string, unknown>;
+        } catch {
+          parsed = {};
+        }
+      }
+
+      const nextProvider =
+        toNormalizedString(row.provider) ?? readMetadataString(parsed, "provider");
+      const nextModelId =
+        toNormalizedString(row.model_id) ?? readMetadataString(parsed, "model_id");
+      const nextModelName =
+        toNormalizedString(row.model_name) ??
+        readMetadataString(parsed, "model_name") ??
+        readMetadataString(parsed, "model");
+      const nextAgent =
+        toNormalizedString(row.agent) ?? readMetadataString(parsed, "agent");
+      const nextSessionId =
+        toNormalizedString(row.session_id) ??
+        readMetadataString(parsed, "session_id");
+      const nextConversationId =
+        toNormalizedString(row.conversation_id) ??
+        readMetadataString(parsed, "conversation_id");
+
+      if (
+        nextProvider !== row.provider ||
+        nextModelId !== row.model_id ||
+        nextModelName !== row.model_name ||
+        nextAgent !== row.agent ||
+        nextSessionId !== row.session_id ||
+        nextConversationId !== row.conversation_id
+      ) {
+        update.run(
+          nextProvider,
+          nextModelId,
+          nextModelName,
+          nextAgent,
+          nextSessionId,
+          nextConversationId,
+          now,
+          row.id
+        );
+      }
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
 
 const initializedDbs = new WeakSet<DatabaseSync>();
 
@@ -257,9 +358,10 @@ export function initializeSchema(db: DatabaseSync): void {
   if (!colNames.has("metadata")) {
     db.exec("ALTER TABLE memories ADD COLUMN metadata TEXT");
   }
+  let needsHashBackfill = false;
   if (!colNames.has("content_hash")) {
     db.exec("ALTER TABLE memories ADD COLUMN content_hash TEXT");
-    db.exec("UPDATE memories SET content_hash = lower(trim(content)) WHERE content_hash IS NULL");
+    needsHashBackfill = true;
   }
   if (!colNames.has("is_indexed")) {
     db.exec("ALTER TABLE memories ADD COLUMN is_indexed INTEGER NOT NULL DEFAULT 1");
@@ -267,8 +369,32 @@ export function initializeSchema(db: DatabaseSync): void {
   if (!colNames.has("is_metadata")) {
     db.exec("ALTER TABLE memories ADD COLUMN is_metadata INTEGER NOT NULL DEFAULT 0");
   }
+  if (!colNames.has("provider")) {
+    db.exec("ALTER TABLE memories ADD COLUMN provider TEXT");
+  }
+  if (!colNames.has("model_id")) {
+    db.exec("ALTER TABLE memories ADD COLUMN model_id TEXT");
+  }
+  if (!colNames.has("model_name")) {
+    db.exec("ALTER TABLE memories ADD COLUMN model_name TEXT");
+  }
+  if (!colNames.has("agent")) {
+    db.exec("ALTER TABLE memories ADD COLUMN agent TEXT");
+  }
+  if (!colNames.has("session_id")) {
+    db.exec("ALTER TABLE memories ADD COLUMN session_id TEXT");
+  }
+  if (!colNames.has("conversation_id")) {
+    db.exec("ALTER TABLE memories ADD COLUMN conversation_id TEXT");
+  }
   db.exec("CREATE INDEX IF NOT EXISTS idx_memories_content_hash ON memories(content_hash)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_memories_is_metadata ON memories(is_metadata)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memories_model_id ON memories(model_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memories_provider ON memories(provider)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memories_session_id ON memories(session_id)");
+
+  // Backfill first-class attribution columns from legacy metadata keys.
+  backfillMemoryAttributionColumns(db);
 
   // Backfill metadata flag for known system/benchmark classes.
   const metadataTagList = (
@@ -507,6 +633,31 @@ export function initializeSchema(db: DatabaseSync): void {
   db.prepare(
     "DELETE FROM memories WHERE chunk_index IS NOT NULL AND parent_id IS NULL"
   ).run();
+
+  // Backfill content_hash with proper SHA-256 when column is newly added.
+  if (needsHashBackfill) {
+    const normalizeWs = getSetting(db, "dedup.hash_normalize_whitespace") !== "false";
+    const rows = db
+      .prepare("SELECT id, content FROM memories WHERE content_hash IS NULL")
+      .all() as Array<{ id: string; content: string }>;
+    if (rows.length > 0) {
+      const update = db.prepare("UPDATE memories SET content_hash = ? WHERE id = ?");
+      db.exec("BEGIN");
+      try {
+        for (const row of rows) {
+          const normalized = normalizeWs
+            ? row.content.toLowerCase().replace(/\s+/g, " ").trim()
+            : row.content.trim();
+          const hash = createHash("sha256").update(normalized).digest("hex");
+          update.run(hash, row.id);
+        }
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+    }
+  }
 
   initializedDbs.add(db);
 }

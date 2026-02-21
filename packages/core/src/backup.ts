@@ -20,6 +20,12 @@ export interface BackupData {
     content_type: string;
     source: string;
     source_uri: string | null;
+    provider?: string | null;
+    model_id?: string | null;
+    model_name?: string | null;
+    agent?: string | null;
+    session_id?: string | null;
+    conversation_id?: string | null;
     content_hash?: string | null;
     is_indexed?: number;
     is_metadata?: number;
@@ -96,7 +102,7 @@ export interface BackupData {
 export function exportData(db: DatabaseSync): BackupData {
   const memories = db
     .prepare(
-      "SELECT id, content, content_type, source, source_uri, content_hash, is_indexed, is_metadata, importance, access_count, parent_id, is_active, metadata, created_at, updated_at FROM memories ORDER BY created_at ASC"
+      "SELECT id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, content_hash, is_indexed, is_metadata, importance, access_count, parent_id, is_active, metadata, created_at, updated_at FROM memories ORDER BY created_at ASC"
     )
     .all() as unknown as Array<{
     id: string;
@@ -104,6 +110,12 @@ export function exportData(db: DatabaseSync): BackupData {
     content_type: string;
     source: string;
     source_uri: string | null;
+    provider: string | null;
+    model_id: string | null;
+    model_name: string | null;
+    agent: string | null;
+    session_id: string | null;
+    conversation_id: string | null;
     content_hash: string | null;
     is_indexed: number;
     is_metadata: number;
@@ -302,8 +314,8 @@ export function importData(db: DatabaseSync, data: BackupData): {
     // Import memories (without embeddings — they'll be regenerated)
     const insertMemory = db.prepare(
       `INSERT OR IGNORE INTO memories
-       (id, content, content_type, source, source_uri, content_hash, is_indexed, is_metadata, importance, access_count, parent_id, is_active, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, content_hash, is_indexed, is_metadata, importance, access_count, parent_id, is_active, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insertTag = db.prepare(
       "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
@@ -312,6 +324,12 @@ export function importData(db: DatabaseSync, data: BackupData): {
     for (const m of data.memories) {
       const result = insertMemory.run(
         m.id, m.content, m.content_type, m.source, m.source_uri,
+        m.provider ?? null,
+        m.model_id ?? null,
+        m.model_name ?? null,
+        m.agent ?? null,
+        m.session_id ?? null,
+        m.conversation_id ?? null,
         m.content_hash ?? null,
         m.is_indexed ?? 1,
         m.is_metadata ?? 0,

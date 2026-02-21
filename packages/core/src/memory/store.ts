@@ -57,6 +57,104 @@ export function stripPrivateContent(text: string): string {
   return stripped.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+type MemoryAttribution = {
+  provider: string | null;
+  model_id: string | null;
+  model_name: string | null;
+  agent: string | null;
+  session_id: string | null;
+  conversation_id: string | null;
+};
+
+function normalizedString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function metadataString(
+  metadata: Record<string, unknown> | undefined,
+  key: string
+): string | null {
+  if (!metadata) return null;
+  return normalizedString(metadata[key]);
+}
+
+function resolveCreateAttribution(input: CreateMemoryInput): MemoryAttribution {
+  return {
+    provider:
+      normalizedString(input.provider) ??
+      metadataString(input.metadata, "provider"),
+    model_id:
+      normalizedString(input.model_id) ??
+      metadataString(input.metadata, "model_id"),
+    model_name:
+      normalizedString(input.model_name) ??
+      metadataString(input.metadata, "model_name") ??
+      metadataString(input.metadata, "model"),
+    agent:
+      normalizedString(input.agent) ??
+      metadataString(input.metadata, "agent"),
+    session_id:
+      normalizedString(input.session_id) ??
+      metadataString(input.metadata, "session_id"),
+    conversation_id:
+      normalizedString(input.conversation_id) ??
+      metadataString(input.metadata, "conversation_id"),
+  };
+}
+
+function resolveUpdateAttribution(
+  input: UpdateMemoryInput,
+  mergedMetadata: Record<string, unknown>
+): Partial<MemoryAttribution> {
+  const hasMeta = input.metadata !== undefined;
+  const hasOwn = (key: string): boolean =>
+    hasMeta && Object.prototype.hasOwnProperty.call(input.metadata, key);
+
+  const updates: Partial<MemoryAttribution> = {};
+
+  if (input.provider !== undefined) {
+    updates.provider = normalizedString(input.provider);
+  } else if (hasOwn("provider")) {
+    updates.provider = metadataString(mergedMetadata, "provider");
+  }
+
+  if (input.model_id !== undefined) {
+    updates.model_id = normalizedString(input.model_id);
+  } else if (hasOwn("model_id")) {
+    updates.model_id = metadataString(mergedMetadata, "model_id");
+  }
+
+  if (input.model_name !== undefined) {
+    updates.model_name = normalizedString(input.model_name);
+  } else if (hasOwn("model_name") || hasOwn("model")) {
+    updates.model_name =
+      metadataString(mergedMetadata, "model_name") ??
+      metadataString(mergedMetadata, "model");
+  }
+
+  if (input.agent !== undefined) {
+    updates.agent = normalizedString(input.agent);
+  } else if (hasOwn("agent")) {
+    updates.agent = metadataString(mergedMetadata, "agent");
+  }
+
+  if (input.session_id !== undefined) {
+    updates.session_id = normalizedString(input.session_id);
+  } else if (hasOwn("session_id")) {
+    updates.session_id = metadataString(mergedMetadata, "session_id");
+  }
+
+  if (input.conversation_id !== undefined) {
+    updates.conversation_id = normalizedString(input.conversation_id);
+  } else if (hasOwn("conversation_id")) {
+    updates.conversation_id = metadataString(mergedMetadata, "conversation_id");
+  }
+
+  return updates;
+}
+
 export class MemoryStore {
   constructor(private db: DatabaseSync) {}
 
@@ -93,6 +191,7 @@ export class MemoryStore {
       importance: input.importance ?? defaultImportance,
       metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     };
+    const attribution = resolveCreateAttribution(input);
 
     const metadataTags = getMetadataTags(this.db, aliasMap);
     const inferredIsMetadata = inferIsMetadata({
@@ -167,6 +266,7 @@ export class MemoryStore {
         memory = await this.createWithChunks(
           id,
           input,
+          attribution,
           now,
           maxLength,
           targetSize,
@@ -226,8 +326,8 @@ export class MemoryStore {
     }
 
     const insertMemory = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, metadata, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertTag = this.db.prepare(
@@ -256,6 +356,12 @@ export class MemoryStore {
         input.content_type ?? "text",
         input.source ?? "manual",
         input.source_uri ?? null,
+        attribution.provider,
+        attribution.model_id,
+        attribution.model_name,
+        attribution.agent,
+        attribution.session_id,
+        attribution.conversation_id,
         embeddingBlob,
         contentHash,
         benchmarkIndexed ? 1 : 0,
@@ -466,17 +572,63 @@ export class MemoryStore {
           .run(now, existingId);
       }
 
-      if (input.metadata && Object.keys(input.metadata).length > 0) {
-        const existingRow = this.db
-          .prepare("SELECT metadata FROM memories WHERE id = ?")
-          .get(existingId) as { metadata: string | null } | undefined;
-        const currentMeta: Record<string, unknown> = existingRow?.metadata
-          ? JSON.parse(existingRow.metadata)
-          : {};
-        const merged = { ...currentMeta, ...input.metadata };
+      const existingRow = this.db
+        .prepare(
+          "SELECT metadata, provider, model_id, model_name, agent, session_id, conversation_id FROM memories WHERE id = ?"
+        )
+        .get(existingId) as
+        | {
+            metadata: string | null;
+            provider: string | null;
+            model_id: string | null;
+            model_name: string | null;
+            agent: string | null;
+            session_id: string | null;
+            conversation_id: string | null;
+          }
+        | undefined;
+      const currentMeta: Record<string, unknown> = existingRow?.metadata
+        ? JSON.parse(existingRow.metadata)
+        : {};
+      const mergedMeta =
+        input.metadata && Object.keys(input.metadata).length > 0
+          ? { ...currentMeta, ...input.metadata }
+          : currentMeta;
+      const attributionUpdates = resolveUpdateAttribution(
+        {
+          provider: input.provider,
+          model_id: input.model_id,
+          model_name: input.model_name,
+          agent: input.agent,
+          session_id: input.session_id,
+          conversation_id: input.conversation_id,
+          metadata: input.metadata,
+        },
+        mergedMeta
+      );
+
+      const shouldWriteMetadata =
+        input.metadata && Object.keys(input.metadata).length > 0;
+      const shouldWriteAttribution = Object.keys(attributionUpdates).length > 0;
+
+      if (shouldWriteMetadata || shouldWriteAttribution) {
         this.db
-          .prepare("UPDATE memories SET metadata = ?, updated_at = ? WHERE id = ?")
-          .run(JSON.stringify(merged), now, existingId);
+          .prepare(
+            "UPDATE memories SET metadata = ?, provider = ?, model_id = ?, model_name = ?, agent = ?, session_id = ?, conversation_id = ?, updated_at = ? WHERE id = ?"
+          )
+          .run(
+            JSON.stringify(mergedMeta),
+            attributionUpdates.provider ?? existingRow?.provider ?? null,
+            attributionUpdates.model_id ?? existingRow?.model_id ?? null,
+            attributionUpdates.model_name ?? existingRow?.model_name ?? null,
+            attributionUpdates.agent ?? existingRow?.agent ?? null,
+            attributionUpdates.session_id ?? existingRow?.session_id ?? null,
+            attributionUpdates.conversation_id ??
+              existingRow?.conversation_id ??
+              null,
+            now,
+            existingId
+          );
       } else {
         this.db
           .prepare("UPDATE memories SET updated_at = ? WHERE id = ?")
@@ -573,6 +725,7 @@ export class MemoryStore {
   private async createWithChunks(
     parentId: string,
     input: CreateMemoryInput,
+    attribution: MemoryAttribution,
     now: string,
     _maxLength: number,
     targetSize: number,
@@ -592,8 +745,8 @@ export class MemoryStore {
 
     // Insert parent (no embedding)
     const insertMemory = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, metadata, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertTag = this.db.prepare(
       "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
@@ -615,6 +768,12 @@ export class MemoryStore {
         input.content_type ?? "text",
         input.source ?? "manual",
         input.source_uri ?? null,
+        attribution.provider,
+        attribution.model_id,
+        attribution.model_name,
+        attribution.agent,
+        attribution.session_id,
+        attribution.conversation_id,
         null, // No embedding for parent
         contentHash,
         isIndexed ? 1 : 0,
@@ -639,8 +798,8 @@ export class MemoryStore {
 
     // Insert chunks with individual embeddings
     const insertChunk = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, chunk_index, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, chunk_index, metadata, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const provider = isIndexed ? await getEmbeddingProvider().catch(() => null) : null;
@@ -665,6 +824,12 @@ export class MemoryStore {
           input.content_type ?? "text",
           input.source ?? "manual",
           input.source_uri ?? null,
+          attribution.provider,
+          attribution.model_id,
+          attribution.model_name,
+          attribution.agent,
+          attribution.session_id,
+          attribution.conversation_id,
           chunkEmbeddingBlob,
           computeContentHashForDb(this.db, chunks[i]),
           isIndexed ? 1 : 0,
@@ -928,6 +1093,11 @@ export class MemoryStore {
       params.push(input.content_type);
     }
 
+    if (input.source_uri !== undefined) {
+      sets.push("source_uri = ?");
+      params.push(input.source_uri);
+    }
+
     if (input.importance !== undefined) {
       sets.push("importance = ?");
       params.push(input.importance);
@@ -953,6 +1123,32 @@ export class MemoryStore {
           ? JSON.stringify(mergedMetadata)
           : null
       );
+    }
+
+    const attributionUpdates = resolveUpdateAttribution(input, mergedMetadata);
+    if (attributionUpdates.provider !== undefined) {
+      sets.push("provider = ?");
+      params.push(attributionUpdates.provider);
+    }
+    if (attributionUpdates.model_id !== undefined) {
+      sets.push("model_id = ?");
+      params.push(attributionUpdates.model_id);
+    }
+    if (attributionUpdates.model_name !== undefined) {
+      sets.push("model_name = ?");
+      params.push(attributionUpdates.model_name);
+    }
+    if (attributionUpdates.agent !== undefined) {
+      sets.push("agent = ?");
+      params.push(attributionUpdates.agent);
+    }
+    if (attributionUpdates.session_id !== undefined) {
+      sets.push("session_id = ?");
+      params.push(attributionUpdates.session_id);
+    }
+    if (attributionUpdates.conversation_id !== undefined) {
+      sets.push("conversation_id = ?");
+      params.push(attributionUpdates.conversation_id);
     }
 
     const shouldRecomputeMetadataFlag =
@@ -1004,13 +1200,19 @@ export class MemoryStore {
         const chunks = splitIntoChunks(replaceChunksContent, { targetSize });
         const parentRow = this.db
           .prepare(
-            "SELECT content_type, source, source_uri, importance, metadata, is_indexed, is_metadata FROM memories WHERE id = ?"
+            "SELECT content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, metadata, is_indexed, is_metadata FROM memories WHERE id = ?"
           )
           .get(id) as
           | {
               content_type: string;
               source: string;
               source_uri: string | null;
+              provider: string | null;
+              model_id: string | null;
+              model_name: string | null;
+              agent: string | null;
+              session_id: string | null;
+              conversation_id: string | null;
               importance: number;
               metadata: string | null;
               is_indexed: number;
@@ -1024,8 +1226,8 @@ export class MemoryStore {
             .all(id) as Array<{ tag: string }>;
 
           const insertChunk = this.db.prepare(`
-            INSERT INTO memories (id, content, content_type, source, source_uri, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, chunk_index, metadata, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, chunk_index, metadata, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `);
           const insertTag = this.db.prepare(
             "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
@@ -1055,6 +1257,12 @@ export class MemoryStore {
               parentRow.content_type,
               parentRow.source,
               parentRow.source_uri,
+              parentRow.provider,
+              parentRow.model_id,
+              parentRow.model_name,
+              parentRow.agent,
+              parentRow.session_id,
+              parentRow.conversation_id,
               chunkEmbeddingBlob,
               computeContentHashForDb(this.db, chunks[i]),
               parentRow.is_indexed,

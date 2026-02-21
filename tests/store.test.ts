@@ -72,10 +72,10 @@ describe("MemoryStore", () => {
     it("normalizes aliased tags on create", async () => {
       const { memory } = await store.create({
         content: "Tag alias test",
-        tags: ["nextjs", "next-js", "clawworld", "NEXTJS"],
+        tags: ["nextjs", "next-js", "reactjs", "NEXTJS"],
       });
       expect(memory.tags).toContain("next.js");
-      expect(memory.tags).toContain("claw-world");
+      expect(memory.tags).toContain("react");
       expect(memory.tags?.filter((t) => t === "next.js")).toHaveLength(1);
     });
 
@@ -103,6 +103,33 @@ describe("MemoryStore", () => {
         metadata: { model: "claude-opus-4-6", source_app: "test" },
       });
       expect(memory.metadata).toEqual({ model: "claude-opus-4-6", source_app: "test" });
+    });
+
+    it("stores first-class attribution fields", async () => {
+      const { memory } = await store.create({
+        content: "Attribution fields",
+        provider: "openai",
+        model_id: "gpt-5-codex",
+        model_name: "GPT-5.3-Codex",
+        agent: "codex",
+        session_id: "session-123",
+        conversation_id: "conversation-abc",
+      });
+      expect(memory.provider).toBe("openai");
+      expect(memory.model_id).toBe("gpt-5-codex");
+      expect(memory.model_name).toBe("GPT-5.3-Codex");
+      expect(memory.agent).toBe("codex");
+      expect(memory.session_id).toBe("session-123");
+      expect(memory.conversation_id).toBe("conversation-abc");
+    });
+
+    it("maps legacy metadata.model/provider into first-class attribution fields", async () => {
+      const { memory } = await store.create({
+        content: "Legacy attribution metadata",
+        metadata: { model: "Legacy Model Name", provider: "anthropic" },
+      });
+      expect(memory.model_name).toBe("Legacy Model Name");
+      expect(memory.provider).toBe("anthropic");
     });
 
     it("handles null metadata gracefully", async () => {
@@ -263,6 +290,22 @@ describe("MemoryStore", () => {
       expect(updated!.importance).toBe(1.0);
     });
 
+    it("updates source_uri and supports clearing it", async () => {
+      const { memory: mem } = await store.create({
+        content: "Source URI test",
+        source_uri: "https://example.com/old",
+      });
+      expect(mem.source_uri).toBe("https://example.com/old");
+
+      const updated = await store.update(mem.id, {
+        source_uri: "https://example.com/new",
+      });
+      expect(updated!.source_uri).toBe("https://example.com/new");
+
+      const cleared = await store.update(mem.id, { source_uri: null });
+      expect(cleared!.source_uri).toBeNull();
+    });
+
     it("returns null for non-existent ID", async () => {
       const result = await store.update("nonexistent", {
         content: "nope",
@@ -290,6 +333,42 @@ describe("MemoryStore", () => {
         metadata: { remove: null },
       });
       expect(updated!.metadata).toEqual({ keep: true });
+    });
+
+    it("syncs attribution columns when metadata attribution keys are updated", async () => {
+      const { memory: mem } = await store.create({
+        content: "Attribution sync",
+        provider: "openai",
+        model_name: "GPT-5.3-Codex",
+      });
+
+      const updated = await store.update(mem.id, {
+        metadata: { provider: "anthropic", model: "Claude Next" },
+      });
+      expect(updated!.provider).toBe("anthropic");
+      expect(updated!.model_name).toBe("Claude Next");
+    });
+
+    it("updates and clears first-class attribution fields directly", async () => {
+      const { memory: mem } = await store.create({
+        content: "Attribution direct update",
+        provider: "openai",
+        model_name: "GPT-5.3-Codex",
+      });
+
+      const updated = await store.update(mem.id, {
+        provider: "openai-compatible",
+        model_name: "Custom Model",
+      });
+      expect(updated!.provider).toBe("openai-compatible");
+      expect(updated!.model_name).toBe("Custom Model");
+
+      const cleared = await store.update(mem.id, {
+        provider: null,
+        model_name: null,
+      });
+      expect(cleared!.provider).toBeNull();
+      expect(cleared!.model_name).toBeNull();
     });
 
     it("dechunks a chunked parent when new content is short", async () => {

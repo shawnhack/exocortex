@@ -14,6 +14,12 @@ export interface Memory {
   content_type: ContentType;
   source: MemorySource;
   source_uri: string | null;
+  provider: string | null;
+  model_id: string | null;
+  model_name: string | null;
+  agent: string | null;
+  session_id: string | null;
+  conversation_id: string | null;
   embedding: Float32Array | null;
   is_metadata: boolean;
   importance: number;
@@ -35,6 +41,12 @@ export interface CreateMemoryInput {
   content_type?: ContentType;
   source?: MemorySource;
   source_uri?: string;
+  provider?: string;
+  model_id?: string;
+  model_name?: string;
+  agent?: string;
+  session_id?: string;
+  conversation_id?: string;
   importance?: number;
   parent_id?: string;
   tags?: string[];
@@ -50,6 +62,13 @@ export interface CreateMemoryInput {
 export interface UpdateMemoryInput {
   content?: string;
   content_type?: ContentType;
+  source_uri?: string | null;
+  provider?: string | null;
+  model_id?: string | null;
+  model_name?: string | null;
+  agent?: string | null;
+  session_id?: string | null;
+  conversation_id?: string | null;
   importance?: number;
   is_active?: boolean;
   tags?: string[];
@@ -110,6 +129,12 @@ export interface MemoryRow {
   content_type: ContentType;
   source: MemorySource;
   source_uri: string | null;
+  provider: string | null;
+  model_id: string | null;
+  model_name: string | null;
+  agent: string | null;
+  session_id: string | null;
+  conversation_id: string | null;
   embedding: Uint8Array | null;
   content_hash: string | null;
   is_indexed: number;

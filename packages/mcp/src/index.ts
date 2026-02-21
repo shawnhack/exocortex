@@ -167,6 +167,12 @@ server.tool(
     tags: z.array(z.string()).optional().describe("Tags for categorization"),
     importance: z.number().min(0).max(1).optional().describe("Importance 0-1 (default 0.5, use 0.8+ for critical info)"),
     content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("Content type (default 'text')"),
+    provider: z.string().optional().describe("Model provider (e.g. openai, anthropic)"),
+    model_id: z.string().optional().describe("Canonical model identifier (e.g. gpt-5-codex)"),
+    model_name: z.string().optional().describe("Human-readable model name (e.g. GPT-5.3-Codex)"),
+    agent: z.string().optional().describe("Agent/runtime identifier (e.g. codex, claude-code)"),
+    session_id: z.string().optional().describe("Optional agent session/thread identifier"),
+    conversation_id: z.string().optional().describe("Optional conversation identifier"),
     metadata: z.record(z.string(), z.any()).optional().describe("Arbitrary JSON metadata (e.g. { model: 'claude-opus-4-6' })"),
     is_metadata: z.boolean().optional().describe("Explicitly mark this memory as metadata/system artifact"),
     benchmark: z.boolean().optional().describe("Store as benchmark artifact (low default importance, reduced indexing/chunking)"),
@@ -181,6 +187,12 @@ server.tool(
         source: "mcp",
         importance: args.importance,
         tags: args.tags,
+        provider: args.provider,
+        model_id: args.model_id,
+        model_name: args.model_name,
+        agent: args.agent,
+        session_id: args.session_id,
+        conversation_id: args.conversation_id,
         metadata: args.metadata,
         is_metadata: args.is_metadata,
         benchmark: args.benchmark,
@@ -508,7 +520,18 @@ server.tool(
         await store.recordAccess(id);
 
         const meta: string[] = [];
+        meta.push(`source: ${memory.source}`);
+        if (memory.source_uri) meta.push(`source_uri: ${memory.source_uri}`);
+        if (memory.provider) meta.push(`provider: ${memory.provider}`);
+        if (memory.model_id) meta.push(`model_id: ${memory.model_id}`);
+        if (memory.model_name) meta.push(`model_name: ${memory.model_name}`);
+        if (memory.agent) meta.push(`agent: ${memory.agent}`);
+        if (memory.session_id) meta.push(`session_id: ${memory.session_id}`);
+        if (memory.conversation_id) meta.push(`conversation_id: ${memory.conversation_id}`);
         if (memory.tags?.length) meta.push(`tags: ${memory.tags.join(", ")}`);
+        if (memory.metadata && Object.keys(memory.metadata).length > 0) {
+          meta.push(`metadata: ${JSON.stringify(memory.metadata)}`);
+        }
         meta.push(`created: ${memory.created_at}`);
         if (memory.importance !== 0.5) meta.push(`importance: ${memory.importance}`);
         results.push(`[${memory.id}] ${memory.content}\n  (${meta.join(" | ")})`);
@@ -722,6 +745,13 @@ server.tool(
     id: z.string().describe("The memory ID to update (ULID)"),
     content: z.string().optional().describe("New content (will re-embed)"),
     content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("New content type"),
+    source_uri: z.string().nullable().optional().describe("Set/clear source URI"),
+    provider: z.string().nullable().optional().describe("Set/clear model provider"),
+    model_id: z.string().nullable().optional().describe("Set/clear canonical model identifier"),
+    model_name: z.string().nullable().optional().describe("Set/clear human-readable model name"),
+    agent: z.string().nullable().optional().describe("Set/clear agent/runtime identifier"),
+    session_id: z.string().nullable().optional().describe("Set/clear session identifier"),
+    conversation_id: z.string().nullable().optional().describe("Set/clear conversation identifier"),
     importance: z.number().min(0).max(1).optional().describe("New importance score"),
     is_metadata: z.boolean().optional().describe("Explicitly set metadata/system classification"),
     tags: z.array(z.string()).optional().describe("Replace all tags with these"),
@@ -731,8 +761,27 @@ server.tool(
     try {
       const { id, ...updates } = args;
 
-      if (!updates.content && !updates.content_type && updates.importance === undefined && updates.is_metadata === undefined && !updates.tags && !updates.metadata) {
-        return { content: [{ type: "text", text: "No update fields provided. Specify at least one of: content, content_type, importance, is_metadata, tags, metadata." }] };
+      if (
+        !updates.content &&
+        !updates.content_type &&
+        updates.source_uri === undefined &&
+        updates.provider === undefined &&
+        updates.model_id === undefined &&
+        updates.model_name === undefined &&
+        updates.agent === undefined &&
+        updates.session_id === undefined &&
+        updates.conversation_id === undefined &&
+        updates.importance === undefined &&
+        updates.is_metadata === undefined &&
+        !updates.tags &&
+        !updates.metadata
+      ) {
+        return {
+          content: [{
+            type: "text",
+            text: "No update fields provided. Specify at least one of: content, content_type, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, is_metadata, tags, metadata.",
+          }],
+        };
       }
 
       const store = new MemoryStore(db);

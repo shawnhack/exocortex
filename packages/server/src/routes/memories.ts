@@ -31,6 +31,12 @@ const createSchema = z.object({
     ])
     .optional(),
   source_uri: z.string().optional(),
+  provider: z.string().optional(),
+  model_id: z.string().optional(),
+  model_name: z.string().optional(),
+  agent: z.string().optional(),
+  session_id: z.string().optional(),
+  conversation_id: z.string().optional(),
   importance: z.number().min(0).max(1).optional(),
   parent_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
@@ -44,6 +50,13 @@ const updateSchema = z.object({
   content_type: z
     .enum(["text", "conversation", "note", "summary"])
     .optional(),
+  source_uri: z.string().nullable().optional(),
+  provider: z.string().nullable().optional(),
+  model_id: z.string().nullable().optional(),
+  model_name: z.string().nullable().optional(),
+  agent: z.string().nullable().optional(),
+  session_id: z.string().nullable().optional(),
+  conversation_id: z.string().nullable().optional(),
   importance: z.number().min(0).max(1).optional(),
   is_active: z.boolean().optional(),
   tags: z.array(z.string()).optional(),

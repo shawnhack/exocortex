@@ -53,8 +53,8 @@ beforeEach(async () => {
     tags: ["exocortex", "retrieval"],
   });
   await store.create({
-    content: "Cortex sentinel health-check reliability issues and fixes.",
-    tags: ["cortex", "health-check"],
+    content: "Platform sentinel health-check reliability issues and fixes.",
+    tags: ["platform", "health-check"],
   });
   await store.create({
     content: "Alpha trade exit logic mismatches between live and paper trader.",
@@ -71,7 +71,7 @@ describe("runRetrievalRegression", () => {
   it("initializes baselines on first run and compares on second run", async () => {
     setGoldenQueries(db, [
       "exocortex retrieval architecture",
-      "cortex sentinel health-check reliability",
+      "platform sentinel health-check reliability",
     ]);
 
     const first = await runRetrievalRegression(db, { limit: 1 });
