@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   getDb,
   closeDb,
@@ -14,24 +15,41 @@ import {
 } from "@exocortex/core";
 
 const mockProvider = {
-  embed: async (text: string) => {
+  async embed(text: string): Promise<Float32Array> {
     const arr = new Float32Array(16);
     const lower = text.toLowerCase();
     for (let i = 0; i < lower.length; i++) {
       arr[lower.charCodeAt(i) % arr.length] += 1;
     }
+    let norm = 0;
+    for (let i = 0; i < arr.length; i++) norm += arr[i] * arr[i];
+    norm = Math.sqrt(norm);
+    if (norm > 0) for (let i = 0; i < arr.length; i++) arr[i] /= norm;
     return arr;
   },
-  dimensions: 16,
+  async embedBatch(texts: string[]): Promise<Float32Array[]> {
+    return Promise.all(texts.map((t) => mockProvider.embed(t)));
+  },
+  dimensions(): number {
+    return 16;
+  },
 };
 
 function runCli(args: string[], env: Record<string, string>) {
+  const mockEmbeddings = pathToFileURL(
+    path.resolve("tests/helpers/mock-embeddings.ts")
+  ).href;
   const cliEntry = path.resolve("packages/cli/src/index.ts");
-  return spawnSync(process.execPath, ["--import", "tsx", cliEntry, ...args], {
-    cwd: path.resolve("."),
-    env: { ...process.env, ...env },
-    encoding: "utf8",
-  });
+  return spawnSync(
+    process.execPath,
+    ["--import", "tsx", "--import", mockEmbeddings, cliEntry, ...args],
+    {
+      cwd: path.resolve("."),
+      env: { ...process.env, ...env },
+      encoding: "utf8",
+      timeout: 30_000,
+    }
+  );
 }
 
 function parseJsonOutput(stdout: string): any {

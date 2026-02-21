@@ -28,6 +28,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build
+        run: pnpm build
+
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.exocortex/models
+          key: embedding-model-xenova-minilm-l6-v2
+
       - name: Lint
         run: pnpm lint
 
