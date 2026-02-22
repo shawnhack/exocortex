@@ -174,6 +174,29 @@ async function main() {
       );
       sections.push(`**Open threads:**\n${lines.join("\n")}`);
     }
+    // 6. Self-model functional directives
+    const selfModel = db
+      .prepare(
+        `SELECT m.content
+         FROM memories m
+         INNER JOIN memory_tags mt ON m.id = mt.memory_id
+         WHERE mt.tag = 'self-model' AND m.is_active = 1
+         ORDER BY m.created_at DESC
+         LIMIT 1`
+      )
+      .all();
+
+    if (selfModel.length > 0) {
+      const content = selfModel[0].content;
+      const match = content.match(
+        /## Functional Directives\n([\s\S]*?)(?=\n## |\s*$)/
+      );
+      if (match) {
+        sections.push(
+          `**Functional directives (from self-model):**\n${match[1].trim()}`
+        );
+      }
+    }
   } catch {
     // Query failures are non-critical — just skip
   } finally {
@@ -182,7 +205,7 @@ async function main() {
     } catch {}
   }
 
-  // 6. Auto-detect skills from project tech stack
+  // 7. Auto-detect skills from project tech stack
   try {
     const skillIndexPath = path.join(os.homedir(), ".claude", "skills", "skill-index.json");
     if (fs.existsSync(skillIndexPath)) {
