@@ -27,11 +27,7 @@ Exocortex gives AI coding agents persistent memory across sessions. It stores me
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/search.png" alt="Search — hybrid retrieval with tag filtering" width="800" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/timeline.png" alt="Timeline — chronological memory view" width="800" />
+  <img src="docs/screenshots/memories.png" alt="Memories — search, browse, and date-grouped timeline" width="800" />
 </p>
 
 <details>
@@ -144,7 +140,7 @@ User prompt → Agent reads/writes memories via MCP tools
 | `@exocortex/mcp` | MCP server — exposes all memory tools via stdio (works with any MCP client) |
 | `@exocortex/server` | Hono REST API on port 3210 + serves the React dashboard |
 | `@exocortex/cli` | CLI tool (`exo`) — add, search, import/export, serve, consolidate, retrieval-regression, backfill |
-| `@exocortex/dashboard` | React SPA with Neural Interface theme — search, chat, graph, timeline, trash, mobile-responsive |
+| `@exocortex/dashboard` | React SPA with Neural Interface theme — memories, chat, graph, entities, goals, trash, mobile-responsive |
 
 ---
 
