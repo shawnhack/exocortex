@@ -20,6 +20,7 @@ export interface DigestResult {
   actions: DigestAction[];
   facts: ExtractedFact[];
   summary: string;
+  assistantTexts: string[];
   stats: { tools_used: number; files_changed: number; commands_run: number };
 }
 
@@ -29,6 +30,8 @@ const SKIP_TOOLS = new Set([
   "Glob",
   "Grep",
   "Task",
+  "TaskOutput",
+  "TaskStop",
   "TaskCreate",
   "TaskUpdate",
   "TaskGet",
@@ -36,6 +39,11 @@ const SKIP_TOOLS = new Set([
   "AskUserQuestion",
   "EnterPlanMode",
   "ExitPlanMode",
+  "EnterWorktree",
+  "TeamCreate",
+  "TeamDelete",
+  "SendMessage",
+  "Skill",
 ]);
 
 interface ToolUseBlock {
@@ -267,15 +275,18 @@ export async function digestTranscript(
   const tools = new Set(deduped.map((a) => a.tool));
 
   const date = new Date().toISOString().split("T")[0];
-  const lines = deduped.map((a) => `- ${a.summary}`);
-  const statsLine = `Files changed: ${files.size} | Commands: ${commands} | Tools used: ${tools.size}`;
+  const fileActions = deduped.filter((a) => a.file_path);
+  const fileNames = [...new Set(fileActions.map((a) => path.basename(a.file_path!)))];
+  const statsLine = `Stats: ${files.size} files changed | ${commands} commands | ${tools.size} tools`;
 
   const summaryParts = [
     `Session ${date}${project ? ` (project: ${project})` : ""}`,
-    ...lines,
-    "",
-    statsLine,
   ];
+
+  if (fileNames.length > 0) {
+    summaryParts.push(`Files: ${fileNames.join(", ")}`);
+  }
+  summaryParts.push(statsLine);
 
   if (facts.length > 0) {
     summaryParts.push("", "Key takeaways:");
@@ -291,6 +302,7 @@ export async function digestTranscript(
     actions: deduped,
     facts,
     summary,
+    assistantTexts,
     stats: {
       tools_used: tools.size,
       files_changed: files.size,

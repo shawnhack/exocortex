@@ -182,6 +182,63 @@ async function main() {
     } catch {}
   }
 
+  // 6. Auto-detect skills from project tech stack
+  try {
+    const skillIndexPath = path.join(os.homedir(), ".claude", "skills", "skill-index.json");
+    if (fs.existsSync(skillIndexPath)) {
+      const skillIndex = JSON.parse(fs.readFileSync(skillIndexPath, "utf-8"));
+      const matchedSkills = new Set();
+
+      // Check package.json dependencies
+      const pkgPath = path.join(cwd, "package.json");
+      if (fs.existsSync(pkgPath)) {
+        try {
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+          const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+          for (const dep of Object.keys(allDeps)) {
+            const skills = skillIndex.signals?.[dep];
+            if (skills) {
+              for (const s of skills) matchedSkills.add(s);
+            }
+          }
+        } catch {}
+      }
+
+      // Check file signals
+      if (skillIndex.fileSignals) {
+        for (const [pattern, skills] of Object.entries(skillIndex.fileSignals)) {
+          const extensions = ["", ".js", ".ts", ".mjs", ".cjs", ".json", ".yml", ".yaml"];
+          const found = extensions.some((ext) =>
+            fs.existsSync(path.join(cwd, pattern + ext))
+          );
+          if (found) {
+            for (const s of skills) matchedSkills.add(s);
+          }
+        }
+      }
+
+      // Cap at 8 skills
+      const skillNames = [...matchedSkills].slice(0, 8);
+
+      if (skillNames.length > 0 && skillIndex.condensed) {
+        const lines = [];
+        for (const name of skillNames) {
+          const rules = skillIndex.condensed[name];
+          if (!rules || rules.length === 0) continue;
+          lines.push(`### ${name}`);
+          for (const rule of rules) {
+            lines.push(`- ${rule}`);
+          }
+        }
+        if (lines.length > 0) {
+          sections.push(
+            `**Active skills (${skillNames.length}):**\n${lines.join("\n")}`
+          );
+        }
+      }
+    }
+  } catch {}
+
   if (sections.length === 0) return;
 
   const context = sections.join("\n\n");

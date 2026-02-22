@@ -23,6 +23,7 @@ export interface Memory {
   embedding: Float32Array | null;
   is_metadata: boolean;
   importance: number;
+  valence: number;
   access_count: number;
   last_accessed_at: string | null;
   parent_id: string | null;
@@ -48,6 +49,7 @@ export interface CreateMemoryInput {
   session_id?: string;
   conversation_id?: string;
   importance?: number;
+  valence?: number;
   parent_id?: string;
   tags?: string[];
   metadata?: Record<string, unknown>;
@@ -70,6 +72,7 @@ export interface UpdateMemoryInput {
   session_id?: string | null;
   conversation_id?: string | null;
   importance?: number;
+  valence?: number;
   is_active?: boolean;
   tags?: string[];
   metadata?: Record<string, unknown>;
@@ -140,6 +143,7 @@ export interface MemoryRow {
   is_indexed: number;
   is_metadata: number;
   importance: number;
+  valence: number;
   access_count: number;
   last_accessed_at: string | null;
   parent_id: string | null;

@@ -9,6 +9,7 @@ export interface ScoringWeights {
   recencyDecay: number;
   graph: number;
   usefulness: number;
+  valence: number;
 }
 
 export function getWeights(db: DatabaseSync): ScoringWeights {
@@ -20,6 +21,7 @@ export function getWeights(db: DatabaseSync): ScoringWeights {
     recencyDecay: parseFloat(getSetting(db, "scoring.recency_decay") ?? "0.05"),
     graph: parseFloat(getSetting(db, "scoring.graph_weight") ?? "0.10"),
     usefulness: parseFloat(getSetting(db, "scoring.usefulness_weight") ?? "0.05"),
+    valence: parseFloat(getSetting(db, "scoring.valence_weight") ?? "0.05"),
   };
 }
 
@@ -71,6 +73,15 @@ export function frequencyScore(
 export function usefulnessScore(usefulCount: number): number {
   if (usefulCount <= 0) return 0;
   return Math.min(1.0, Math.log(1 + usefulCount) / Math.log(1 + 5));
+}
+
+/**
+ * Valence score: emotionally significant memories (positive or negative)
+ * are more retrievable, like somatic markers in human cognition.
+ * Uses absolute value — both breakthroughs (+1) and failures (-1) score high.
+ */
+export function valenceScore(valence: number): number {
+  return Math.abs(valence);
 }
 
 export function computeHybridScore(

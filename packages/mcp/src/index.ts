@@ -80,6 +80,15 @@ const server = new McpServer({
 // so first tool call doesn't pay the cost
 const db = getDb();
 initializeSchema(db);
+
+// Default attribution from environment — each MCP client can set these
+// so memories are tagged with the correct provider/model even if the caller omits them.
+const DEFAULT_ATTRIBUTION = {
+  provider: process.env.EXOCORTEX_DEFAULT_PROVIDER || undefined,
+  model_id: process.env.EXOCORTEX_DEFAULT_MODEL_ID || undefined,
+  model_name: process.env.EXOCORTEX_DEFAULT_MODEL_NAME || undefined,
+  agent: process.env.EXOCORTEX_DEFAULT_AGENT || undefined,
+};
 if (process.env.EXOCORTEX_SKIP_EMBEDDING_WARMUP !== "1") {
   getEmbeddingProvider().catch(() => {
     // Model warmup failed — will retry on first tool call
@@ -166,6 +175,7 @@ server.tool(
     content: z.string().describe("The content to remember"),
     tags: z.array(z.string()).optional().describe("Tags for categorization"),
     importance: z.number().min(0).max(1).optional().describe("Importance 0-1 (default 0.5, use 0.8+ for critical info)"),
+    valence: z.number().min(-1).max(1).optional().describe("Emotional significance (-1=failure/warning, 0=neutral, 1=breakthrough/success)"),
     content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("Content type (default 'text')"),
     provider: z.string().optional().describe("Model provider (e.g. openai, anthropic)"),
     model_id: z.string().optional().describe("Canonical model identifier (e.g. gpt-5-codex)"),
@@ -186,11 +196,12 @@ server.tool(
         content_type: args.content_type ?? "text",
         source: "mcp",
         importance: args.importance,
+        valence: args.valence,
         tags: args.tags,
-        provider: args.provider,
-        model_id: args.model_id,
-        model_name: args.model_name,
-        agent: args.agent,
+        provider: args.provider || DEFAULT_ATTRIBUTION.provider,
+        model_id: args.model_id || DEFAULT_ATTRIBUTION.model_id,
+        model_name: args.model_name || DEFAULT_ATTRIBUTION.model_name,
+        agent: args.agent || DEFAULT_ATTRIBUTION.agent,
         session_id: args.session_id,
         conversation_id: args.conversation_id,
         metadata: args.metadata,
@@ -335,6 +346,7 @@ server.tool(
         meta.push(`score: ${r.score.toFixed(3)}`);
         meta.push(`created: ${m.created_at}`);
         if (m.importance !== 0.5) meta.push(`importance: ${m.importance}`);
+        if (m.valence !== 0) meta.push(`valence: ${m.valence}`);
         return `[${m.id}] ${m.content}\n  (${meta.join(" | ")})`;
       };
 
@@ -534,6 +546,7 @@ server.tool(
         }
         meta.push(`created: ${memory.created_at}`);
         if (memory.importance !== 0.5) meta.push(`importance: ${memory.importance}`);
+        if (memory.valence !== 0) meta.push(`valence: ${memory.valence}`);
         results.push(`[${memory.id}] ${memory.content}\n  (${meta.join(" | ")})`);
       }
 
@@ -753,6 +766,7 @@ server.tool(
     session_id: z.string().nullable().optional().describe("Set/clear session identifier"),
     conversation_id: z.string().nullable().optional().describe("Set/clear conversation identifier"),
     importance: z.number().min(0).max(1).optional().describe("New importance score"),
+    valence: z.number().min(-1).max(1).optional().describe("New valence score (-1 to 1)"),
     is_metadata: z.boolean().optional().describe("Explicitly set metadata/system classification"),
     tags: z.array(z.string()).optional().describe("Replace all tags with these"),
     metadata: z.record(z.string(), z.any()).optional().describe("Merge metadata keys (set value to null to delete a key)"),
@@ -772,6 +786,7 @@ server.tool(
         updates.session_id === undefined &&
         updates.conversation_id === undefined &&
         updates.importance === undefined &&
+        updates.valence === undefined &&
         updates.is_metadata === undefined &&
         !updates.tags &&
         !updates.metadata
@@ -779,7 +794,7 @@ server.tool(
         return {
           content: [{
             type: "text",
-            text: "No update fields provided. Specify at least one of: content, content_type, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, is_metadata, tags, metadata.",
+            text: "No update fields provided. Specify at least one of: content, content_type, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, valence, is_metadata, tags, metadata.",
           }],
         };
       }
@@ -894,6 +909,7 @@ server.tool(
         meta.push(`type: ${r.content_type}`);
         meta.push(`created: ${r.created_at}`);
         if (r.importance !== 0.5) meta.push(`importance: ${r.importance}`);
+        if ((r as any).valence !== 0) meta.push(`valence: ${(r as any).valence}`);
         return `[${r.id}] ${r.content}\n  (${meta.join(" | ")})`;
       });
 

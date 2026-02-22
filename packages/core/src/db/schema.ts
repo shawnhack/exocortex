@@ -219,6 +219,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "observability.log_events": "false",
   "scoring.graph_weight": "0.10",
   "scoring.usefulness_weight": "0.05",
+  "scoring.valence_weight": "0.05",
 };
 
 function toNormalizedString(value: unknown): string | null {
@@ -597,6 +598,10 @@ export function initializeSchema(db: DatabaseSync): void {
 
   if (!colNames.has("useful_count")) {
     db.exec("ALTER TABLE memories ADD COLUMN useful_count INTEGER NOT NULL DEFAULT 0");
+  }
+
+  if (!colNames.has("valence")) {
+    db.exec("ALTER TABLE memories ADD COLUMN valence REAL NOT NULL DEFAULT 0.0");
   }
 
   if (!colNames.has("keywords")) {

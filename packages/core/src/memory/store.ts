@@ -326,8 +326,8 @@ export class MemoryStore {
     }
 
     const insertMemory = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, metadata, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertTag = this.db.prepare(
@@ -367,6 +367,7 @@ export class MemoryStore {
         benchmarkIndexed ? 1 : 0,
         input.is_metadata ? 1 : 0,
         input.importance ?? defaultImportance,
+        input.valence ?? 0,
         input.parent_id ?? null,
         input.metadata ? JSON.stringify(input.metadata) : null,
         now,
@@ -745,8 +746,8 @@ export class MemoryStore {
 
     // Insert parent (no embedding)
     const insertMemory = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, metadata, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertTag = this.db.prepare(
       "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
@@ -779,6 +780,7 @@ export class MemoryStore {
         isIndexed ? 1 : 0,
         isMetadata ? 1 : 0,
         input.importance ?? 0.5,
+        input.valence ?? 0,
         input.parent_id ?? null,
         input.metadata ? JSON.stringify(input.metadata) : null,
         now,
@@ -798,8 +800,8 @@ export class MemoryStore {
 
     // Insert chunks with individual embeddings
     const insertChunk = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, chunk_index, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, chunk_index, metadata, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const provider = isIndexed ? await getEmbeddingProvider().catch(() => null) : null;
@@ -835,6 +837,7 @@ export class MemoryStore {
           isIndexed ? 1 : 0,
           isMetadata ? 1 : 0,
           input.importance ?? 0.5,
+          input.valence ?? 0,
           parentId,
           i,
           input.metadata ? JSON.stringify(input.metadata) : null,
@@ -1103,6 +1106,11 @@ export class MemoryStore {
       params.push(input.importance);
     }
 
+    if (input.valence !== undefined) {
+      sets.push("valence = ?");
+      params.push(input.valence);
+    }
+
     if (input.is_active !== undefined) {
       sets.push("is_active = ?");
       params.push(input.is_active ? 1 : 0);
@@ -1200,7 +1208,7 @@ export class MemoryStore {
         const chunks = splitIntoChunks(replaceChunksContent, { targetSize });
         const parentRow = this.db
           .prepare(
-            "SELECT content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, metadata, is_indexed, is_metadata FROM memories WHERE id = ?"
+            "SELECT content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, valence, metadata, is_indexed, is_metadata FROM memories WHERE id = ?"
           )
           .get(id) as
           | {
@@ -1214,6 +1222,7 @@ export class MemoryStore {
               session_id: string | null;
               conversation_id: string | null;
               importance: number;
+              valence: number;
               metadata: string | null;
               is_indexed: number;
               is_metadata: number;
@@ -1226,8 +1235,8 @@ export class MemoryStore {
             .all(id) as Array<{ tag: string }>;
 
           const insertChunk = this.db.prepare(`
-            INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, parent_id, chunk_index, metadata, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, chunk_index, metadata, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `);
           const insertTag = this.db.prepare(
             "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
@@ -1268,6 +1277,7 @@ export class MemoryStore {
               parentRow.is_indexed,
               parentRow.is_metadata,
               parentRow.importance,
+              parentRow.valence,
               id,
               i,
               parentRow.metadata,
