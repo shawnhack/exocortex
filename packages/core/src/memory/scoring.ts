@@ -10,6 +10,7 @@ export interface ScoringWeights {
   graph: number;
   usefulness: number;
   valence: number;
+  goalGated: number;
 }
 
 export function getWeights(db: DatabaseSync): ScoringWeights {
@@ -22,6 +23,7 @@ export function getWeights(db: DatabaseSync): ScoringWeights {
     graph: parseFloat(getSetting(db, "scoring.graph_weight") ?? "0.10"),
     usefulness: parseFloat(getSetting(db, "scoring.usefulness_weight") ?? "0.05"),
     valence: parseFloat(getSetting(db, "scoring.valence_weight") ?? "0.05"),
+    goalGated: parseFloat(getSetting(db, "scoring.goal_gated_weight") ?? "0.10"),
   };
 }
 
@@ -82,6 +84,31 @@ export function usefulnessScore(usefulCount: number): number {
  */
 export function valenceScore(valence: number): number {
   return Math.abs(valence);
+}
+
+/**
+ * Goal relevance score: memories related to active goals surface more readily.
+ * Conway's "working self" — current goals shape what gets retrieved.
+ */
+export function goalRelevanceScore(
+  memoryTags: string[],
+  goalKeywords: Set<string>
+): number {
+  if (goalKeywords.size === 0) return 0;
+
+  // Direct goal linkage — highest signal
+  if (memoryTags.includes("goal-progress")) return 1.0;
+  if (memoryTags.includes("goal-progress-implicit")) return 0.7;
+
+  // Tag overlap with goal-derived keywords
+  let matchCount = 0;
+  for (const tag of memoryTags) {
+    if (goalKeywords.has(tag)) matchCount++;
+  }
+  if (matchCount === 0) return 0;
+
+  // Normalize: 3+ matching tags = full relevance
+  return Math.min(1.0, matchCount / Math.min(goalKeywords.size, 3));
 }
 
 export function computeHybridScore(

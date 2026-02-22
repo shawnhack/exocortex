@@ -21,6 +21,7 @@ interface MemoryWithEmbedding {
   content: string;
   embedding: Float32Array;
   created_at: string;
+  bucket?: string;
 }
 
 /**
@@ -29,20 +30,32 @@ interface MemoryWithEmbedding {
  */
 export function findClusters(
   db: DatabaseSync,
-  options: { minSimilarity?: number; minClusterSize?: number; maxMemories?: number } = {}
+  options: {
+    minSimilarity?: number;
+    minClusterSize?: number;
+    maxMemories?: number;
+    timeBucket?: 'week' | 'month';
+  } = {}
 ): ConsolidationCluster[] {
   const minSimilarity = options.minSimilarity ?? 0.75;
   const minClusterSize = options.minClusterSize ?? 3;
   const maxMemories = options.maxMemories ?? 500;
 
+  // Build bucket column expression if time-constrained clustering is requested
+  const bucketExpr = options.timeBucket === 'week'
+    ? ", strftime('%Y-W%W', created_at) as bucket"
+    : options.timeBucket === 'month'
+      ? ", strftime('%Y-%m', created_at) as bucket"
+      : '';
+
   // Get active memories with embeddings
   const rows = db
     .prepare(
-      `SELECT id, content, embedding, created_at FROM memories
+      `SELECT id, content, embedding, created_at${bucketExpr} FROM memories
        WHERE is_active = 1 AND embedding IS NOT NULL AND parent_id IS NULL
        ORDER BY created_at DESC LIMIT ?`
     )
-    .all(maxMemories) as unknown as MemoryRow[];
+    .all(maxMemories) as unknown as (MemoryRow & { bucket?: string })[];
 
   const memories: MemoryWithEmbedding[] = rows
     .filter((r) => r.embedding)
@@ -53,6 +66,7 @@ export function findClusters(
         content: r.content,
         created_at: r.created_at,
         embedding: new Float32Array(new Uint8Array(bytes).buffer),
+        bucket: r.bucket,
       };
     });
 
@@ -71,6 +85,9 @@ export function findClusters(
 
     for (const candidate of memories) {
       if (candidate.id === seed.id || assigned.has(candidate.id)) continue;
+
+      // Skip candidates in different time buckets when time-constrained
+      if (options.timeBucket && seed.bucket && candidate.bucket !== seed.bucket) continue;
 
       const sim = cosineSimilarity(seed.embedding, candidate.embedding);
       if (sim >= minSimilarity) {

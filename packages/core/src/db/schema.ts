@@ -220,6 +220,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "scoring.graph_weight": "0.10",
   "scoring.usefulness_weight": "0.05",
   "scoring.valence_weight": "0.05",
+  "scoring.goal_gated_weight": "0.10",
 };
 
 function toNormalizedString(value: unknown): string | null {

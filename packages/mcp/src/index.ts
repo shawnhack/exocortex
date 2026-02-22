@@ -957,12 +957,14 @@ server.tool(
     dry_run: z.boolean().optional().describe("Preview clusters without consolidating (default true — safe preview mode)"),
     min_similarity: z.number().min(0).max(1).optional().describe("Minimum cosine similarity for clustering (default 0.75)"),
     min_cluster_size: z.number().min(2).optional().describe("Minimum cluster size (default 3)"),
+    time_bucket: z.enum(["week", "month"]).optional().describe("Constrain clustering to same time window (week or month)"),
   },
   async (args) => {
     try {
       const clusters = findClusters(db, {
         minSimilarity: args.min_similarity,
         minClusterSize: args.min_cluster_size,
+        timeBucket: args.time_bucket,
       });
 
       if (clusters.length === 0) {

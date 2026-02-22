@@ -9,12 +9,14 @@ import {
   frequencyScore,
   usefulnessScore,
   valenceScore,
+  goalRelevanceScore,
   computeHybridScore,
   getWeights,
   getRRFConfig,
   reciprocalRankFusion,
 } from "./scoring.js";
 import { EntityStore } from "../entities/store.js";
+import { GoalStore } from "../goals/store.js";
 import { MemoryLinkStore } from "./links.js";
 import { getTagAliasMap, normalizeTags } from "./tag-normalization.js";
 import { getMetadataTags } from "./metadata-classification.js";
@@ -75,6 +77,25 @@ export class MemorySearch {
       metadataTags,
       aliasMap
     );
+
+    // Goal-gated retrieval: build keyword set from active goals
+    let goalKeywords = new Set<string>();
+    if (weights.goalGated > 0) {
+      try {
+        const goalStore = new GoalStore(this.db);
+        const activeGoals = goalStore.list("active");
+        const STOP = new Set(["the","a","an","and","or","of","to","in","for","is","on","v1","v2"]);
+        for (const goal of activeGoals) {
+          const words = goal.title.toLowerCase().split(/[\s\-_/]+/).filter((w: string) => w.length >= 2 && !STOP.has(w));
+          for (const w of words) goalKeywords.add(w);
+          const milestones = goalStore.getMilestones(goal.id);
+          for (const m of milestones) {
+            const mWords = m.title.toLowerCase().split(/[\s\-_/]+/).filter((w: string) => w.length >= 2 && !STOP.has(w));
+            for (const w of mWords) goalKeywords.add(w);
+          }
+        }
+      } catch {}
+    }
 
     // Build WHERE clauses for filtering
     const conditions: string[] = ["m.is_active = 1"];
@@ -271,6 +292,7 @@ export class MemorySearch {
       freq: number;
       usefulness: number;
       valence: number;
+      goalRelevance: number;
     }> = [];
 
     for (const row of rows) {
@@ -286,8 +308,10 @@ export class MemorySearch {
       const freq = frequencyScore(row.access_count, maxAccessCount);
       const usefulness = usefulnessScore((row as any).useful_count ?? 0);
       const valence = valenceScore((row as any).valence ?? 0);
+      const memTags = candidateTagMap.get(row.id) ?? [];
+      const goalRelevance = goalRelevanceScore(memTags, goalKeywords);
 
-      candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness, valence });
+      candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness, valence, goalRelevance });
     }
 
     // Graph-proximity scores (if weight > 0)
@@ -302,7 +326,7 @@ export class MemorySearch {
 
     // RRF or legacy scoring
     const rrfConfig = getRRFConfig(this.db);
-    const scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number; valence: number }> = [];
+    const scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number; valence: number; goalRelevance: number }> = [];
     let penalizedMetadataCount = 0;
 
     if (rrfConfig.enabled) {
@@ -360,7 +384,7 @@ export class MemorySearch {
         }
 
         // Post-RRF multiplicative boost from recency + frequency + usefulness + valence
-        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence;
+        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.goalGated * c.goalRelevance;
         let score = baseRrf * boostMultiplier;
 
         // Tag boost scaled to RRF range
@@ -380,7 +404,7 @@ export class MemorySearch {
         }
 
         if (score >= rrfMinScore) {
-          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence });
+          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, goalRelevance: c.goalRelevance });
         }
       }
     } else {
@@ -394,9 +418,10 @@ export class MemorySearch {
           weights
         );
 
-        // Additive usefulness + valence boosts (only positive, never penalizes)
+        // Additive usefulness + valence + goal boosts (only positive, never penalizes)
         score += weights.usefulness * c.usefulness;
         score += weights.valence * c.valence;
+        score += weights.goalGated * c.goalRelevance;
 
         if (tagBoost > 0 && queryTerms.length > 0) {
           const memTags = candidateTagMap.get(c.row.id);
@@ -421,7 +446,7 @@ export class MemorySearch {
         }
 
         if (score >= minScore) {
-          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence });
+          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, goalRelevance: c.goalRelevance });
         }
       }
     }

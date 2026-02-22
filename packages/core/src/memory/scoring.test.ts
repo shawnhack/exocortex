@@ -5,6 +5,7 @@ import {
   cosineSimilarity,
   computeHybridScore,
   reciprocalRankFusion,
+  goalRelevanceScore,
 } from "./scoring.js";
 
 describe("scoring", () => {
@@ -183,6 +184,43 @@ describe("scoring", () => {
     });
   });
 
+  describe("goalRelevanceScore", () => {
+    it("should return 0 when no goal keywords", () => {
+      expect(goalRelevanceScore(["foo", "bar"], new Set())).toBe(0);
+    });
+
+    it("should return 1.0 for goal-progress tag", () => {
+      expect(goalRelevanceScore(["goal-progress", "other"], new Set(["memory"]))).toBe(1.0);
+    });
+
+    it("should return 0.7 for goal-progress-implicit tag", () => {
+      expect(goalRelevanceScore(["goal-progress-implicit"], new Set(["memory"]))).toBe(0.7);
+    });
+
+    it("should prefer goal-progress over goal-progress-implicit", () => {
+      expect(
+        goalRelevanceScore(["goal-progress", "goal-progress-implicit"], new Set(["memory"]))
+      ).toBe(1.0);
+    });
+
+    it("should score based on tag overlap with goal keywords", () => {
+      const keywords = new Set(["memory", "hygiene", "exocortex"]);
+      expect(goalRelevanceScore(["memory"], keywords)).toBeCloseTo(1 / 3);
+      expect(goalRelevanceScore(["memory", "hygiene"], keywords)).toBeCloseTo(2 / 3);
+      expect(goalRelevanceScore(["memory", "hygiene", "exocortex"], keywords)).toBe(1.0);
+    });
+
+    it("should return 0 when no tags match keywords", () => {
+      expect(goalRelevanceScore(["unrelated"], new Set(["memory", "hygiene"]))).toBe(0);
+    });
+
+    it("should cap at 1.0 with many matching tags", () => {
+      const keywords = new Set(["a", "b"]);
+      // min(keywords.size, 3) = 2, so 2 matches / 2 = 1.0
+      expect(goalRelevanceScore(["a", "b", "c"], keywords)).toBe(1.0);
+    });
+  });
+
   describe("computeHybridScore", () => {
     it("should weight scores correctly", () => {
       const weights = {
@@ -194,6 +232,7 @@ describe("scoring", () => {
         graph: 0,
         usefulness: 0.05,
         valence: 0.05,
+        goalGated: 0.10,
       };
 
       const score = computeHybridScore(1.0, 1.0, 1.0, 1.0, weights);
@@ -210,6 +249,7 @@ describe("scoring", () => {
         graph: 0,
         usefulness: 0.05,
         valence: 0.05,
+        goalGated: 0.10,
       };
 
       const score = computeHybridScore(0, 0, 0, 0, weights);
