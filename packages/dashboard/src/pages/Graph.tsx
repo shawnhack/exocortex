@@ -22,6 +22,8 @@ interface Edge {
 }
 
 const DEFAULT_COLOR = "#22d3ee";
+const ALPHA_DECAY = 0.998;
+const ALPHA_MIN = 0.001;
 
 const hexToRgba = (hex: string, alpha: number): string => {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -103,16 +105,82 @@ export function Graph() {
     scaleRef.current = 1;
   }, [data]);
 
-  // Force simulation + rendering
-  useEffect(() => {
+  // Render function — can be called from anywhere via ref
+  const renderGraph = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const nodes = nodesRef.current;
+    const edges = edgesRef.current;
+    if (nodes.length === 0) return;
+
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+    const dpr = window.devicePixelRatio || 1;
+    const cw = canvas.clientWidth;
+    const ch = canvas.clientHeight;
+    if (canvas.width !== cw * dpr || canvas.height !== ch * dpr) {
+      canvas.width = cw * dpr;
+      canvas.height = ch * dpr;
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cw, ch);
+
+    ctx.save();
+    ctx.translate(panRef.current.x, panRef.current.y);
+    ctx.scale(scaleRef.current, scaleRef.current);
+
+    // Draw edges
+    for (const edge of edges) {
+      const s = nodeMap.get(edge.source);
+      const t = nodeMap.get(edge.target);
+      if (!s || !t) continue;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(t.x, t.y);
+      ctx.strokeStyle = "rgba(34, 211, 238, 0.12)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Draw nodes
+    const hovered = hoveredRef.current;
+    for (const node of nodes) {
+      const color = node.tags.length > 0 ? tagColor(node.tags[0]) : DEFAULT_COLOR;
+      const isHovered = hovered === node;
+      const r = isHovered ? 9 : node.radius;
+
+      // Glow
+      if (isHovered) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r + 6, 0, Math.PI * 2);
+        ctx.fillStyle = hexToRgba(color, 0.15);
+        ctx.fill();
+      }
+
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+
+      // Label
+      ctx.font = `${isHovered ? "600 12px" : "11px"} system-ui, sans-serif`;
+      ctx.fillStyle = isHovered ? "#e8e8f4" : "#a0a0be";
+      ctx.textAlign = "center";
+      ctx.fillText(node.name, node.x, node.y + r + 14);
+    }
+
+    ctx.restore();
+  }, []);
+
+  // Force simulation loop — only runs physics, calls renderGraph
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
     alphaRef.current = 1;
-    const ALPHA_DECAY = 0.998;
-    const ALPHA_MIN = 0.001;
 
     function tick() {
       const nodes = nodesRef.current;
@@ -187,63 +255,7 @@ export function Graph() {
         alphaRef.current = alpha * ALPHA_DECAY;
       }
 
-      // Render
-      const dpr = window.devicePixelRatio || 1;
-      const cw = canvas!.clientWidth;
-      const ch = canvas!.clientHeight;
-      if (canvas!.width !== cw * dpr || canvas!.height !== ch * dpr) {
-        canvas!.width = cw * dpr;
-        canvas!.height = ch * dpr;
-      }
-
-      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx!.clearRect(0, 0, cw, ch);
-
-      ctx!.save();
-      ctx!.translate(panRef.current.x, panRef.current.y);
-      ctx!.scale(scaleRef.current, scaleRef.current);
-
-      // Draw edges
-      for (const edge of edges) {
-        const s = nodeMap.get(edge.source);
-        const t = nodeMap.get(edge.target);
-        if (!s || !t) continue;
-        ctx!.beginPath();
-        ctx!.moveTo(s.x, s.y);
-        ctx!.lineTo(t.x, t.y);
-        ctx!.strokeStyle = "rgba(34, 211, 238, 0.12)";
-        ctx!.lineWidth = 1;
-        ctx!.stroke();
-      }
-
-      // Draw nodes
-      const hovered = hoveredRef.current;
-      for (const node of nodes) {
-        const color = node.tags.length > 0 ? tagColor(node.tags[0]) : DEFAULT_COLOR;
-        const isHovered = hovered === node;
-        const r = isHovered ? 9 : node.radius;
-
-        // Glow
-        if (isHovered) {
-          ctx!.beginPath();
-          ctx!.arc(node.x, node.y, r + 6, 0, Math.PI * 2);
-          ctx!.fillStyle = hexToRgba(color, 0.15);
-          ctx!.fill();
-        }
-
-        ctx!.beginPath();
-        ctx!.arc(node.x, node.y, r, 0, Math.PI * 2);
-        ctx!.fillStyle = color;
-        ctx!.fill();
-
-        // Label
-        ctx!.font = `${isHovered ? "600 12px" : "11px"} system-ui, sans-serif`;
-        ctx!.fillStyle = isHovered ? "#e8e8f4" : "#a0a0be";
-        ctx!.textAlign = "center";
-        ctx!.fillText(node.name, node.x, node.y + r + 14);
-      }
-
-      ctx!.restore();
+      renderGraph();
 
       if (alphaRef.current > ALPHA_MIN) {
         animRef.current = requestAnimationFrame(tick);
@@ -252,29 +264,21 @@ export function Graph() {
       }
     }
 
-    function startAnimation() {
-      if (animRunningRef.current) return;
-      animRunningRef.current = true;
-      animRef.current = requestAnimationFrame(tick);
-    }
+    animRunningRef.current = true;
+    animRef.current = requestAnimationFrame(tick);
 
-    // Expose startAnimation via a ref-accessible mechanism
-    (canvasRef.current as any).__startAnimation = startAnimation;
-
-    startAnimation();
     return () => {
       animRunningRef.current = false;
       cancelAnimationFrame(animRef.current);
     };
-  }, [data]);
+  }, [data, renderGraph]);
 
-  // Helper to restart animation on interaction
-  const startAnimation = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (canvas && (canvas as any).__startAnimation) {
-      (canvas as any).__startAnimation();
-    }
-  }, []);
+  // Schedule a single render frame — used by interaction handlers when
+  // the physics loop has stopped. This is completely independent of the
+  // animation loop and always works.
+  const scheduleRender = useCallback(() => {
+    requestAnimationFrame(() => renderGraph());
+  }, [renderGraph]);
 
   // Mouse interaction handlers
   const screenToWorld = useCallback((sx: number, sy: number) => {
@@ -300,6 +304,7 @@ export function Graph() {
     if (!canvas) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      e.stopPropagation();
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
@@ -309,11 +314,11 @@ export function Graph() {
       panRef.current.x = mx - (mx - panRef.current.x) * (newScale / prevScale);
       panRef.current.y = my - (my - panRef.current.y) * (newScale / prevScale);
       scaleRef.current = newScale;
-      startAnimation();
+      scheduleRender();
     };
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", onWheel);
-  }, [startAnimation]);
+  }, [scheduleRender, data]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -325,13 +330,12 @@ export function Graph() {
     if (node) {
       dragRef.current = { node, offsetX: node.x - x, offsetY: node.y - y };
       alphaRef.current = Math.max(alphaRef.current, 0.3);
-      startAnimation();
+      scheduleRender();
     } else {
       isPanningRef.current = true;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
-      startAnimation();
     }
-  }, [screenToWorld, findNode, startAnimation]);
+  }, [screenToWorld, findNode, scheduleRender]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -344,23 +348,23 @@ export function Graph() {
       dragRef.current.node.y = y + dragRef.current.offsetY;
       dragRef.current.node.vx = 0;
       dragRef.current.node.vy = 0;
-      startAnimation();
+      scheduleRender();
     } else if (isPanningRef.current) {
       panRef.current.x += e.clientX - lastMouseRef.current.x;
       panRef.current.y += e.clientY - lastMouseRef.current.y;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
-      startAnimation();
+      scheduleRender();
     } else {
       const nextHovered = findNode(x, y);
       if (hoveredRef.current !== nextHovered) {
         hoveredRef.current = nextHovered;
-        startAnimation();
+        scheduleRender();
       } else {
         hoveredRef.current = nextHovered;
       }
       canvasRef.current!.style.cursor = hoveredRef.current ? "pointer" : "grab";
     }
-  }, [screenToWorld, findNode, startAnimation]);
+  }, [screenToWorld, findNode, scheduleRender]);
 
   const handleMouseUp = useCallback(() => {
     dragRef.current = { node: null, offsetX: 0, offsetY: 0 };
@@ -439,7 +443,7 @@ export function Graph() {
       >
         <canvas
           ref={canvasRef}
-          style={{ width: "100%", height: "100%", cursor: "grab" }}
+          style={{ width: "100%", height: "100%", cursor: "grab", touchAction: "none" }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
