@@ -172,9 +172,9 @@ export function Entities() {
             >
               <div
                 style={{
-                  background: selected ? "rgba(139, 92, 246, 0.05)" : "#0c0c1d",
-                  border: `1px solid ${selected ? "rgba(139, 92, 246, 0.35)" : "#16163a"}`,
-                  borderLeft: `3px solid ${selected ? "#8b5cf6" : borderColor}`,
+                  background: selected ? "rgba(34, 211, 238, 0.05)" : "#0c0c1d",
+                  border: `1px solid ${selected ? "rgba(34, 211, 238, 0.35)" : "#16163a"}`,
+                  borderLeft: `3px solid ${selected ? "#22d3ee" : borderColor}`,
                   borderRadius: 10,
                   padding: "14px 16px",
                   display: "flex",
@@ -192,8 +192,8 @@ export function Entities() {
                         width: 20,
                         height: 20,
                         borderRadius: 6,
-                        border: `2px solid ${selected ? "#8b5cf6" : "#16163a"}`,
-                        background: selected ? "#8b5cf6" : "transparent",
+                        border: `2px solid ${selected ? "#22d3ee" : "#16163a"}`,
+                        background: selected ? "#22d3ee" : "transparent",
                         transition: "all 0.2s",
                         display: "flex",
                         alignItems: "center",
@@ -202,7 +202,7 @@ export function Entities() {
                       }}
                     >
                       {selected && (
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
                         </svg>
                       )}
@@ -267,13 +267,13 @@ export function Entities() {
             left: "50%",
             transform: "translateX(-50%)",
             background: "#0c0c1d",
-            border: "1px solid rgba(139, 92, 246, 0.3)",
+            border: "1px solid rgba(34, 211, 238, 0.3)",
             borderRadius: 14,
             padding: "10px 20px",
             display: "flex",
             alignItems: "center",
             gap: 16,
-            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(139, 92, 246, 0.08)",
+            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(34, 211, 238, 0.08)",
             zIndex: 100,
             animation: "fadeIn 0.2s ease-out",
           }}
@@ -282,7 +282,7 @@ export function Entities() {
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 13,
-              color: selectedIds.size > 0 ? "#a78bfa" : "#8080a0",
+              color: selectedIds.size > 0 ? "#67e8f9" : "#8080a0",
               fontWeight: 600,
               minWidth: 90,
             }}

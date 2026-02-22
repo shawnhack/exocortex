@@ -22,7 +22,7 @@ function RelationshipGraph({
   const cx = width / 2;
   const cy = height / 2;
   const radius = 155;
-  const centerColor = entityTags.length > 0 ? tagColor(entityTags[0]) : "#8b5cf6";
+  const centerColor = entityTags.length > 0 ? tagColor(entityTags[0]) : "#22d3ee";
 
   // Collect distinct tags for glow filters
   const allColors = new Set<string>();
@@ -198,7 +198,7 @@ function RelationshipRow({
         padding: "8px 10px",
         fontSize: 13,
         borderRadius: 6,
-        background: hovered ? "rgba(139, 92, 246, 0.04)" : "transparent",
+        background: hovered ? "rgba(34, 211, 238, 0.04)" : "transparent",
         transition: "background 0.15s",
       }}
     >
@@ -407,7 +407,7 @@ export function EntityDetail() {
           marginBottom: 16,
           transition: "color 0.15s",
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = "#8b5cf6"; }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "#22d3ee"; }}
         onMouseLeave={(e) => { e.currentTarget.style.color = "#8080a0"; }}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -458,7 +458,7 @@ export function EntityDetail() {
       {relationships.length > 0 && (
         <div style={{ marginBottom: 24, animation: "slideUp 0.3s ease-out 0.06s both" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
               <path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98" />
             </svg>

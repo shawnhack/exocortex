@@ -6,7 +6,7 @@ import { useToast } from "../components/Toast";
 
 const STATUS_COLORS: Record<string, { color: string; bg: string }> = {
   active: { color: "#34d399", bg: "rgba(52, 211, 153, 0.15)" },
-  completed: { color: "#8b5cf6", bg: "rgba(139, 92, 246, 0.15)" },
+  completed: { color: "#38bdf8", bg: "rgba(56, 189, 248, 0.15)" },
   stalled: { color: "#fbbf24", bg: "rgba(251, 191, 36, 0.15)" },
   abandoned: { color: "#8080a0", bg: "rgba(128, 128, 160, 0.1)" },
 };
@@ -107,9 +107,9 @@ export function Goals() {
         <button
           onClick={() => setShowCreate(!showCreate)}
           style={{
-            background: "rgba(139, 92, 246, 0.15)",
-            color: "#8b5cf6",
-            border: "1px solid rgba(139, 92, 246, 0.3)",
+            background: "rgba(34, 211, 238, 0.15)",
+            color: "#22d3ee",
+            border: "1px solid rgba(34, 211, 238, 0.3)",
             borderRadius: 8,
             padding: "8px 16px",
             fontSize: 13,
@@ -117,8 +117,8 @@ export function Goals() {
             cursor: "pointer",
             transition: "all 0.15s",
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(139, 92, 246, 0.25)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(139, 92, 246, 0.15)"; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(34, 211, 238, 0.25)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(34, 211, 238, 0.15)"; }}
         >
           + New Goal
         </button>
@@ -129,7 +129,7 @@ export function Goals() {
         <div
           style={{
             background: "#0c0c1d",
-            border: "1px solid rgba(139, 92, 246, 0.3)",
+            border: "1px solid rgba(34, 211, 238, 0.3)",
             borderRadius: 12,
             padding: 20,
             marginBottom: 20,
@@ -151,7 +151,7 @@ export function Goals() {
               marginBottom: 10,
               outline: "none",
             }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = "#8b5cf6"; }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
             onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
           />
           <textarea
@@ -196,8 +196,8 @@ export function Goals() {
               onClick={() => createMutation.mutate()}
               disabled={!newTitle.trim() || createMutation.isPending}
               style={{
-                background: "#8b5cf6",
-                color: "#fff",
+                background: "#22d3ee",
+                color: "#000",
                 border: "none",
                 borderRadius: 6,
                 padding: "7px 18px",
@@ -226,9 +226,9 @@ export function Goals() {
             key={s}
             onClick={() => setStatusFilter(s)}
             style={{
-              background: statusFilter === s ? "rgba(139, 92, 246, 0.15)" : "transparent",
-              color: statusFilter === s ? "#8b5cf6" : "#8080a0",
-              border: "1px solid " + (statusFilter === s ? "rgba(139, 92, 246, 0.3)" : "transparent"),
+              background: statusFilter === s ? "rgba(34, 211, 238, 0.15)" : "transparent",
+              color: statusFilter === s ? "#22d3ee" : "#8080a0",
+              border: "1px solid " + (statusFilter === s ? "rgba(34, 211, 238, 0.3)" : "transparent"),
               borderRadius: 20,
               padding: "5px 14px",
               fontSize: 12,
@@ -263,7 +263,7 @@ export function Goals() {
                 key={goal.id}
                 style={{
                   background: "#0c0c1d",
-                  border: `1px solid ${isExpanded ? "rgba(139, 92, 246, 0.3)" : "#16163a"}`,
+                  border: `1px solid ${isExpanded ? "rgba(34, 211, 238, 0.3)" : "#16163a"}`,
                   borderRadius: 10,
                   overflow: "hidden",
                   transition: "border-color 0.2s",
@@ -280,7 +280,7 @@ export function Goals() {
                     gap: 12,
                     transition: "background 0.15s",
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(139, 92, 246, 0.03)"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(34, 211, 238, 0.03)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
                 >
                   {/* Priority dot */}
@@ -370,7 +370,7 @@ export function Goals() {
                           <div style={{
                             height: "100%",
                             width: `${milestones.length > 0 ? (milestonesDone / milestones.length) * 100 : 0}%`,
-                            background: "linear-gradient(90deg, #8b5cf6, #22d3ee)",
+                            background: "linear-gradient(90deg, #06b6d4, #22d3ee)",
                             borderRadius: 2,
                             transition: "width 0.3s",
                           }} />
@@ -380,11 +380,11 @@ export function Goals() {
                             <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
                               <div style={{
                                 width: 16, height: 16, borderRadius: 4, border: "1px solid #16163a",
-                                background: m.status === "completed" ? "#8b5cf6" : "transparent",
+                                background: m.status === "completed" ? "#22d3ee" : "transparent",
                                 display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
                               }}>
                                 {m.status === "completed" && (
-                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6L9 17l-5-5" /></svg>
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3"><path d="M20 6L9 17l-5-5" /></svg>
                                 )}
                               </div>
                               <span style={{ color: m.status === "completed" ? "#8080a0" : "#d0d0e0", textDecoration: m.status === "completed" ? "line-through" : "none" }}>
@@ -418,7 +418,7 @@ export function Goals() {
                                 cursor: "pointer",
                                 transition: "border-color 0.15s",
                               }}
-                              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(139, 92, 246, 0.3)"; }}
+                              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(34, 211, 238, 0.3)"; }}
                               onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
                             >
                               <span style={{ color: "#8080a0", marginRight: 8 }}>{timeAgo(p.created_at)}</span>

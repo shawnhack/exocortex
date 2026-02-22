@@ -5,7 +5,7 @@ import { api, type Memory } from "../api/client";
 import { useToast } from "../components/Toast";
 
 const FACT_TAG_COLORS: Record<string, { color: string; bg: string }> = {
-  decision: { color: "#8b5cf6", bg: "rgba(139, 92, 246, 0.15)" },
+  decision: { color: "#38bdf8", bg: "rgba(56, 189, 248, 0.15)" },
   discovery: { color: "#22d3ee", bg: "rgba(34, 211, 238, 0.15)" },
   architecture: { color: "#34d399", bg: "rgba(52, 211, 153, 0.15)" },
   learning: { color: "#fbbf24", bg: "rgba(251, 191, 36, 0.15)" },
@@ -219,7 +219,7 @@ export function MemoryDetail() {
     ? Object.entries(memory.metadata).filter(([key]) => !metadataHiddenKeys.has(key))
     : [];
 
-  const importanceColor = editImportance >= 0.8 ? "#f472b6" : editImportance >= 0.5 ? "#8b5cf6" : editImportance >= 0.3 ? "#22d3ee" : "#8080a0";
+  const importanceColor = editImportance >= 0.8 ? "#f472b6" : editImportance >= 0.5 ? "#22d3ee" : editImportance >= 0.3 ? "#22d3ee" : "#8080a0";
 
   return (
     <div>
@@ -239,7 +239,7 @@ export function MemoryDetail() {
           gap: 4,
           transition: "color 0.15s",
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = "#8b5cf6"; }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "#22d3ee"; }}
         onMouseLeave={(e) => { e.currentTarget.style.color = "#8080a0"; }}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -266,7 +266,7 @@ export function MemoryDetail() {
       <div
         style={{
           background: "#0c0c1d",
-          border: `1px solid ${isEditing ? "rgba(139, 92, 246, 0.3)" : "#16163a"}`,
+          border: `1px solid ${isEditing ? "rgba(34, 211, 238, 0.3)" : "#16163a"}`,
           borderRadius: 12,
           padding: 24,
           marginBottom: 24,
@@ -281,9 +281,9 @@ export function MemoryDetail() {
               data-testid="memory-edit-button"
               onClick={startEditing}
               style={{
-                background: "rgba(139, 92, 246, 0.15)",
-                color: "#8b5cf6",
-                border: "1px solid rgba(139, 92, 246, 0.3)",
+                background: "rgba(34, 211, 238, 0.15)",
+                color: "#22d3ee",
+                border: "1px solid rgba(34, 211, 238, 0.3)",
                 borderRadius: 6,
                 padding: "5px 14px",
                 fontSize: 12,
@@ -295,11 +295,11 @@ export function MemoryDetail() {
                 transition: "all 0.15s",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(139, 92, 246, 0.25)";
-                e.currentTarget.style.boxShadow = "0 0 12px rgba(139, 92, 246, 0.15)";
+                e.currentTarget.style.background = "rgba(34, 211, 238, 0.25)";
+                e.currentTarget.style.boxShadow = "0 0 12px rgba(34, 211, 238, 0.15)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(139, 92, 246, 0.15)";
+                e.currentTarget.style.background = "rgba(34, 211, 238, 0.15)";
                 e.currentTarget.style.boxShadow = "none";
               }}
             >
@@ -317,7 +317,7 @@ export function MemoryDetail() {
             {/* Edit mode header */}
             <div style={{
               display: "flex", alignItems: "center", gap: 6, marginBottom: 12,
-              fontSize: 11, color: "#8b5cf6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em",
+              fontSize: 11, color: "#22d3ee", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em",
             }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -346,8 +346,8 @@ export function MemoryDetail() {
                 outline: "none",
               }}
               onFocus={(e) => {
-                e.currentTarget.style.borderColor = "#8b5cf6";
-                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(139, 92, 246, 0.12)";
+                e.currentTarget.style.borderColor = "#22d3ee";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(34, 211, 238, 0.12)";
               }}
               onBlur={(e) => {
                 e.currentTarget.style.borderColor = "#16163a";
@@ -377,7 +377,7 @@ export function MemoryDetail() {
                     outline: "none",
                     transition: "border-color 0.2s",
                   }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = "#8b5cf6"; }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
                   onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
                 />
               </div>
@@ -402,7 +402,7 @@ export function MemoryDetail() {
                     outline: "none",
                     transition: "border-color 0.2s",
                   }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = "#8b5cf6"; }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
                   onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
                 />
               </div>
@@ -427,7 +427,7 @@ export function MemoryDetail() {
                     outline: "none",
                     transition: "border-color 0.2s",
                   }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = "#8b5cf6"; }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
                   onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
                 />
               </div>
@@ -445,8 +445,8 @@ export function MemoryDetail() {
                     <span
                       key={tag}
                       style={{
-                        background: factColor?.bg ?? "rgba(139, 92, 246, 0.15)",
-                        color: factColor?.color ?? "#8b5cf6",
+                        background: factColor?.bg ?? "rgba(34, 211, 238, 0.15)",
+                        color: factColor?.color ?? "#22d3ee",
                         padding: "4px 10px",
                         borderRadius: 20,
                         fontSize: 12,
@@ -495,23 +495,23 @@ export function MemoryDetail() {
                     outline: "none",
                     transition: "border-color 0.2s",
                   }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = "#8b5cf6"; }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
                   onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
                 />
                 <button
                   onClick={addTag}
                   style={{
-                    background: "rgba(139, 92, 246, 0.15)",
-                    color: "#8b5cf6",
-                    border: "1px solid rgba(139, 92, 246, 0.3)",
+                    background: "rgba(34, 211, 238, 0.15)",
+                    color: "#22d3ee",
+                    border: "1px solid rgba(34, 211, 238, 0.3)",
                     borderRadius: 6,
                     padding: "5px 12px",
                     fontSize: 12,
                     cursor: "pointer",
                     transition: "all 0.15s",
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(139, 92, 246, 0.25)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(139, 92, 246, 0.15)"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(34, 211, 238, 0.25)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(34, 211, 238, 0.15)"; }}
                 >
                   Add
                 </button>
@@ -584,8 +584,8 @@ export function MemoryDetail() {
                 onClick={handleSave}
                 disabled={updateMutation.isPending}
                 style={{
-                  background: "#8b5cf6",
-                  color: "#fff",
+                  background: "#22d3ee",
+                  color: "#000",
                   border: "none",
                   borderRadius: 8,
                   padding: "8px 20px",
@@ -598,7 +598,7 @@ export function MemoryDetail() {
                   alignItems: "center",
                   gap: 6,
                 }}
-                onMouseEnter={(e) => { if (!updateMutation.isPending) e.currentTarget.style.boxShadow = "0 0 20px rgba(139, 92, 246, 0.3)"; }}
+                onMouseEnter={(e) => { if (!updateMutation.isPending) e.currentTarget.style.boxShadow = "0 0 20px rgba(34, 211, 238, 0.3)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "none"; }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -660,8 +660,8 @@ export function MemoryDetail() {
                 key={tag}
                 onClick={() => navigate(`/?tag=${encodeURIComponent(tag)}`)}
                 style={{
-                  background: factColor?.bg ?? "rgba(139, 92, 246, 0.15)",
-                  color: factColor?.color ?? "#8b5cf6",
+                  background: factColor?.bg ?? "rgba(34, 211, 238, 0.15)",
+                  color: factColor?.color ?? "#22d3ee",
                   padding: "4px 14px",
                   borderRadius: 20,
                   fontSize: 12,
@@ -815,7 +815,7 @@ export function MemoryDetail() {
 }
 
 const LINK_TYPE_COLORS: Record<string, string> = {
-  related: "#8b5cf6",
+  related: "#38bdf8",
   elaborates: "#22d3ee",
   contradicts: "#f87171",
   supersedes: "#fbbf24",
@@ -849,7 +849,7 @@ function LinkedMemories({ memoryId }: { memoryId: string }) {
         style={{
           fontSize: 12,
           fontWeight: 600,
-          color: "#8b5cf6",
+          color: "#22d3ee",
           marginBottom: 14,
           textTransform: "uppercase",
           letterSpacing: "0.05em",
@@ -876,11 +876,11 @@ function LinkedMemories({ memoryId }: { memoryId: string }) {
               padding: "10px 14px",
               cursor: "pointer",
               transition: "all 0.15s",
-              borderLeft: `3px solid ${LINK_TYPE_COLORS[link.link_type] ?? "#8b5cf6"}`,
+              borderLeft: `3px solid ${LINK_TYPE_COLORS[link.link_type] ?? "#22d3ee"}`,
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = "#0a0a18";
-              e.currentTarget.style.boxShadow = "0 0 8px rgba(139, 92, 246, 0.1)";
+              e.currentTarget.style.boxShadow = "0 0 8px rgba(34, 211, 238, 0.1)";
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = "#06060e";
@@ -892,7 +892,7 @@ function LinkedMemories({ memoryId }: { memoryId: string }) {
                 style={{
                   fontSize: 10,
                   fontWeight: 600,
-                  color: LINK_TYPE_COLORS[link.link_type] ?? "#8b5cf6",
+                  color: LINK_TYPE_COLORS[link.link_type] ?? "#22d3ee",
                   textTransform: "uppercase",
                   letterSpacing: "0.05em",
                 }}

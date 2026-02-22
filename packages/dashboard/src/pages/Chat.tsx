@@ -86,9 +86,9 @@ export function Chat() {
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
-              background: "rgba(139, 92, 246, 0.15)",
-              color: "#8b5cf6",
-              border: "1px solid rgba(139, 92, 246, 0.3)",
+              background: "rgba(34, 211, 238, 0.15)",
+              color: "#22d3ee",
+              border: "1px solid rgba(34, 211, 238, 0.3)",
               borderRadius: 8,
               padding: "8px 16px",
               fontSize: 13,
@@ -151,9 +151,9 @@ export function Chat() {
                   lineHeight: 1.6,
                   whiteSpace: "pre-wrap",
                   background: msg.role === "user"
-                    ? "linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(139, 92, 246, 0.1))"
+                    ? "linear-gradient(135deg, rgba(34, 211, 238, 0.2), rgba(34, 211, 238, 0.1))"
                     : "#0c0c1d",
-                  border: `1px solid ${msg.role === "user" ? "rgba(139, 92, 246, 0.3)" : "#16163a"}`,
+                  border: `1px solid ${msg.role === "user" ? "rgba(34, 211, 238, 0.3)" : "#16163a"}`,
                   color: "#e8e8f4",
                 }}
               >
@@ -235,7 +235,7 @@ export function Chat() {
             outline: "none",
             transition: "border-color 0.2s",
           }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(139, 92, 246, 0.4)"; }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(34, 211, 238, 0.4)"; }}
           onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
           disabled={loading}
         />

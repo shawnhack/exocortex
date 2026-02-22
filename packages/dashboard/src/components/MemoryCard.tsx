@@ -22,7 +22,7 @@ function timeAgo(dateStr: string): string {
 }
 
 const FACT_TAG_COLORS: Record<string, { color: string; bg: string; border: string }> = {
-  decision: { color: "#8b5cf6", bg: "rgba(139, 92, 246, 0.1)", border: "rgba(139, 92, 246, 0.2)" },
+  decision: { color: "#38bdf8", bg: "rgba(56, 189, 248, 0.1)", border: "rgba(56, 189, 248, 0.2)" },
   discovery: { color: "#22d3ee", bg: "rgba(34, 211, 238, 0.1)", border: "rgba(34, 211, 238, 0.2)" },
   architecture: { color: "#34d399", bg: "rgba(52, 211, 153, 0.1)", border: "rgba(52, 211, 153, 0.2)" },
   learning: { color: "#fbbf24", bg: "rgba(251, 191, 36, 0.1)", border: "rgba(251, 191, 36, 0.2)" },
@@ -123,9 +123,9 @@ export function MemoryCard({
               height: "100%",
               width: `${Math.min(score * 100, 100)}%`,
               borderRadius: 1,
-              background: "linear-gradient(90deg, #8b5cf6, #22d3ee)",
+              background: "linear-gradient(90deg, #06b6d4, #22d3ee)",
               transition: "width 0.4s ease-out",
-              boxShadow: "0 0 6px rgba(139, 92, 246, 0.2)",
+              boxShadow: "0 0 6px rgba(34, 211, 238, 0.2)",
             }}
           />
         </div>
@@ -148,9 +148,9 @@ export function MemoryCard({
               key={tag}
               onClick={onTagClick ? (e) => { e.preventDefault(); e.stopPropagation(); onTagClick(tag); } : undefined}
               style={{
-                background: factColor?.bg ?? "rgba(139, 92, 246, 0.08)",
-                color: factColor?.color ?? "#8b5cf6",
-                border: `1px solid ${factColor?.border ?? "rgba(139, 92, 246, 0.12)"}`,
+                background: factColor?.bg ?? "rgba(34, 211, 238, 0.08)",
+                color: factColor?.color ?? "#22d3ee",
+                border: `1px solid ${factColor?.border ?? "rgba(34, 211, 238, 0.12)"}`,
                 padding: "1px 9px",
                 borderRadius: 20,
                 fontSize: 10,
@@ -184,8 +184,8 @@ export function MemoryCard({
   const cardStyle = {
     flex: 1,
     minWidth: 0,
-    background: selected ? "rgba(139, 92, 246, 0.05)" : "#0c0c1d",
-    border: `1px solid ${selected ? "rgba(139, 92, 246, 0.35)" : "#16163a"}`,
+    background: selected ? "rgba(34, 211, 238, 0.05)" : "#0c0c1d",
+    border: `1px solid ${selected ? "rgba(34, 211, 238, 0.35)" : "#16163a"}`,
     borderRadius: 10,
     padding: 16,
     marginBottom: 8,
@@ -200,8 +200,8 @@ export function MemoryCard({
 
   const handleMouseEnter = (e: React.MouseEvent<HTMLElement>) => {
     if (!selected) {
-      e.currentTarget.style.borderColor = "rgba(139, 92, 246, 0.35)";
-      e.currentTarget.style.boxShadow = "0 0 20px rgba(139, 92, 246, 0.06), 0 0 60px rgba(139, 92, 246, 0.02)";
+      e.currentTarget.style.borderColor = "rgba(34, 211, 238, 0.35)";
+      e.currentTarget.style.boxShadow = "0 0 20px rgba(34, 211, 238, 0.06), 0 0 60px rgba(34, 211, 238, 0.02)";
       e.currentTarget.style.background = "#0e0e22";
     }
   };
@@ -223,7 +223,7 @@ export function MemoryCard({
           left: 0,
           width: 20,
           height: 1,
-          background: "linear-gradient(90deg, rgba(139, 92, 246, 0.4), transparent)",
+          background: "linear-gradient(90deg, rgba(34, 211, 238, 0.4), transparent)",
         }}
       />
       <div
@@ -233,7 +233,7 @@ export function MemoryCard({
           left: 0,
           width: 1,
           height: 20,
-          background: "linear-gradient(180deg, rgba(139, 92, 246, 0.4), transparent)",
+          background: "linear-gradient(180deg, rgba(34, 211, 238, 0.4), transparent)",
         }}
       />
     </>
@@ -259,8 +259,8 @@ export function MemoryCard({
             width: 20,
             height: 20,
             borderRadius: 6,
-            border: `2px solid ${selected ? "#8b5cf6" : "#16163a"}`,
-            background: selected ? "#8b5cf6" : "transparent",
+            border: `2px solid ${selected ? "#22d3ee" : "#16163a"}`,
+            background: selected ? "#22d3ee" : "transparent",
             transition: "all 0.2s",
             display: "flex",
             alignItems: "center",
@@ -268,7 +268,7 @@ export function MemoryCard({
           }}
         >
           {selected && (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
             </svg>
           )}

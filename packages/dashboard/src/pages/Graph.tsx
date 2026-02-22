@@ -21,7 +21,7 @@ interface Edge {
   label: string;
 }
 
-const DEFAULT_COLOR = "#8b5cf6";
+const DEFAULT_COLOR = "#22d3ee";
 
 const hexToRgba = (hex: string, alpha: number): string => {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -211,7 +211,7 @@ export function Graph() {
         ctx!.beginPath();
         ctx!.moveTo(s.x, s.y);
         ctx!.lineTo(t.x, t.y);
-        ctx!.strokeStyle = "rgba(139, 92, 246, 0.12)";
+        ctx!.strokeStyle = "rgba(34, 211, 238, 0.12)";
         ctx!.lineWidth = 1;
         ctx!.stroke();
       }

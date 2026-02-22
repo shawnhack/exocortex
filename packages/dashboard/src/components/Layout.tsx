@@ -13,19 +13,10 @@ const navItems = [
   },
   {
     to: "/",
-    label: "Search",
+    label: "Memories",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-      </svg>
-    ),
-  },
-  {
-    to: "/timeline",
-    label: "Timeline",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
       </svg>
     ),
   },
@@ -145,7 +136,7 @@ export function Layout() {
             style={{
               display: "block",
               borderRadius: 12,
-              boxShadow: "0 0 24px rgba(139, 92, 246, 0.3), 0 0 8px rgba(34, 211, 238, 0.15)",
+              boxShadow: "0 0 24px rgba(34, 211, 238, 0.3), 0 0 8px rgba(34, 211, 238, 0.15)",
             }}
           />
           <div
@@ -153,7 +144,7 @@ export function Layout() {
               position: "absolute",
               inset: -6,
               borderRadius: 18,
-              background: "radial-gradient(circle, rgba(139, 92, 246, 0.2) 0%, transparent 70%)",
+              background: "radial-gradient(circle, rgba(34, 211, 238, 0.2) 0%, transparent 70%)",
               animation: "pulseGlow 4s ease-in-out infinite",
               pointerEvents: "none",
             }}
@@ -167,7 +158,7 @@ export function Layout() {
                 fontWeight: 600,
                 fontSize: 18,
                 letterSpacing: "0.18em",
-                background: "linear-gradient(135deg, #a78bfa, #22d3ee)",
+                background: "linear-gradient(135deg, #67e8f9, #22d3ee)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",
                 backgroundClip: "text",
@@ -212,8 +203,8 @@ export function Layout() {
               textDecoration: "none",
               fontSize: 14,
               fontWeight: isActive ? 600 : 400,
-              background: isActive ? "rgba(139, 92, 246, 0.1)" : "transparent",
-              borderLeft: isCollapsed ? "none" : isActive ? "2px solid #8b5cf6" : "2px solid transparent",
+              background: isActive ? "rgba(34, 211, 238, 0.1)" : "transparent",
+              borderLeft: isCollapsed ? "none" : isActive ? "2px solid #22d3ee" : "2px solid transparent",
               transition: "all 0.2s",
               position: "relative",
               whiteSpace: "nowrap",
@@ -242,7 +233,7 @@ export function Layout() {
           <button
             onClick={() => setCollapsed(!collapsed)}
             style={{
-              background: "rgba(139, 92, 246, 0.06)",
+              background: "rgba(34, 211, 238, 0.06)",
               border: "1px solid #16163a",
               color: "#a0a0be",
               cursor: "pointer",
@@ -257,12 +248,12 @@ export function Layout() {
               justifyContent: collapsed ? "center" : "flex-start",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "rgba(139, 92, 246, 0.3)";
-              e.currentTarget.style.background = "rgba(139, 92, 246, 0.1)";
+              e.currentTarget.style.borderColor = "rgba(34, 211, 238, 0.3)";
+              e.currentTarget.style.background = "rgba(34, 211, 238, 0.1)";
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.borderColor = "#16163a";
-              e.currentTarget.style.background = "rgba(139, 92, 246, 0.06)";
+              e.currentTarget.style.background = "rgba(34, 211, 238, 0.06)";
             }}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
@@ -360,7 +351,7 @@ export function Layout() {
             right: 0,
             width: 1,
             height: "100%",
-            background: "linear-gradient(180deg, #8b5cf6, #22d3ee, #8b5cf6)",
+            background: "linear-gradient(180deg, #22d3ee, #06b6d4, #22d3ee)",
             backgroundSize: "100% 200%",
             animation: "breathe 6s ease infinite",
             zIndex: 2,

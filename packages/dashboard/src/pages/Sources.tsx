@@ -41,7 +41,7 @@ export function Dashboard() {
         <StatCard
           label="Total Memories"
           value={stats.total_memories}
-          accent="#8b5cf6"
+          accent="#22d3ee"
         />
         <StatCard
           label="Active"

@@ -18,9 +18,9 @@ const tabStyle = (active: boolean): React.CSSProperties => ({
   fontSize: 13,
   fontWeight: active ? 600 : 400,
   color: active ? "#e8e8f4" : "#8080a0",
-  background: active ? "rgba(139, 92, 246, 0.12)" : "transparent",
+  background: active ? "rgba(34, 211, 238, 0.12)" : "transparent",
   border: "1px solid",
-  borderColor: active ? "rgba(139, 92, 246, 0.3)" : "transparent",
+  borderColor: active ? "rgba(34, 211, 238, 0.3)" : "transparent",
   borderRadius: 8,
   cursor: "pointer",
   transition: "all 0.15s",
@@ -31,9 +31,9 @@ const toggleTrackStyle = (on: boolean): React.CSSProperties => ({
   width: 40,
   height: 22,
   borderRadius: 11,
-  background: on ? "#8b5cf6" : "#2a2a4a",
+  background: on ? "#22d3ee" : "#2a2a4a",
   border: "1px solid",
-  borderColor: on ? "#8b5cf6" : "#3a3a5a",
+  borderColor: on ? "#22d3ee" : "#3a3a5a",
   cursor: "pointer",
   position: "relative",
   transition: "background 0.2s, border-color 0.2s",
@@ -251,8 +251,8 @@ export function Settings() {
                   transition: "border-color 0.2s, box-shadow 0.2s",
                 }}
                 onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#8b5cf6";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(139, 92, 246, 0.15)";
+                  e.currentTarget.style.borderColor = "#22d3ee";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(34, 211, 238, 0.15)";
                 }}
                 onBlur={(e) => {
                   e.currentTarget.style.borderColor = "#16163a";
@@ -342,8 +342,8 @@ export function Settings() {
             transition: "border-color 0.2s, box-shadow 0.2s",
           }}
           onFocus={(e) => {
-            e.currentTarget.style.borderColor = "#8b5cf6";
-            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(139, 92, 246, 0.15)";
+            e.currentTarget.style.borderColor = "#22d3ee";
+            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(34, 211, 238, 0.15)";
           }}
           onBlur={(e) => {
             e.currentTarget.style.borderColor = "#16163a";
@@ -389,7 +389,7 @@ export function Settings() {
                 style={{
                   fontSize: 13,
                   fontWeight: 600,
-                  color: "#8b5cf6",
+                  color: "#22d3ee",
                   textTransform: "uppercase",
                   letterSpacing: "0.06em",
                   marginBottom: 16,
@@ -441,7 +441,7 @@ export function Settings() {
               style={{
                 fontSize: 13,
                 fontWeight: 600,
-                color: "#8b5cf6",
+                color: "#22d3ee",
                 textTransform: "uppercase",
                 letterSpacing: "0.06em",
                 marginBottom: 12,
@@ -493,7 +493,7 @@ export function Settings() {
               style={{
                 fontSize: 13,
                 fontWeight: 600,
-                color: "#8b5cf6",
+                color: "#22d3ee",
                 textTransform: "uppercase",
                 letterSpacing: "0.06em",
                 marginBottom: 12,
@@ -545,8 +545,8 @@ export function Settings() {
                 transition: "border-color 0.2s, box-shadow 0.2s",
               }}
               onFocus={(e) => {
-                e.currentTarget.style.borderColor = "#8b5cf6";
-                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(139, 92, 246, 0.15)";
+                e.currentTarget.style.borderColor = "#22d3ee";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(34, 211, 238, 0.15)";
               }}
               onBlur={(e) => {
                 e.currentTarget.style.borderColor = "#16163a";

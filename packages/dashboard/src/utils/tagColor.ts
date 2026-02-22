@@ -1,6 +1,6 @@
 const PALETTE = [
-  "#22d3ee", "#8b5cf6", "#34d399", "#fbbf24", "#f472b6",
-  "#fb923c", "#38bdf8", "#a78bfa", "#4ade80", "#f87171",
+  "#22d3ee", "#06b6d4", "#34d399", "#fbbf24", "#f472b6",
+  "#fb923c", "#38bdf8", "#67e8f9", "#4ade80", "#f87171",
 ];
 
 export function tagColor(tag: string): string {
