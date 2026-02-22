@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "./components/Toast";
 import { Layout } from "./components/Layout";
 import { Search } from "./pages/Search";
-import { Timeline } from "./pages/Timeline";
 import { MemoryDetail } from "./pages/MemoryDetail";
 import { Dashboard } from "./pages/Sources";
 import { Entities } from "./pages/Entities";
@@ -28,7 +27,6 @@ export default function App() {
           <Routes>
             <Route element={<Layout />}>
               <Route path="/" element={<Search />} />
-              <Route path="/timeline" element={<Timeline />} />
               <Route path="/memory/:id" element={<MemoryDetail />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/entities" element={<Entities />} />

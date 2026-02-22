@@ -6,6 +6,28 @@ import { SearchBar } from "../components/SearchBar";
 import { MemoryCard } from "../components/MemoryCard";
 import { useToast } from "../components/Toast";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { parseUTC } from "../utils/format";
+
+function formatDate(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function groupByDate(memories: Array<{ created_at: string; [key: string]: unknown }>) {
+  const groups: Record<string, typeof memories> = {};
+  for (const m of memories) {
+    const d = parseUTC(m.created_at);
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (!groups[date]) groups[date] = [];
+    groups[date].push(m);
+  }
+  return Object.entries(groups);
+}
 
 export function Search() {
   const queryClient = useQueryClient();
@@ -57,7 +79,7 @@ export function Search() {
   const { data: browseData, isLoading: browseLoading, error: browseError } = useQuery({
     queryKey: ["browse-tags", filterTags, page, extraFilters],
     queryFn: () => api.getRecent(limit, page * limit, filterTags, extraFilters),
-    enabled: query.length === 0 && filterTags.length > 0,
+    enabled: query.length === 0,
   });
 
   const data = query.length > 0
@@ -184,9 +206,9 @@ export function Search() {
 
   return (
     <div>
-      <h1>Search</h1>
+      <h1>Memories</h1>
       <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
-        Query your second brain
+        Search, browse, and manage your second brain
       </p>
 
       <SearchBar onSearch={handleSearch} inputRef={searchBarRef} />
@@ -194,8 +216,8 @@ export function Search() {
       {/* Quick filters */}
       <div style={{ display: "flex", gap: 6, marginBottom: 12, marginTop: 12, flexWrap: "wrap" }}>
         {([
-          { tag: "session-fact", label: "Facts", color: "#8b5cf6" },
-          { tag: "decision", label: "Decisions", color: "#8b5cf6" },
+          { tag: "session-fact", label: "Facts", color: "#38bdf8" },
+          { tag: "decision", label: "Decisions", color: "#38bdf8" },
           { tag: "discovery", label: "Discoveries", color: "#22d3ee" },
           { tag: "architecture", label: "Architecture", color: "#34d399" },
           { tag: "learning", label: "Learnings", color: "#fbbf24" },
@@ -236,8 +258,8 @@ export function Search() {
             <span
               key={tag}
               style={{
-                background: "rgba(139, 92, 246, 0.25)",
-                color: "#c4b5fd",
+                background: "rgba(34, 211, 238, 0.25)",
+                color: "#a5f3fc",
                 padding: "3px 10px",
                 borderRadius: 20,
                 fontSize: 12,
@@ -292,8 +314,8 @@ export function Search() {
           Filters
           {activeFilterCount > 0 && (
             <span style={{
-              background: "#8b5cf6",
-              color: "#fff",
+              background: "#22d3ee",
+              color: "#000",
               borderRadius: 10,
               padding: "1px 6px",
               fontSize: 10,
@@ -363,7 +385,7 @@ export function Search() {
           </div>
           <div style={{ minWidth: 160 }}>
             <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
-              Min Importance {filterMinImportance && <span style={{ color: "#8b5cf6", fontFamily: "var(--font-mono)" }}>{filterMinImportance}</span>}
+              Min Importance {filterMinImportance && <span style={{ color: "#22d3ee", fontFamily: "var(--font-mono)" }}>{filterMinImportance}</span>}
             </div>
             <input
               type="range"
@@ -377,7 +399,7 @@ export function Search() {
                 height: 4,
                 appearance: "none",
                 WebkitAppearance: "none",
-                background: `linear-gradient(90deg, #8b5cf6 ${(Number(filterMinImportance) || 0) * 100}%, #16163a ${(Number(filterMinImportance) || 0) * 100}%)`,
+                background: `linear-gradient(90deg, #22d3ee ${(Number(filterMinImportance) || 0) * 100}%, #16163a ${(Number(filterMinImportance) || 0) * 100}%)`,
                 borderRadius: 2,
                 outline: "none",
                 cursor: "pointer",
@@ -409,14 +431,14 @@ export function Search() {
         <div
           style={{
             background: "#0c0c1d",
-            border: "1px solid rgba(139, 92, 246, 0.3)",
+            border: "1px solid rgba(34, 211, 238, 0.3)",
             borderRadius: 12,
             padding: 20,
             marginBottom: 20,
             animation: "fadeIn 0.2s ease-out",
           }}
         >
-          <div style={{ fontSize: 11, color: "#8b5cf6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ fontSize: 11, color: "#22d3ee", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
@@ -442,7 +464,7 @@ export function Search() {
               transition: "border-color 0.2s",
               marginBottom: 12,
             }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = "#8b5cf6"; }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
             onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
           />
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
@@ -458,7 +480,7 @@ export function Search() {
             <div style={{ minWidth: 160 }}>
               <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, display: "flex", justifyContent: "space-between" }}>
                 <span>Importance</span>
-                <span style={{ color: "#8b5cf6", fontFamily: "var(--font-mono)" }}>{newImportance.toFixed(1)}</span>
+                <span style={{ color: "#22d3ee", fontFamily: "var(--font-mono)" }}>{newImportance.toFixed(1)}</span>
               </div>
               <input
                 type="range"
@@ -472,7 +494,7 @@ export function Search() {
                   height: 4,
                   appearance: "none",
                   WebkitAppearance: "none",
-                  background: `linear-gradient(90deg, #8b5cf6 ${newImportance * 100}%, #16163a ${newImportance * 100}%)`,
+                  background: `linear-gradient(90deg, #22d3ee ${newImportance * 100}%, #16163a ${newImportance * 100}%)`,
                   borderRadius: 2,
                   outline: "none",
                   cursor: "pointer",
@@ -552,8 +574,8 @@ export function Search() {
                 <span
                   key={tag}
                   style={{
-                    background: "rgba(139, 92, 246, 0.15)",
-                    color: "#8b5cf6",
+                    background: "rgba(34, 211, 238, 0.15)",
+                    color: "#22d3ee",
                     padding: "3px 10px",
                     borderRadius: 20,
                     fontSize: 12,
@@ -666,26 +688,78 @@ export function Search() {
               )}
             </div>
           </div>
-          {data.results.map((memory, i) => {
-            const sr = data.searchResults?.[i];
-            return (
-              <MemoryCard
-                key={memory.id}
-                memory={memory}
-                score={sr?.score}
-                scoreBreakdown={sr ? {
-                  vector_score: sr.vector_score,
-                  fts_score: sr.fts_score,
-                  recency_score: sr.recency_score,
-                  frequency_score: sr.frequency_score,
-                } : undefined}
-                selectable={selectMode}
-                selected={selectedIds.has(memory.id)}
-                onToggle={toggleSelect}
-                onTagClick={handleTagClick}
-              />
-            );
-          })}
+          {query.length > 0 ? (
+            data.results.map((memory, i) => {
+              const sr = data.searchResults?.[i];
+              return (
+                <MemoryCard
+                  key={memory.id}
+                  memory={memory}
+                  score={sr?.score}
+                  scoreBreakdown={sr ? {
+                    vector_score: sr.vector_score,
+                    fts_score: sr.fts_score,
+                    recency_score: sr.recency_score,
+                    frequency_score: sr.frequency_score,
+                  } : undefined}
+                  selectable={selectMode}
+                  selected={selectedIds.has(memory.id)}
+                  onToggle={toggleSelect}
+                  onTagClick={handleTagClick}
+                />
+              );
+            })
+          ) : (
+            groupByDate(data.results as any).map(([date, memories]) => (
+              <div key={date} style={{ marginBottom: 24 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    marginBottom: 12,
+                    position: "sticky",
+                    top: 0,
+                    background: "#06060e",
+                    paddingTop: 8,
+                    paddingBottom: 8,
+                    zIndex: 1,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 3,
+                      height: 20,
+                      borderRadius: 2,
+                      background: "linear-gradient(180deg, #22d3ee, #06b6d4)",
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#a0a0be",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {formatDate(date)}
+                  </span>
+                </div>
+                <div style={{ paddingLeft: 15, borderLeft: "1px solid #16163a" }}>
+                  {(memories as any[]).map((memory) => (
+                    <MemoryCard
+                      key={memory.id}
+                      memory={memory}
+                      selectable={selectMode}
+                      selected={selectedIds.has(memory.id)}
+                      onToggle={toggleSelect}
+                      onTagClick={handleTagClick}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
 
           {/* Pagination */}
           <div style={{ display: "flex", gap: 10, marginTop: 20, marginBottom: selectMode ? 80 : 0, alignItems: "center" }}>
@@ -723,13 +797,13 @@ export function Search() {
                 left: "50%",
                 transform: "translateX(-50%)",
                 background: "#0c0c1d",
-                border: "1px solid rgba(139, 92, 246, 0.3)",
+                border: "1px solid rgba(34, 211, 238, 0.3)",
                 borderRadius: 14,
                 padding: "10px 20px",
                 display: "flex",
                 alignItems: "center",
                 gap: 16,
-                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(139, 92, 246, 0.08)",
+                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(34, 211, 238, 0.08)",
                 zIndex: 100,
                 animation: "fadeIn 0.2s ease-out",
               }}
@@ -738,7 +812,7 @@ export function Search() {
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontSize: 13,
-                  color: selectedIds.size > 0 ? "#a78bfa" : "#8080a0",
+                  color: selectedIds.size > 0 ? "#67e8f9" : "#8080a0",
                   fontWeight: 600,
                   minWidth: 90,
                 }}
