@@ -108,20 +108,7 @@ export function startScheduler(): void {
         `[scheduler] Backup complete: ${result.path} (${sizeMB} MB)${result.pruned > 0 ? `, pruned ${result.pruned} old backups` : ""}`
       );
 
-      // Copy to secondary location if configured
-      const copyTo = getSetting(db, "backup.copy_to");
-      if (copyTo) {
-        try {
-          if (!fs.existsSync(copyTo)) {
-            fs.mkdirSync(copyTo, { recursive: true });
-          }
-          const dest = path.join(copyTo, path.basename(result.path));
-          fs.copyFileSync(result.path, dest);
-          console.log(`[scheduler] Backup copied to: ${dest}`);
-        } catch (copyErr) {
-          console.error("[scheduler] Backup copy error:", copyErr);
-        }
-      }
+      // Secondary copy handled externally by nexus backup-exocortex script
     } catch (err) {
       console.error("[scheduler] Backup error:", err);
     }
