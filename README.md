@@ -119,16 +119,20 @@ User prompt → Agent reads/writes memories via MCP tools
  (memories)  (full-text)  (384-dim embeddings)
                 ↓
     Reciprocal Rank Fusion scoring
-    + recency/frequency boost
+    + recency/frequency/usefulness boost
+    + graph-aware expansion (1-hop links)
                 ↓
-         Ranked results returned
+     Ranked results + linked context
 ```
 
 **Key design choices:**
 - **No external services** — embeddings run locally via HuggingFace transformers
 - **Hybrid retrieval** — vector similarity + BM25 full-text search, fused with RRF
+- **Graph-aware retrieval** — search results include 1-hop linked memories for richer context
+- **Usefulness feedback** — memories accessed after search get implicit quality signals, improving future ranking
 - **Automatic enrichment** — entity extraction, auto-tagging, and deduplication happen on every write
 - **Importance decay** — unused memories lose importance over time, frequently accessed ones gain it
+- **Privacy stripping** — `<private>` blocks are stripped before storage/embedding
 
 ---
 
@@ -165,7 +169,7 @@ The MCP server exposes all Exocortex tools over stdio. See [Quick Start](#connec
 | `memory_ingest` | Index markdown files — splits by `##` headers, deduplicates by `source_uri`, supports globs |
 | `memory_link` | Create/remove memory-to-memory links for graph-aware retrieval |
 | `memory_digest_session` | Digest a coding session transcript into a structured session summary |
-| `memory_maintenance` | Adjust importance scores, archive stale memories, health diagnostics, search friction signals |
+| `memory_maintenance` | Run maintenance: importance adjustment, archival, health checks, search friction, re-embedding, entity backfill, importance recalibration, graph densification, co-retrieval links, adaptive weight tuning, entity orphan pruning |
 | `memory_consolidate` | Find and merge clusters of similar memories into summaries |
 | `memory_graph` | Entity graph analysis — full graph, bridge detection, community detection |
 | `memory_decay_preview` | Dry-run preview of what maintenance would archive |
@@ -358,11 +362,41 @@ All weights are configurable via the `settings` table. Score range: ~0.15–0.80
 
 ---
 
+## Retrieval Intelligence
+
+### Usefulness feedback loop
+
+Every memory has a `useful_count` column. When a memory appears in search results and is then fetched via `memory_get` within 5 minutes, the count is implicitly incremented. Explicit feedback via `memory_feedback` also increments it. `usefulnessScore()` uses this count to boost future ranking.
+
+### Adaptive weight tuning
+
+Running `memory_maintenance` with `tune_weights: true` analyzes feedback data and nudges scoring weights ±0.02 per cycle. Over time, the retrieval system self-tunes toward the signals that correlate with usefulness.
+
+### Graph-aware retrieval
+
+Memory-to-memory links (created manually via `memory_link` or automatically) are used during search and context loading. Up to 3 linked memories (1-hop) are appended to results as a "Linked" section, providing richer context without additional queries.
+
+### Valence scoring
+
+Memories can carry an emotional significance field (`valence`, -1 to 1). Both breakthroughs (+1) and failures (-1) boost retrieval via `Math.abs()` — strong emotional signals surface more readily regardless of polarity. Inspired by Damasio's Somatic Marker Hypothesis.
+
+### Store-time relation discovery
+
+On every `memory_store`, the top 200 recent memories are scanned by cosine similarity. Memories with similarity >= 0.75 are automatically linked (up to 5 per write), building the knowledge graph organically.
+
+### Co-retrieval link building
+
+Memories frequently retrieved together in the same search sessions are tracked in the `co_retrievals` table. During maintenance, pairs with enough co-retrieval history are automatically linked, reinforcing natural knowledge clusters.
+
+---
+
 ## Intelligence Features
 
 ### Consolidation
 
 Greedy agglomerative clustering of semantically similar memories (threshold: 0.75). Clusters of 3+ memories are merged into a basic summary that extracts key facts — dates, metrics, decisions, architecture notes. Source memories are archived and linked to the summary via `parent_id`. LLM-powered synthesis can be handled externally by scheduled maintenance jobs, keeping Exocortex API-cost-free.
+
+Tags like `skill`, `prompt-amendment`, and `goal-progress-implicit` are excluded from propagating to consolidated summaries to prevent semantic pollution.
 
 ### Entity Graph Analysis
 
@@ -396,6 +430,11 @@ Importance adjustment and memory archival run automatically — no manual interv
 - Low importance (<0.3) + old (>90 days) + rarely accessed (<2 times)
 - Never accessed + very old (>365 days)
 
+Additional maintenance operations available via `memory_maintenance`:
+- **Entity orphan pruning** — entities with fewer than 2 active memory links are automatically deleted
+- **Importance recalibration** — optional percentile-rank normalization of importance distribution
+- **Graph densification** — creates co-occurrence relationships between entities sharing memories
+
 Consolidation and contradiction detection run nightly only (2:00 AM / 2:30 AM) since they may need human review. Entity extraction for unprocessed memories runs nightly at 3:00 AM.
 
 ### Temporal analysis
@@ -414,6 +453,8 @@ Regex-based extraction scans memory content with keyword/context heuristics (an 
 
 Automatic category assignment is disabled: extracted entities are stored as type `concept` by default. The `type` field is manual/editable metadata (API/dashboard), not an automatic classifier at ingest time.
 
+Entities below 0.5 confidence are filtered out at extraction time, removing noisy single-mention concepts.
+
 Entities are linked to memories with relevance scores and can be queried independently. Relationships include optional context phrases extracted from memory content (e.g. "uses -> for real-time event streaming").
 
 ### Auto-tagging
@@ -425,10 +466,18 @@ When `auto_tagging.enabled = true`, up to 5 tags are generated per memory by mat
 
 Generated tags are normalized through the alias map and merged with user-supplied tags (duplicates ignored).
 
+### Keyword generation
+
+Keywords are generated from content, tags, and entity names, then stored in the `keywords` column for FTS boosting. This gives full-text search additional high-signal terms beyond the raw content.
+
+### Relation discovery
+
+On every `memory_store`, the top 200 recent memories are scanned by cosine similarity. Memories with similarity >= 0.75 are auto-linked (up to 5 per write), building the knowledge graph incrementally without manual intervention.
+
 ### Deduplication
 
 Dedup uses two checks:
-1. **Hash dedup** — compares against active root memories with the same `content_type` + `content_hash`
+1. **Hash dedup** — compares against active root memories with the same `content_type` + `content_hash`. Whitespace is normalized before hashing when `dedup.hash_normalize_whitespace` is enabled (default).
 2. **Semantic dedup** — for content >= 50 chars with an embedding available, compares against the most recent `dedup.candidate_pool` active root memories (default `200`) of the same content type
 
 Semantic dedup requires cosine similarity >= `dedup.similarity_threshold` (default `0.85`). If incoming tags are provided, at least one tag must overlap the candidate.
@@ -436,6 +485,18 @@ Semantic dedup requires cosine similarity >= `dedup.similarity_threshold` (defau
 Action on match depends on `dedup.skip_insert_on_match`:
 - `true` (default): skip insert, return existing memory (`dedup_action = "skipped"`)
 - `false`: insert new memory and supersede old one (`is_active = 0`, `superseded_by = new_id`)
+
+---
+
+## Privacy
+
+Content wrapped in `<private>...</private>` tags is stripped before storage, embedding, and indexing. Use this to include context in prompts without persisting sensitive information.
+
+---
+
+## Attribution
+
+Each memory tracks its origin: `provider`, `model_id`, `model_name`, `agent`, `session_id`, `conversation_id`. These are set via MCP tool parameters or environment defaults (`EXOCORTEX_DEFAULT_PROVIDER`, etc.). Attribution enables filtering by source and auditing which model/agent produced a memory.
 
 ---
 
@@ -484,6 +545,9 @@ All settings are stored in the `settings` table and can be changed via the REST 
 | `scoring.recency_decay` | `0.05` | Recency decay rate |
 | `scoring.min_score` | `0.15` | Minimum score threshold (legacy mode) |
 | `scoring.tag_boost` | `0.10` | Score boost for tag matches |
+| `scoring.graph_weight` | `0.10` | Graph proximity weight |
+| `scoring.usefulness_weight` | `0.05` | Usefulness feedback weight |
+| `scoring.valence_weight` | `0.05` | Valence (emotional significance) weight |
 
 ### Embedding
 
@@ -533,6 +597,10 @@ All settings are stored in the `settings` table and can be changed via the REST 
 |-----|---------|-------------|
 | `server.port` | `3210` | REST API / dashboard port |
 | `auto_tagging.enabled` | `true` | Auto-generate tags on memory creation |
+
+### Tag Normalization
+
+Tags are normalized on read/write through an alias map stored in settings. Define aliases to merge variant spellings: `tag_alias.js = javascript`, `tag_alias.ts = typescript`. All queries and writes go through normalization.
 
 ---
 
