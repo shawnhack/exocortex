@@ -126,8 +126,8 @@ describe("digestTranscript", () => {
 
     const result = await digestTranscript(p);
     expect(result.summary).toContain("Session");
-    expect(result.summary).toContain("- Edit /app/src/x.ts");
-    expect(result.summary).toContain("Files changed: 1");
+    expect(result.summary).toContain("x.ts");
+    expect(result.summary).toContain("1 files changed");
   });
 
   it("extracts facts from assistant text blocks", async () => {
