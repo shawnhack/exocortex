@@ -12,6 +12,7 @@ import chatRoutes from "./routes/chat.js";
 import goalsRoutes from "./routes/goals.js";
 import linksRoutes from "./routes/links.js";
 import healthRoutes from "./routes/health.js";
+import analyticsRoutes from "./routes/analytics.js";
 import { startScheduler } from "./scheduler.js";
 import path from "node:path";
 import fs from "node:fs";
@@ -53,6 +54,7 @@ export function createApp(): Hono {
   app.route("/", chatRoutes);
   app.route("/", goalsRoutes);
   app.route("/", linksRoutes);
+  app.route("/", analyticsRoutes);
 
   // Serve dashboard static files if built
   const dashboardDist = path.resolve(

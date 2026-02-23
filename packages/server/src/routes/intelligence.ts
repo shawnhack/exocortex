@@ -12,6 +12,7 @@ import {
   updateContradiction,
   getTimeline,
   getTemporalStats,
+  getTemporalHierarchy,
   archiveStaleMemories,
   adjustImportance,
 } from "@exocortex/core";
@@ -164,6 +165,22 @@ intelligence.get("/api/timeline", (c) => {
 intelligence.get("/api/temporal-stats", (c) => {
   const db = getDb();
   return c.json(getTemporalStats(db));
+});
+
+// GET /api/hierarchy — temporal hierarchy (epoch -> theme -> episode)
+intelligence.get("/api/hierarchy", (c) => {
+  const db = getDb();
+  const month = c.req.query("month");
+  const after = c.req.query("after");
+  const before = c.req.query("before");
+  const maxEpisodesRaw = c.req.query("max_episodes");
+  const maxEpisodes = maxEpisodesRaw
+    ? Math.min(100, Math.max(1, parseInt(maxEpisodesRaw, 10) || 20))
+    : 20;
+
+  return c.json(
+    getTemporalHierarchy(db, { month, after, before, maxEpisodes })
+  );
 });
 
 export default intelligence;

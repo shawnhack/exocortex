@@ -92,8 +92,8 @@ export type {
   Contradiction,
   ContradictionCandidate,
 } from "./intelligence/contradictions.js";
-export { getTimeline, getTemporalStats, getMemoryLineage, getDecisionTimeline } from "./intelligence/temporal.js";
-export type { TimelineEntry, TemporalStats, LineageEntry, DecisionTimelineEntry } from "./intelligence/temporal.js";
+export { getTimeline, getTemporalStats, getMemoryLineage, getDecisionTimeline, getTemporalHierarchy } from "./intelligence/temporal.js";
+export type { TimelineEntry, TemporalStats, LineageEntry, DecisionTimelineEntry, HierarchyEpoch, HierarchyTheme, HierarchyEpisode, TemporalHierarchy, TemporalHierarchyOptions } from "./intelligence/temporal.js";
 export {
   getArchiveCandidates,
   archiveStaleMemories,
@@ -185,6 +185,22 @@ export {
   normalizeTags,
 } from "./memory/tag-normalization.js";
 
+// Analytics
+export {
+  getAnalyticsSummary,
+  getAccessDistribution,
+  getTagEffectiveness,
+  getProducerQuality,
+  getQualityTrend,
+} from "./memory/analytics.js";
+export type {
+  AnalyticsSummary,
+  AccessBucket,
+  TagEffectiveness,
+  ProducerQuality,
+  QualityTrendEntry,
+} from "./memory/analytics.js";
+
 // Observability
 export {
   incrementCounter,
@@ -200,8 +216,9 @@ export {
   decryptBackup,
   importData,
   backupDatabase,
+  verifyBackup,
 } from "./backup.js";
-export type { BackupData, BackupDatabaseOptions, BackupDatabaseResult } from "./backup.js";
+export type { BackupData, BackupDatabaseOptions, BackupDatabaseResult, VerifyBackupResult } from "./backup.js";
 
 // Obsidian export
 export { exportToObsidian } from "./export/obsidian.js";

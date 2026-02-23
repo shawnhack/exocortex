@@ -14,6 +14,7 @@ import { registerExport } from "./commands/export.js";
 import { registerObsidianExport } from "./commands/obsidian-export.js";
 import { registerRetrievalRegression } from "./commands/retrieval-regression.js";
 import { registerBackfill } from "./commands/backfill.js";
+import { registerVerifyBackup } from "./commands/verify-backup.js";
 
 const program = new Command();
 
@@ -35,5 +36,6 @@ registerExport(program);
 registerObsidianExport(program);
 registerRetrievalRegression(program);
 registerBackfill(program);
+registerVerifyBackup(program);
 
 program.parse();

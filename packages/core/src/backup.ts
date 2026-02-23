@@ -7,9 +7,10 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import type { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import type { MemoryRow } from "./memory/types.js";
 import type { Entity } from "./entities/types.js";
+import { initializeSchema } from "./db/schema.js";
 
 export interface BackupData {
   version: 1;
@@ -540,4 +541,88 @@ export function backupDatabase(
   }
 
   return { path: backupPath, sizeBytes, pruned };
+}
+
+export interface VerifyBackupResult {
+  valid: boolean;
+  counts: Array<{
+    table: string;
+    backup: number;
+    imported: number;
+    source: number;
+  }>;
+  discrepancies: string[];
+  embeddingCheck?: {
+    sampled: number;
+    withContent: number;
+  };
+}
+
+/**
+ * Verify backup integrity by importing into a temp in-memory DB and comparing counts.
+ */
+export function verifyBackup(
+  sourceDb: DatabaseSync,
+  data: BackupData,
+  options?: { checkEmbeddings?: boolean; sampleSize?: number }
+): VerifyBackupResult {
+  const tempDb = new DatabaseSync(":memory:");
+  tempDb.exec("PRAGMA foreign_keys = ON");
+  initializeSchema(tempDb);
+  importData(tempDb, data);
+
+  const tables: Array<{ table: string; backupKey: keyof BackupData }> = [
+    { table: "memories", backupKey: "memories" },
+    { table: "entities", backupKey: "entities" },
+    { table: "memory_entities", backupKey: "memory_entities" },
+    { table: "goals", backupKey: "goals" },
+    { table: "memory_links", backupKey: "memory_links" },
+    { table: "entity_relationships", backupKey: "entity_relationships" },
+    { table: "contradictions", backupKey: "contradictions" },
+  ];
+
+  const counts: VerifyBackupResult["counts"] = [];
+  const discrepancies: string[] = [];
+
+  for (const { table, backupKey } of tables) {
+    const backupArr = data[backupKey];
+    const backupCount = Array.isArray(backupArr) ? backupArr.length : 0;
+
+    const importedCount = (
+      tempDb.prepare(`SELECT COUNT(*) as cnt FROM ${table}`).get() as { cnt: number }
+    ).cnt;
+
+    const sourceCount = (
+      sourceDb.prepare(`SELECT COUNT(*) as cnt FROM ${table}`).get() as { cnt: number }
+    ).cnt;
+
+    counts.push({ table, backup: backupCount, imported: importedCount, source: sourceCount });
+
+    if (backupCount !== importedCount) {
+      discrepancies.push(
+        `${table}: backup has ${backupCount} rows but only ${importedCount} were imported`
+      );
+    }
+  }
+
+  let embeddingCheck: VerifyBackupResult["embeddingCheck"] | undefined;
+  if (options?.checkEmbeddings) {
+    const sampleSize = options.sampleSize ?? 10;
+    const sample = data.memories.slice(0, sampleSize);
+    const withContent = sample.filter((m) => m.content.trim().length > 0).length;
+    embeddingCheck = { sampled: sample.length, withContent };
+  }
+
+  try {
+    tempDb.close();
+  } catch {
+    // ignore close errors on temp db
+  }
+
+  return {
+    valid: discrepancies.length === 0,
+    counts,
+    discrepancies,
+    embeddingCheck,
+  };
 }

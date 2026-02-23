@@ -268,6 +268,72 @@ server.tool(
         // Relation discovery is non-critical
       }
 
+      // Temporal auto-linking: narratives and epochs link to high-importance episodes
+      try {
+        const tags = args.tags ?? [];
+        const isNarrative = tags.includes("narrative") && tags.includes("weekly-summary");
+        const isEpoch = tags.includes("epoch");
+
+        if ((isNarrative || isEpoch) && result.dedup_action !== "skipped") {
+          const linkStore = new MemoryLinkStore(db);
+          const memDate = new Date(result.memory.created_at);
+          const windowDays = isEpoch ? 31 : 7;
+          const windowStart = new Date(memDate.getTime() - windowDays * 24 * 60 * 60 * 1000);
+          const cap = isEpoch ? 30 : 15;
+
+          // Find high-importance episodes in the time window
+          const episodes = db
+            .prepare(
+              `SELECT id FROM memories
+               WHERE is_active = 1 AND importance >= 0.5 AND is_metadata = 0
+                 AND created_at >= ? AND created_at < ?
+                 AND id != ?
+                 AND id NOT IN (SELECT memory_id FROM memory_tags WHERE tag = 'epoch')
+                 AND id NOT IN (SELECT memory_id FROM memory_tags WHERE tag = 'narrative')
+               ORDER BY importance DESC
+               LIMIT ?`
+            )
+            .all(
+              windowStart.toISOString().replace("T", " ").slice(0, 19),
+              result.memory.created_at,
+              result.memory.id,
+              cap
+            ) as unknown as Array<{ id: string }>;
+
+          let linkedCount = 0;
+          for (const ep of episodes) {
+            linkStore.link(result.memory.id, ep.id, "elaborates", 0.6);
+            linkedCount++;
+          }
+
+          // Epochs also link to narratives in the same month
+          if (isEpoch) {
+            const monthStr = result.memory.created_at.slice(0, 7); // YYYY-MM
+            const narratives = db
+              .prepare(
+                `SELECT m.id FROM memories m
+                 JOIN memory_tags mt ON mt.memory_id = m.id AND mt.tag = 'narrative'
+                 WHERE m.is_active = 1
+                   AND strftime('%Y-%m', m.created_at) = ?
+                   AND m.id != ?
+                 ORDER BY m.created_at DESC`
+              )
+              .all(monthStr, result.memory.id) as unknown as Array<{ id: string }>;
+
+            for (const n of narratives) {
+              linkStore.link(result.memory.id, n.id, "elaborates", 0.8);
+              linkedCount++;
+            }
+          }
+
+          if (linkedCount > 0) {
+            meta.push(`hierarchy: ${linkedCount} elaborates links`);
+          }
+        }
+      } catch {
+        // Temporal auto-linking is non-critical
+      }
+
       return { content: [{ type: "text", text: `Stored memory (${meta.join(" | ")})` }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
@@ -1223,11 +1289,12 @@ server.tool(
 // memory_timeline
 server.tool(
   "memory_timeline",
-  "Query decision history, memory lineage, or topic evolution. Use 'decisions' for decision-tagged memories chronologically, 'lineage' to trace a memory's supersession chain, or 'evolution' to see how knowledge about a topic changed over time.",
+  "Query decision history, memory lineage, topic evolution, or temporal hierarchy. Use 'decisions' for decision-tagged memories chronologically, 'lineage' to trace a memory's supersession chain, 'evolution' to see how knowledge about a topic changed over time, or 'hierarchy' to view epoch -> theme -> episode organization.",
   {
-    mode: z.enum(["decisions", "lineage", "evolution"]).describe("'decisions' for decision timeline, 'lineage' for supersession chain, 'evolution' for topic knowledge evolution"),
+    mode: z.enum(["decisions", "lineage", "evolution", "hierarchy"]).describe("'decisions' for decision timeline, 'lineage' for supersession chain, 'evolution' for topic knowledge evolution, 'hierarchy' for epoch/theme/episode tree"),
     memory_id: z.string().optional().describe("Memory ID (required for lineage mode)"),
     topic: z.string().optional().describe("Topic to trace evolution for (required for evolution mode)"),
+    month: z.string().optional().describe("Month filter YYYY-MM (for hierarchy mode)"),
     after: z.string().optional().describe("Only after this date (YYYY-MM-DD)"),
     before: z.string().optional().describe("Only before this date (YYYY-MM-DD)"),
     limit: z.number().optional().describe("Max results (default 50)"),
@@ -1235,6 +1302,60 @@ server.tool(
   },
   async (args) => {
     try {
+      // hierarchy mode — epoch -> theme -> episode tree
+      if (args.mode === "hierarchy") {
+        const { getTemporalHierarchy } = await import("@exocortex/core");
+        const hierarchy = getTemporalHierarchy(db, {
+          month: args.month,
+          after: args.after,
+          before: args.before,
+          maxEpisodes: args.limit ?? 20,
+        });
+
+        if (hierarchy.epochs.length === 0 && hierarchy.orphan_themes.length === 0) {
+          return { content: [{ type: "text", text: "No epochs or narratives found for the given time range." }] };
+        }
+
+        const lines: string[] = [];
+        const range = hierarchy.time_range
+          ? `${hierarchy.time_range.start} to ${hierarchy.time_range.end}`
+          : "unknown";
+        lines.push(`Temporal Hierarchy (${range}):\n`);
+
+        for (const epoch of hierarchy.epochs) {
+          const preview = epoch.content.length > 120 ? epoch.content.substring(0, 117) + "..." : epoch.content;
+          lines.push(`EPOCH [${epoch.month}] [${epoch.id}] ${preview}`);
+
+          for (const theme of epoch.themes) {
+            const tPreview = theme.content.length > 100 ? theme.content.substring(0, 97) + "..." : theme.content;
+            const linkIcon = theme.linked ? " ~" : "";
+            lines.push(`  THEME [${theme.id}] ${tPreview}${linkIcon}`);
+
+            for (const ep of theme.episodes) {
+              const ePreview = ep.content.length > 80 ? ep.content.substring(0, 77) + "..." : ep.content;
+              const epLink = ep.linked ? " ~" : "";
+              const tagStr = ep.tags.length > 0 ? ` [${ep.tags.slice(0, 3).join(", ")}]` : "";
+              lines.push(`    - [${ep.id}] ${ePreview}${tagStr}${epLink} (${ep.importance})`);
+            }
+          }
+          lines.push("");
+        }
+
+        if (hierarchy.orphan_themes.length > 0) {
+          lines.push("ORPHAN THEMES (no matching epoch):");
+          for (const theme of hierarchy.orphan_themes) {
+            const tPreview = theme.content.length > 100 ? theme.content.substring(0, 97) + "..." : theme.content;
+            lines.push(`  THEME [${theme.id}] ${tPreview}`);
+            for (const ep of theme.episodes) {
+              const ePreview = ep.content.length > 80 ? ep.content.substring(0, 77) + "..." : ep.content;
+              lines.push(`    - [${ep.id}] ${ePreview} (${ep.importance})`);
+            }
+          }
+        }
+
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      }
+
       if (args.mode === "lineage") {
         if (!args.memory_id) {
           return { content: [{ type: "text", text: "memory_id is required for lineage mode." }] };

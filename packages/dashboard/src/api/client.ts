@@ -102,6 +102,70 @@ export interface GoalWithProgress extends Goal {
   milestones: Milestone[];
 }
 
+export interface AnalyticsSummary {
+  totalActive: number;
+  neverAccessedPct: number;
+  usefulPct: number;
+  medianAccessCount: number;
+}
+
+export interface AccessBucket {
+  label: string;
+  count: number;
+}
+
+export interface TagEffectiveness {
+  tag: string;
+  memoryCount: number;
+  avgUsefulCount: number;
+}
+
+export interface ProducerQuality {
+  producer: string;
+  memoryCount: number;
+  avgUsefulCount: number;
+}
+
+export interface QualityTrendEntry {
+  period: string;
+  created: number;
+  avgUseful: number;
+  neverAccessedPct: number;
+}
+
+export interface HierarchyEpisode {
+  id: string;
+  content: string;
+  importance: number;
+  created_at: string;
+  tags: string[];
+  linked: boolean;
+}
+
+export interface HierarchyTheme {
+  id: string;
+  content: string;
+  importance: number;
+  created_at: string;
+  linked: boolean;
+  episodes: HierarchyEpisode[];
+}
+
+export interface HierarchyEpoch {
+  id: string;
+  content: string;
+  importance: number;
+  created_at: string;
+  month: string;
+  themes: HierarchyTheme[];
+}
+
+export interface TemporalHierarchy {
+  epochs: HierarchyEpoch[];
+  orphan_themes: HierarchyTheme[];
+  time_range: { start: string; end: string } | null;
+}
+
 export interface Stats {
   total_memories: number;
   active_memories: number;
@@ -305,6 +369,16 @@ export const api = {
     }>("/api/entities/graph");
   },
 
+  getHierarchy(options?: { month?: string; after?: string; before?: string; maxEpisodes?: number }) {
+    const params = new URLSearchParams();
+    if (options?.month) params.set("month", options.month);
+    if (options?.after) params.set("after", options.after);
+    if (options?.before) params.set("before", options.before);
+    if (options?.maxEpisodes) params.set("max_episodes", String(options.maxEpisodes));
+    const qs = params.toString() ? `?${params}` : "";
+    return request<TemporalHierarchy>(`/api/hierarchy${qs}`);
+  },
+
   getTimeline(options?: { limit?: number; includeMemories?: boolean }) {
     const params = new URLSearchParams();
     if (options?.limit) params.set("limit", String(options.limit));
@@ -370,5 +444,32 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(settings),
     });
+  },
+
+  // Analytics
+  getAnalyticsSummary() {
+    return request<AnalyticsSummary>("/api/analytics/summary");
+  },
+
+  getAccessDistribution() {
+    return request<AccessBucket[]>("/api/analytics/access-distribution");
+  },
+
+  getTagEffectiveness(limit = 20) {
+    return request<TagEffectiveness[]>(
+      `/api/analytics/tag-effectiveness?limit=${limit}`
+    );
+  },
+
+  getProducerQuality(by: "model" | "agent" = "model", limit = 15) {
+    return request<ProducerQuality[]>(
+      `/api/analytics/producer-quality?by=${by}&limit=${limit}`
+    );
+  },
+
+  getQualityTrend(granularity: "month" | "week" = "month", limit = 12) {
+    return request<QualityTrendEntry[]>(
+      `/api/analytics/quality-trend?granularity=${granularity}&limit=${limit}`
+    );
   },
 };

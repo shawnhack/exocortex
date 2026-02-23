@@ -330,3 +330,236 @@ export function getTemporalStats(db: DatabaseSync): TemporalStats {
     streak_longest: longestStreak,
   };
 }
+
+// --- Hierarchical Temporal Organization ---
+
+export interface HierarchyEpisode {
+  id: string;
+  content: string;
+  importance: number;
+  created_at: string;
+  tags: string[];
+  linked: boolean;
+}
+
+export interface HierarchyTheme {
+  id: string;
+  content: string;
+  importance: number;
+  created_at: string;
+  linked: boolean;
+  episodes: HierarchyEpisode[];
+}
+
+export interface HierarchyEpoch {
+  id: string;
+  content: string;
+  importance: number;
+  created_at: string;
+  month: string;
+  themes: HierarchyTheme[];
+}
+
+export interface TemporalHierarchy {
+  epochs: HierarchyEpoch[];
+  orphan_themes: HierarchyTheme[];
+  time_range: { start: string; end: string } | null;
+}
+
+export interface TemporalHierarchyOptions {
+  month?: string; // YYYY-MM
+  after?: string;
+  before?: string;
+  maxEpisodes?: number;
+}
+
+export function getTemporalHierarchy(
+  db: DatabaseSync,
+  options: TemporalHierarchyOptions = {}
+): TemporalHierarchy {
+  const maxEpisodes = options.maxEpisodes ?? 20;
+
+  // Build date conditions
+  const dateConditions: string[] = [];
+  const dateParams: string[] = [];
+
+  if (options.month) {
+    dateConditions.push("strftime('%Y-%m', m.created_at) = ?");
+    dateParams.push(options.month);
+  }
+  if (options.after) {
+    dateConditions.push("m.created_at >= ?");
+    dateParams.push(options.after);
+  }
+  if (options.before) {
+    dateConditions.push("m.created_at <= ?");
+    dateParams.push(options.before);
+  }
+
+  const dateWhere =
+    dateConditions.length > 0 ? " AND " + dateConditions.join(" AND ") : "";
+
+  // 1. Query epochs (tagged 'epoch')
+  const epochRows = db
+    .prepare(
+      `SELECT m.id, m.content, m.importance, m.created_at,
+              strftime('%Y-%m', m.created_at) as month
+       FROM memories m
+       JOIN memory_tags mt ON mt.memory_id = m.id AND mt.tag = 'epoch'
+       WHERE m.is_active = 1${dateWhere}
+       ORDER BY m.created_at DESC`
+    )
+    .all(...dateParams) as unknown as Array<{
+    id: string;
+    content: string;
+    importance: number;
+    created_at: string;
+    month: string;
+  }>;
+
+  // 2. Query themes (tagged 'narrative')
+  const themeRows = db
+    .prepare(
+      `SELECT m.id, m.content, m.importance, m.created_at,
+              strftime('%Y-%m', m.created_at) as month
+       FROM memories m
+       JOIN memory_tags mt ON mt.memory_id = m.id AND mt.tag = 'narrative'
+       WHERE m.is_active = 1${dateWhere}
+       ORDER BY m.created_at DESC`
+    )
+    .all(...dateParams) as unknown as Array<{
+    id: string;
+    content: string;
+    importance: number;
+    created_at: string;
+    month: string;
+  }>;
+
+  // 3. Check for explicit 'elaborates' links
+  const linkedSet = new Set<string>();
+  if (epochRows.length > 0 || themeRows.length > 0) {
+    const allIds = [
+      ...epochRows.map((e) => e.id),
+      ...themeRows.map((t) => t.id),
+    ];
+
+    for (const id of allIds) {
+      const links = db
+        .prepare(
+          `SELECT source_id, target_id FROM memory_links
+           WHERE (source_id = ? OR target_id = ?) AND link_type = 'elaborates'`
+        )
+        .all(id, id) as unknown as Array<{
+        source_id: string;
+        target_id: string;
+      }>;
+
+      for (const link of links) {
+        linkedSet.add(link.source_id);
+        linkedSet.add(link.target_id);
+      }
+    }
+  }
+
+  // 4. For each theme, find episodes in its 7-day window
+  const tagStmt = db.prepare(
+    "SELECT tag FROM memory_tags WHERE memory_id = ?"
+  );
+
+  function getEpisodesForWindow(
+    before: string,
+    afterDate: string
+  ): HierarchyEpisode[] {
+    const episodes = db
+      .prepare(
+        `SELECT m.id, m.content, m.importance, m.created_at
+         FROM memories m
+         WHERE m.is_active = 1
+           AND m.is_metadata = 0
+           AND m.created_at >= ? AND m.created_at < ?
+           AND m.id NOT IN (SELECT memory_id FROM memory_tags WHERE tag = 'epoch')
+           AND m.id NOT IN (SELECT memory_id FROM memory_tags WHERE tag = 'narrative')
+         ORDER BY m.importance DESC
+         LIMIT ?`
+      )
+      .all(afterDate, before, maxEpisodes) as unknown as Array<{
+      id: string;
+      content: string;
+      importance: number;
+      created_at: string;
+    }>;
+
+    return episodes.map((ep) => {
+      const tags = (tagStmt.all(ep.id) as unknown as Array<{ tag: string }>).map(
+        (t) => t.tag
+      );
+      return { ...ep, tags, linked: linkedSet.has(ep.id) };
+    });
+  }
+
+  // Build themes with episodes
+  const themes: Array<HierarchyTheme & { month: string }> = themeRows.map(
+    (t) => {
+      const themeDate = new Date(t.created_at);
+      const weekBefore = new Date(
+        themeDate.getTime() - 7 * 24 * 60 * 60 * 1000
+      );
+      const episodes = getEpisodesForWindow(
+        t.created_at,
+        weekBefore.toISOString().replace("T", " ").slice(0, 19)
+      );
+
+      return {
+        id: t.id,
+        content: t.content,
+        importance: t.importance,
+        created_at: t.created_at,
+        linked: linkedSet.has(t.id),
+        month: t.month,
+        episodes,
+      };
+    }
+  );
+
+  // 5. Group themes under epochs by month
+  const epochMap = new Map<string, HierarchyEpoch>();
+
+  for (const epoch of epochRows) {
+    epochMap.set(epoch.month, {
+      id: epoch.id,
+      content: epoch.content,
+      importance: epoch.importance,
+      created_at: epoch.created_at,
+      month: epoch.month,
+      themes: [],
+    });
+  }
+
+  const orphanThemes: HierarchyTheme[] = [];
+
+  for (const theme of themes) {
+    const epoch = epochMap.get(theme.month);
+    const { month: _, ...themeWithoutMonth } = theme;
+    if (epoch) {
+      epoch.themes.push(themeWithoutMonth);
+    } else {
+      orphanThemes.push(themeWithoutMonth);
+    }
+  }
+
+  // Time range
+  const allDates = [
+    ...epochRows.map((e) => e.created_at),
+    ...themeRows.map((t) => t.created_at),
+  ].sort();
+  const timeRange =
+    allDates.length > 0
+      ? { start: allDates[0], end: allDates[allDates.length - 1] }
+      : null;
+
+  return {
+    epochs: Array.from(epochMap.values()),
+    orphan_themes: orphanThemes,
+    time_range: timeRange,
+  };
+}

@@ -644,11 +644,28 @@ export class MemorySearch {
     return scores;
   }
 
+  private buildReverseTagAliasMap(
+    aliasMap: Record<string, string>
+  ): Map<string, string[]> {
+    const reverse = new Map<string, string[]>();
+    for (const [alias, canonical] of Object.entries(aliasMap)) {
+      const arr = reverse.get(canonical);
+      if (arr) arr.push(alias);
+      else reverse.set(canonical, [alias]);
+    }
+    return reverse;
+  }
+
   private expandQuery(
     query: string
   ): { expandedText: string; expandedTerms: string[] } | null {
     const enabled = getSetting(this.db, "search.query_expansion");
     if (enabled !== "true") return null;
+
+    const maxTerms = parseInt(
+      getSetting(this.db, "search.expansion_max_terms") ?? "15",
+      10
+    );
 
     const words = query
       .split(/\s+/)
@@ -661,11 +678,11 @@ export class MemorySearch {
     const additionalTerms = new Set<string>();
     const queryLower = query.toLowerCase();
 
+    // (a) Single-word entity matching (existing logic)
     for (const word of words) {
       const entity = entityStore.getByName(word);
       if (!entity) continue;
 
-      // Add entity aliases
       for (const alias of entity.aliases) {
         const aliasLower = alias.toLowerCase();
         if (!queryLower.includes(aliasLower)) {
@@ -673,7 +690,6 @@ export class MemorySearch {
         }
       }
 
-      // Add names of related entities (limit 5)
       const related = entityStore.getRelatedEntities(entity.id);
       let count = 0;
       for (const rel of related) {
@@ -686,9 +702,109 @@ export class MemorySearch {
       }
     }
 
+    // (a) N-gram entity matching (2-word and 3-word)
+    for (const n of [2, 3]) {
+      for (let i = 0; i <= words.length - n; i++) {
+        const ngram = words.slice(i, i + n).join(" ");
+        const entity = entityStore.getByName(ngram);
+        if (!entity) continue;
+
+        for (const alias of entity.aliases) {
+          const aliasLower = alias.toLowerCase();
+          if (!queryLower.includes(aliasLower)) {
+            additionalTerms.add(alias);
+          }
+        }
+
+        const related = entityStore.getRelatedEntities(entity.id);
+        let count = 0;
+        for (const rel of related) {
+          if (count >= 5) break;
+          const relNameLower = rel.entity.name.toLowerCase();
+          if (!queryLower.includes(relNameLower)) {
+            additionalTerms.add(rel.entity.name);
+            count++;
+          }
+        }
+      }
+    }
+
+    // (b) Bidirectional tag alias expansion
+    const aliasMap = getTagAliasMap(this.db);
+    const reverseMap = this.buildReverseTagAliasMap(aliasMap);
+    for (const word of words) {
+      // alias -> canonical
+      if (aliasMap[word] && !queryLower.includes(aliasMap[word])) {
+        additionalTerms.add(aliasMap[word]);
+      }
+      // canonical -> all aliases
+      const aliases = reverseMap.get(word);
+      if (aliases) {
+        for (const alias of aliases) {
+          if (!queryLower.includes(alias)) {
+            additionalTerms.add(alias);
+          }
+        }
+      }
+    }
+
+    // (c) Zero-FTS keyword fallback
+    if (additionalTerms.size === 0) {
+      let ftsHasResults = false;
+      try {
+        const ftsQuery = this.sanitizeFtsQuery(query);
+        const ftsRows = this.db
+          .prepare(
+            "SELECT rowid FROM memories_fts WHERE memories_fts MATCH ? LIMIT 1"
+          )
+          .all(ftsQuery) as unknown[];
+        ftsHasResults = ftsRows.length > 0;
+      } catch {
+        // FTS may fail on unusual input
+      }
+
+      if (!ftsHasResults) {
+        try {
+          const recentRows = this.db
+            .prepare(
+              "SELECT content FROM memories WHERE is_active = 1 ORDER BY created_at DESC LIMIT 10"
+            )
+            .all() as Array<{ content: string }>;
+          const extraTerms = new Set<string>();
+          for (const row of recentRows) {
+            const contentWords = row.content
+              .split(/\s+/)
+              .map((w) => w.toLowerCase().replace(/[^a-z0-9]/g, ""))
+              .filter((w) => w.length > 3);
+            for (const cw of contentWords) {
+              if (extraTerms.size >= 5) break;
+              for (const qw of words) {
+                if (
+                  cw.length >= 4 &&
+                  qw.length >= 4 &&
+                  cw.slice(0, 4) === qw.slice(0, 4) &&
+                  cw !== qw
+                ) {
+                  extraTerms.add(cw);
+                  break;
+                }
+              }
+            }
+            if (extraTerms.size >= 5) break;
+          }
+          for (const t of extraTerms) {
+            additionalTerms.add(t);
+          }
+        } catch {
+          // Non-critical
+        }
+      }
+    }
+
     if (additionalTerms.size === 0) return null;
 
-    const terms = Array.from(additionalTerms);
+    // (d) Cap total expansion terms
+    const terms = Array.from(additionalTerms).slice(0, maxTerms);
     return {
       expandedText: `${query} ${terms.join(" ")}`,
       expandedTerms: terms,
