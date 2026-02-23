@@ -217,6 +217,33 @@ export class EntityStore {
     return rows.map((r) => r.tag);
   }
 
+  /**
+   * Prune orphan entities that have fewer than `minLinks` active memory links.
+   * Deletion cascades via FK to memory_entities, entity_tags, entity_relationships.
+   */
+  pruneOrphans(minLinks = 2): { pruned: number; names: string[] } {
+    const candidates = this.db.prepare(`
+      SELECT e.id, e.name, COUNT(CASE WHEN m.is_active = 1 THEN 1 END) as active_links
+      FROM entities e
+      LEFT JOIN memory_entities me ON e.id = me.entity_id
+      LEFT JOIN memories m ON me.memory_id = m.id
+      GROUP BY e.id
+      HAVING active_links < ?
+    `).all(minLinks) as unknown as Array<{ id: string; name: string; active_links: number }>;
+
+    if (candidates.length === 0) return { pruned: 0, names: [] };
+
+    const names: string[] = [];
+    const deleteStmt = this.db.prepare("DELETE FROM entities WHERE id = ?");
+
+    for (const c of candidates) {
+      deleteStmt.run(c.id);
+      names.push(c.name);
+    }
+
+    return { pruned: names.length, names };
+  }
+
   getRelatedEntities(entityId: string): Array<{ entity: Entity; relationship: string; direction: "outgoing" | "incoming"; context: string | null }> {
     const rels = this.getRelationships(entityId);
     const results: Array<{ entity: Entity; relationship: string; direction: "outgoing" | "incoming"; context: string | null }> = [];

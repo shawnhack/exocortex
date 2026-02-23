@@ -141,14 +141,24 @@ export async function consolidateCluster(
     }
   }
 
-  // Collect tags from source memories
+  // Collect tags from source memories, filtering out identity tags that
+  // lose meaning when merged into consolidated summaries
+  const CONSOLIDATION_TAG_BLOCKLIST = new Set([
+    "skill",
+    "prompt-amendment",
+    "goal-progress-implicit",
+    "goal-progress",
+    "benchmark-artifact",
+  ]);
   const tagSet = new Set<string>();
   if (cluster.memberIds.length > 0) {
     const placeholders = cluster.memberIds.map(() => "?").join(",");
     const tagRows = db
       .prepare(`SELECT DISTINCT tag FROM memory_tags WHERE memory_id IN (${placeholders})`)
       .all(...cluster.memberIds) as Array<{ tag: string }>;
-    for (const t of tagRows) tagSet.add(t.tag);
+    for (const t of tagRows) {
+      if (!CONSOLIDATION_TAG_BLOCKLIST.has(t.tag)) tagSet.add(t.tag);
+    }
   }
 
   db.exec("BEGIN");

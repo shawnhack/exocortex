@@ -11,6 +11,7 @@ import { registerConsolidate } from "./commands/consolidate.js";
 import { registerEntities } from "./commands/entities.js";
 import { registerContradictions } from "./commands/contradictions.js";
 import { registerExport } from "./commands/export.js";
+import { registerObsidianExport } from "./commands/obsidian-export.js";
 import { registerRetrievalRegression } from "./commands/retrieval-regression.js";
 import { registerBackfill } from "./commands/backfill.js";
 
@@ -31,6 +32,7 @@ registerConsolidate(program);
 registerEntities(program);
 registerContradictions(program);
 registerExport(program);
+registerObsidianExport(program);
 registerRetrievalRegression(program);
 registerBackfill(program);
 

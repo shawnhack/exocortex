@@ -1200,6 +1200,19 @@ server.tool(
         // Non-critical
       }
 
+      // Prune orphan entities (< 2 active memory links)
+      try {
+        const entityStore = new EntityStore(db);
+        const pruneResult = entityStore.pruneOrphans(2);
+        if (pruneResult.pruned > 0) {
+          const nameList = pruneResult.names.slice(0, 10).join(", ");
+          const suffix = pruneResult.names.length > 10 ? ` (+${pruneResult.names.length - 10} more)` : "";
+          parts.push(`\nPruned ${pruneResult.pruned} orphan entities: ${nameList}${suffix}`);
+        }
+      } catch {
+        // Non-critical
+      }
+
       return { content: [{ type: "text", text: `Maintenance complete:\n\n${parts.join("\n")}` }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };

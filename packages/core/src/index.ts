@@ -202,3 +202,7 @@ export {
   backupDatabase,
 } from "./backup.js";
 export type { BackupData, BackupDatabaseOptions, BackupDatabaseResult } from "./backup.js";
+
+// Obsidian export
+export { exportToObsidian } from "./export/obsidian.js";
+export type { ObsidianExportOptions, ObsidianExportResult } from "./export/obsidian.js";

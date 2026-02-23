@@ -408,7 +408,7 @@ export class MemoryStore {
     if (!isBenchmark) {
       // Auto-extract and link entities + relationships
       try {
-        const extracted = extractEntities(input.content);
+        const extracted = extractEntities(input.content).filter(e => e.confidence >= 0.5);
         if (extracted.length > 0) {
           const entityStore = new EntityStore(this.db);
           const entityIdMap = new Map<string, string>();
@@ -861,7 +861,7 @@ export class MemoryStore {
     if (isIndexed) {
       // Entity extraction runs on full content, linked to parent
       try {
-        const extracted = extractEntities(input.content);
+        const extracted = extractEntities(input.content).filter(e => e.confidence >= 0.5);
         if (extracted.length > 0) {
           const entityStore = new EntityStore(this.db);
           const entityIdMap = new Map<string, string>();
