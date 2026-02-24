@@ -31,6 +31,8 @@ interface NodeData {
   color: string;
   x?: number;
   y?: number;
+  fx?: number;
+  fy?: number;
 }
 
 interface LinkData {
@@ -230,7 +232,7 @@ export function Graph() {
 
           ctx.restore();
         })
-        .enableNodeDrag(true)
+        .enableNodeDrag(false)
         .d3AlphaDecay(0.02)
         .d3VelocityDecay(0.3);
 
@@ -269,37 +271,77 @@ export function Graph() {
         return closest;
       }
 
+      // --- Manual drag state ---
+      let dragNode: NodeData | null = null;
+      let didDrag = false;
+
       function onMouseMove(e: MouseEvent) {
+        if (dragNode) {
+          // Dragging — update node position
+          const rect = el.getBoundingClientRect();
+          const coords = graph.screen2GraphCoords(e.clientX - rect.left, e.clientY - rect.top);
+          dragNode.fx = coords.x;
+          dragNode.fy = coords.y;
+          didDrag = true;
+          graph.d3ReheatSimulation();
+          return;
+        }
+
         const node = findNodeAtScreen(e.clientX, e.clientY);
         const newId = node?.id ?? null;
         if (newId !== hoveredNodeId) {
           hoveredNodeId = newId;
           el.style.cursor = node ? "pointer" : "default";
-          // Force repaint
           requestAnimationFrame(() => {
             graph.nodeColor?.(graph.nodeColor?.());
           });
         }
       }
 
-      function onClick(e: MouseEvent) {
+      function onMouseDown(e: MouseEvent) {
+        if (e.button !== 0) return; // left click only
         const node = findNodeAtScreen(e.clientX, e.clientY);
         if (node) {
-          setTooltip((prev: TooltipState | null) =>
-            prev?.node.id === node.id ? null : { node, x: e.clientX, y: e.clientY }
-          );
-        } else {
-          setTooltip(null);
+          dragNode = node;
+          didDrag = false;
+          node.fx = node.x;
+          node.fy = node.y;
+          // Capture phase on container fires before d3-zoom on canvas —
+          // stopPropagation prevents the event from reaching the canvas
+          e.stopPropagation();
+          e.preventDefault();
         }
       }
 
+      function onMouseUp(e: MouseEvent) {
+        if (dragNode) {
+          dragNode.fx = undefined;
+          dragNode.fy = undefined;
+          if (!didDrag) {
+            const node = dragNode;
+            setTooltip((prev: TooltipState | null) =>
+              prev?.node.id === node.id ? null : { node, x: e.clientX, y: e.clientY }
+            );
+          }
+          dragNode = null;
+          didDrag = false;
+          return;
+        }
+        // Click on empty space — dismiss tooltip
+        const node = findNodeAtScreen(e.clientX, e.clientY);
+        if (!node) setTooltip(null);
+      }
+
       el.addEventListener("mousemove", onMouseMove);
-      el.addEventListener("click", onClick);
+      // Capture phase so we intercept before d3-zoom on the canvas child
+      el.addEventListener("mousedown", onMouseDown, true);
+      window.addEventListener("mouseup", onMouseUp);
 
       // Store cleanup refs
       (graph as any).__manualCleanup = () => {
         el.removeEventListener("mousemove", onMouseMove);
-        el.removeEventListener("click", onClick);
+        el.removeEventListener("mousedown", onMouseDown, true);
+        window.removeEventListener("mouseup", onMouseUp);
       };
     });
 
