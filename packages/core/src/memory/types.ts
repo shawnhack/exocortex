@@ -32,6 +32,8 @@ export interface Memory {
   chunk_index: number | null;
   keywords?: string;
   metadata?: Record<string, unknown>;
+  expires_at: string | null;
+  namespace: string | null;
   created_at: string;
   updated_at: string;
   tags?: string[];
@@ -54,6 +56,8 @@ export interface CreateMemoryInput {
   tags?: string[];
   metadata?: Record<string, unknown>;
   is_metadata?: boolean;
+  expires_at?: string;
+  namespace?: string;
   /**
    * Benchmark artifacts are stored with lower default importance and reduced indexing/chunking.
    * Use for evaluation snapshots, regression reports, and query benchmark metadata.
@@ -77,6 +81,8 @@ export interface UpdateMemoryInput {
   tags?: string[];
   metadata?: Record<string, unknown>;
   is_metadata?: boolean;
+  expires_at?: string | null;
+  namespace?: string | null;
 }
 
 export interface SearchQuery {
@@ -103,6 +109,7 @@ export interface SearchQuery {
    * Defaults to false.
    */
   include_metadata?: boolean;
+  namespace?: string;
 }
 
 export interface SearchResult {
@@ -112,6 +119,13 @@ export interface SearchResult {
   fts_score: number;
   recency_score: number;
   frequency_score: number;
+  score_breakdown?: {
+    usefulness: number;
+    valence: number;
+    quality: number;
+    goal_relevance: number;
+    graph: number;
+  };
 }
 
 export interface MemoryStats {
@@ -129,7 +143,7 @@ export interface CreateMemoryResult {
   memory: Memory;
   superseded_id?: string;
   dedup_similarity?: number;
-  dedup_action?: "superseded" | "skipped";
+  dedup_action?: "superseded" | "skipped" | "merged";
 }
 
 /** Raw row shape from SQLite (embedding as Buffer, is_active as integer) */
@@ -159,6 +173,8 @@ export interface MemoryRow {
   chunk_index: number | null;
   keywords: string | null;
   metadata: string | null;
+  expires_at: string | null;
+  namespace: string | null;
   created_at: string;
   updated_at: string;
 }

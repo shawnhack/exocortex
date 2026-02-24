@@ -118,6 +118,93 @@ export function getArchiveCandidates(
 }
 
 /**
+ * Archive memories whose expires_at timestamp has passed.
+ * Returns the number of memories archived.
+ */
+export function archiveExpired(db: DatabaseSync): number {
+  const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const result = db
+    .prepare(
+      `UPDATE memories SET is_active = 0, updated_at = ?
+       WHERE is_active = 1 AND expires_at IS NOT NULL AND expires_at <= datetime('now')`
+    )
+    .run(now) as { changes: number };
+  return result.changes;
+}
+
+// --- Sentinel Report Expiry ---
+
+export interface ExpireSentinelReportsResult {
+  matched: number;
+  updated: number;
+  dry_run: boolean;
+}
+
+/**
+ * Mark old sentinel/health-check run reports for expiry.
+ * Sets expires_at = now + 7 days (grace period before archiveExpired removes them).
+ * Targets: source='mcp', tagged cortex/health-check/sentinel/metrics, importance <= 0.6,
+ * older than TTL days.
+ */
+export function expireSentinelReports(
+  db: DatabaseSync,
+  opts?: { ttlDays?: number; dryRun?: boolean }
+): ExpireSentinelReportsResult {
+  const ttlDays = opts?.ttlDays ?? 30;
+  const dryRun = opts?.dryRun ?? false;
+
+  const cutoff = new Date(Date.now() - ttlDays * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 19)
+    .replace("T", " ");
+
+  const sentinelTags = ["cortex", "health-check", "sentinel", "metrics"];
+  const placeholders = sentinelTags.map(() => "?").join(",");
+
+  // Find matching memories
+  const candidates = db
+    .prepare(
+      `SELECT DISTINCT m.id FROM memories m
+       INNER JOIN memory_tags mt ON m.id = mt.memory_id
+       WHERE m.is_active = 1
+         AND m.source = 'mcp'
+         AND m.importance <= 0.6
+         AND m.created_at < ?
+         AND m.expires_at IS NULL
+         AND mt.tag IN (${placeholders})`
+    )
+    .all(cutoff, ...sentinelTags) as Array<{ id: string }>;
+
+  if (dryRun || candidates.length === 0) {
+    return { matched: candidates.length, updated: 0, dry_run: dryRun };
+  }
+
+  // Set expires_at to 7 days from now
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 19)
+    .replace("T", " ");
+  const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+
+  const stmt = db.prepare(
+    "UPDATE memories SET expires_at = ?, updated_at = ? WHERE id = ?"
+  );
+
+  db.exec("BEGIN");
+  try {
+    for (const c of candidates) {
+      stmt.run(expiresAt, now, c.id);
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+
+  return { matched: candidates.length, updated: candidates.length, dry_run: false };
+}
+
+/**
  * Archive stale memories by setting is_active = 0.
  * Returns the list of archived candidates.
  */

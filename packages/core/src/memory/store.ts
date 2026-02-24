@@ -43,6 +43,8 @@ function rowToMemory(row: MemoryRow, tags?: string[]): Memory {
     chunk_index: rowData.chunk_index ?? null,
     keywords: rowData.keywords ?? undefined,
     metadata: rowData.metadata ? JSON.parse(rowData.metadata) : undefined,
+    expires_at: rowData.expires_at ?? null,
+    namespace: rowData.namespace ?? null,
     tags,
   };
 }
@@ -304,7 +306,7 @@ export class MemoryStore {
     // Dedup check: find semantically similar existing memory.
     // Actual supersede update happens inside the insert transaction so
     // dedup cannot deactivate data if the insert later fails.
-    let dedupInfo: { superseded_id: string; similarity: number } | null =
+    let dedupInfo: { superseded_id: string; similarity: number; action?: "merge" } | null =
       hashDedupId && !skipInsertOnDedup
         ? { superseded_id: hashDedupId, similarity: 1.0 }
         : null;
@@ -325,9 +327,14 @@ export class MemoryStore {
       );
     }
 
+    // Merge mode: append new content to existing memory instead of creating a new one
+    if (dedupInfo && dedupInfo.action === "merge") {
+      return this.mergeIntoExisting(dedupInfo.superseded_id, input, now, dedupInfo.similarity);
+    }
+
     const insertMemory = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, metadata, expires_at, namespace, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertTag = this.db.prepare(
@@ -370,6 +377,8 @@ export class MemoryStore {
         input.valence ?? 0,
         input.parent_id ?? null,
         input.metadata ? JSON.stringify(input.metadata) : null,
+        input.expires_at ?? null,
+        input.namespace ?? null,
         now,
         now
       );
@@ -666,7 +675,7 @@ export class MemoryStore {
   private findDedupCandidate(
     input: CreateMemoryInput,
     newEmbedding: Float32Array
-  ): { superseded_id: string; similarity: number } | null {
+  ): { superseded_id: string; similarity: number; action?: "merge" } | null {
     const dedupEnabled = getSetting(this.db, "dedup.enabled") !== "false";
     if (!dedupEnabled) return null;
 
@@ -714,6 +723,28 @@ export class MemoryStore {
 
         return { superseded_id: candidate.id, similarity };
       }
+
+      // Merge mode: check if similarity is in the merge range (below threshold but above merge threshold)
+      const mergeEnabled = getSetting(this.db, "dedup.merge_enabled") === "true";
+      if (mergeEnabled) {
+        const mergeThreshold = parseFloat(
+          getSetting(this.db, "dedup.merge_threshold") ?? "0.75"
+        );
+        if (similarity >= mergeThreshold && similarity < threshold) {
+          // Check tag overlap
+          if (input.tags && input.tags.length > 0) {
+            const existingTags = this.db
+              .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
+              .all(candidate.id) as Array<{ tag: string }>;
+            const existingTagSet = new Set(existingTags.map((t) => t.tag));
+            const hasOverlap = input.tags.some((t) =>
+              existingTagSet.has(t.toLowerCase().trim())
+            );
+            if (!hasOverlap) continue;
+          }
+          return { superseded_id: candidate.id, similarity, action: "merge" as const };
+        }
+      }
     }
 
     return null;
@@ -746,8 +777,8 @@ export class MemoryStore {
 
     // Insert parent (no embedding)
     const insertMemory = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, metadata, expires_at, namespace, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertTag = this.db.prepare(
       "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
@@ -783,6 +814,8 @@ export class MemoryStore {
         input.valence ?? 0,
         input.parent_id ?? null,
         input.metadata ? JSON.stringify(input.metadata) : null,
+        input.expires_at ?? null,
+        input.namespace ?? null,
         now,
         now
       );
@@ -800,8 +833,8 @@ export class MemoryStore {
 
     // Insert chunks with individual embeddings
     const insertChunk = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, chunk_index, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, chunk_index, metadata, expires_at, namespace, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const provider = isIndexed ? await getEmbeddingProvider().catch(() => null) : null;
@@ -841,6 +874,8 @@ export class MemoryStore {
           parentId,
           i,
           input.metadata ? JSON.stringify(input.metadata) : null,
+          input.expires_at ?? null,
+          input.namespace ?? null,
           now,
           now
         );
@@ -1116,6 +1151,16 @@ export class MemoryStore {
       params.push(input.is_active ? 1 : 0);
     }
 
+    if (input.expires_at !== undefined) {
+      sets.push("expires_at = ?");
+      params.push(input.expires_at);
+    }
+
+    if (input.namespace !== undefined) {
+      sets.push("namespace = ?");
+      params.push(input.namespace);
+    }
+
     if (input.metadata !== undefined) {
       // Merge with existing metadata: new keys added, null values delete keys
       for (const [k, v] of Object.entries(input.metadata)) {
@@ -1376,18 +1421,22 @@ export class MemoryStore {
     return (result as { changes: number }).changes > 0;
   }
 
-  async getRecent(limit = 20, offset = 0, tags?: string[]): Promise<Memory[]> {
+  async getRecent(limit = 20, offset = 0, tags?: string[], namespace?: string): Promise<Memory[]> {
     let sql: string;
     let params: (string | number)[];
     const normalizedTags = normalizeTags(tags, getTagAliasMap(this.db));
 
+    const nsCondition = namespace ? " AND m.namespace = ?" : "";
+    const nsConditionNoAlias = namespace ? " AND namespace = ?" : "";
+    const nsParams: string[] = namespace ? [namespace] : [];
+
     if (normalizedTags.length > 0) {
       const placeholders = normalizedTags.map(() => "?").join(", ");
-      sql = `SELECT DISTINCT m.* FROM memories m INNER JOIN memory_tags mt ON m.id = mt.memory_id AND mt.tag IN (${placeholders}) WHERE m.is_active = 1 ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?`;
-      params = [...normalizedTags, limit, offset];
+      sql = `SELECT DISTINCT m.* FROM memories m INNER JOIN memory_tags mt ON m.id = mt.memory_id AND mt.tag IN (${placeholders}) WHERE m.is_active = 1${nsCondition} ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?`;
+      params = [...normalizedTags, ...nsParams, limit, offset];
     } else {
-      sql = "SELECT * FROM memories WHERE is_active = 1 ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?";
-      params = [limit, offset];
+      sql = `SELECT * FROM memories m WHERE m.is_active = 1${nsCondition} ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?`;
+      params = [...nsParams, limit, offset];
     }
 
     const rows = this.db.prepare(sql).all(...params) as unknown as MemoryRow[];
@@ -1432,6 +1481,220 @@ export class MemoryStore {
     this.db
       .prepare("UPDATE memories SET useful_count = useful_count + 1 WHERE id = ?")
       .run(id);
+  }
+
+  private async mergeIntoExisting(
+    existingId: string,
+    input: CreateMemoryInput,
+    now: string,
+    similarity: number
+  ): Promise<CreateMemoryResult> {
+    const existing = await this.getById(existingId);
+    if (!existing) {
+      throw new Error(`Merge target ${existingId} not found`);
+    }
+
+    const mergedContent = `${existing.content}\n\n---\n\n${input.content}`;
+    const contentHash = computeContentHashForDb(this.db, mergedContent);
+
+    // Re-embed the merged content
+    let embeddingBlob: Uint8Array | null = null;
+    try {
+      const provider = await getEmbeddingProvider();
+      const embedding = await provider.embed(mergedContent);
+      embeddingBlob = new Uint8Array(
+        embedding.buffer,
+        embedding.byteOffset,
+        embedding.byteLength
+      );
+    } catch {
+      // Skip re-embedding on failure
+    }
+
+    this.db.exec("BEGIN");
+    try {
+      const sets = [
+        "content = ?",
+        "content_hash = ?",
+        "updated_at = ?",
+      ];
+      const params: (string | number | Uint8Array | null)[] = [
+        mergedContent,
+        contentHash,
+        now,
+      ];
+
+      if (embeddingBlob) {
+        sets.push("embedding = ?");
+        params.push(embeddingBlob);
+      }
+
+      // Take the higher importance
+      if (input.importance !== undefined && input.importance > existing.importance) {
+        sets.push("importance = ?");
+        params.push(input.importance);
+      }
+
+      params.push(existingId);
+      this.db
+        .prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`)
+        .run(...params);
+
+      // Merge tags
+      if (input.tags && input.tags.length > 0) {
+        const insertTag = this.db.prepare(
+          "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
+        );
+        for (const tag of input.tags) {
+          insertTag.run(existingId, tag);
+        }
+      }
+
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+
+    incrementCounter(this.db, "memory.dedup_merged");
+
+    const updated = await this.getById(existingId);
+    if (!updated) {
+      throw new Error(`Merged memory ${existingId} disappeared`);
+    }
+
+    return {
+      memory: updated,
+      superseded_id: existingId,
+      dedup_similarity: similarity,
+      dedup_action: "merged",
+    };
+  }
+
+  bulkAddTags(ids: string[], tags: string[]): void {
+    if (ids.length === 0 || tags.length === 0) return;
+    const aliasMap = getTagAliasMap(this.db);
+    const normalizedTags = normalizeTags(tags, aliasMap);
+    const insertTag = this.db.prepare(
+      "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
+    );
+    const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+    const updateTime = this.db.prepare(
+      "UPDATE memories SET updated_at = ? WHERE id = ?"
+    );
+
+    this.db.exec("BEGIN");
+    try {
+      for (const id of ids) {
+        for (const tag of normalizedTags) {
+          insertTag.run(id, tag);
+        }
+        updateTime.run(now, id);
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  bulkRemoveTags(ids: string[], tags: string[]): void {
+    if (ids.length === 0 || tags.length === 0) return;
+    const aliasMap = getTagAliasMap(this.db);
+    const normalizedTags = normalizeTags(tags, aliasMap);
+    const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+    const updateTime = this.db.prepare(
+      "UPDATE memories SET updated_at = ? WHERE id = ?"
+    );
+
+    this.db.exec("BEGIN");
+    try {
+      for (const id of ids) {
+        for (const tag of normalizedTags) {
+          this.db
+            .prepare("DELETE FROM memory_tags WHERE memory_id = ? AND tag = ?")
+            .run(id, tag);
+        }
+        updateTime.run(now, id);
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  bulkUpdateImportance(ids: string[], importance: number): void {
+    if (ids.length === 0) return;
+    const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+    const update = this.db.prepare(
+      "UPDATE memories SET importance = ?, updated_at = ? WHERE id = ?"
+    );
+
+    this.db.exec("BEGIN");
+    try {
+      for (const id of ids) {
+        update.run(importance, now, id);
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  async getDiff(since: string, limit = 50, namespace?: string): Promise<{
+    created: Memory[];
+    updated: Memory[];
+    archived: Memory[];
+  }> {
+    const nsFilter = namespace ? " AND namespace = ?" : "";
+    const nsParams: string[] = namespace ? [namespace] : [];
+
+    const createdRows = this.db
+      .prepare(
+        `SELECT * FROM memories WHERE created_at > ? AND is_active = 1${nsFilter} ORDER BY created_at DESC LIMIT ?`
+      )
+      .all(since, ...nsParams, limit) as unknown as MemoryRow[];
+
+    const updatedRows = this.db
+      .prepare(
+        `SELECT * FROM memories WHERE updated_at > ? AND created_at <= ? AND is_active = 1${nsFilter} ORDER BY updated_at DESC LIMIT ?`
+      )
+      .all(since, since, ...nsParams, limit) as unknown as MemoryRow[];
+
+    const archivedRows = this.db
+      .prepare(
+        `SELECT * FROM memories WHERE updated_at > ? AND is_active = 0 AND created_at <= ?${nsFilter} ORDER BY updated_at DESC LIMIT ?`
+      )
+      .all(since, since, ...nsParams, limit) as unknown as MemoryRow[];
+
+    const allIds = [
+      ...createdRows.map((r) => r.id),
+      ...updatedRows.map((r) => r.id),
+      ...archivedRows.map((r) => r.id),
+    ];
+
+    let tagMap = new Map<string, string[]>();
+    if (allIds.length > 0) {
+      const placeholders = allIds.map(() => "?").join(", ");
+      const tagRows = this.db
+        .prepare(`SELECT memory_id, tag FROM memory_tags WHERE memory_id IN (${placeholders})`)
+        .all(...allIds) as Array<{ memory_id: string; tag: string }>;
+      for (const t of tagRows) {
+        const arr = tagMap.get(t.memory_id);
+        if (arr) arr.push(t.tag);
+        else tagMap.set(t.memory_id, [t.tag]);
+      }
+    }
+
+    const toMemory = (row: MemoryRow) => rowToMemory(row, tagMap.get(row.id) ?? []);
+
+    return {
+      created: createdRows.map(toMemory),
+      updated: updatedRows.map(toMemory),
+      archived: archivedRows.map(toMemory),
+    };
   }
 
   async getStats(): Promise<MemoryStats> {

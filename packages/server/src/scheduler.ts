@@ -9,6 +9,7 @@ import {
   detectContradictions,
   recordContradiction,
   archiveStaleMemories,
+  archiveExpired,
   adjustImportance,
   getSetting,
   purgeTrash,
@@ -19,15 +20,19 @@ import {
   densifyEntityGraph,
   buildCoRetrievalLinks,
   runRetrievalRegression,
+  autoConsolidate,
+  expireSentinelReports,
+  suggestTagMerges,
+  applyTagMerge,
 } from "@exocortex/core";
 import type { RetrievalRegressionResult } from "@exocortex/core";
 
 /**
- * Run importance adjustment + archival immediately.
+ * Run importance adjustment + archival + auto-consolidation immediately.
  * Called on startup and after every N memory stores.
- * Skips consolidation/contradictions (those need human review).
+ * Skips manual consolidation/contradictions (those need human review).
  */
-export function runMaintenanceNow(): void {
+export async function runMaintenanceNow(): Promise<void> {
   try {
     const db = getDb();
 
@@ -45,6 +50,43 @@ export function runMaintenanceNow(): void {
     if (archResult.archived > 0) {
       console.log(`[maintenance] Archived ${archResult.archived} stale memories`);
     }
+
+    // Archive expired memories
+    const expiredCount = archiveExpired(db);
+    if (expiredCount > 0) {
+      console.log(`[maintenance] Archived ${expiredCount} expired memories`);
+    }
+
+    // Auto-consolidation (gated by setting)
+    if (getSetting(db, "consolidation.auto_enabled") !== "false") {
+      try {
+        const provider = await getEmbeddingProvider();
+        const consolResult = await autoConsolidate(db, provider, {
+          maxClusters: 3,
+          minSimilarity: 0.85,
+        });
+        if (consolResult.clustersConsolidated > 0) {
+          console.log(
+            `[maintenance] Auto-consolidated ${consolResult.clustersConsolidated}/${consolResult.clustersFound} clusters, ${consolResult.memoriesMerged} memories merged`
+          );
+        }
+      } catch (err) {
+        console.error("[maintenance] Auto-consolidation error:", err);
+      }
+    }
+
+    // Auto tag cleanup (conservative: max 1 merge per maintenance run)
+    try {
+      const suggestions = suggestTagMerges(db, { minSimilarity: 0.95, limit: 1 });
+      for (const s of suggestions) {
+        if (s.fromCount <= 50) {
+          const result = applyTagMerge(db, s.from, s.to);
+          console.log(`[maintenance] Auto-merged tag "${s.from}" → "${s.to}": ${result.updated} memories updated`);
+        }
+      }
+    } catch (err) {
+      console.error("[maintenance] Tag cleanup error:", err);
+    }
   } catch (err) {
     console.error("[maintenance] Error:", err);
   }
@@ -55,13 +97,16 @@ let storesSinceMaintenance = 0;
 
 /**
  * Call after each memory store. Triggers maintenance every N stores.
+ * Fire-and-forget — does not block the caller.
  */
 export function notifyMemoryStored(): void {
   storesSinceMaintenance++;
   if (storesSinceMaintenance >= MAINTENANCE_EVERY_N_STORES) {
     storesSinceMaintenance = 0;
     console.log(`[maintenance] ${MAINTENANCE_EVERY_N_STORES} memories stored — running maintenance`);
-    runMaintenanceNow();
+    runMaintenanceNow().catch((err) =>
+      console.error("[maintenance] Periodic maintenance error:", err)
+    );
   }
 }
 
@@ -180,13 +225,40 @@ export function startScheduler(): void {
     }
   });
 
-  // Stale memory archival — every day at 4:00 AM
+  // Stale memory archival + expired + sentinel report expiry — every day at 4:00 AM
   cron.schedule("0 4 * * *", () => {
     try {
       console.log("[scheduler] Running stale memory archival...");
       const db = getDb();
       const result = archiveStaleMemories(db);
       console.log(`[scheduler] Archival complete: ${result.archived} memories archived`);
+
+      // Archive memories past their expires_at
+      const expiredCount = archiveExpired(db);
+      if (expiredCount > 0) {
+        console.log(`[scheduler] Archived ${expiredCount} expired memories`);
+      }
+
+      // Mark old sentinel reports for expiry
+      const ttlStr = getSetting(db, "sentinel.report_ttl_days");
+      const ttlDays = ttlStr ? parseInt(ttlStr, 10) : 30;
+      const sentinelResult = expireSentinelReports(db, { ttlDays });
+      if (sentinelResult.updated > 0) {
+        console.log(`[scheduler] Marked ${sentinelResult.updated} sentinel reports for expiry`);
+      }
+
+      // Auto tag cleanup (up to 3 near-duplicate merges)
+      try {
+        const suggestions = suggestTagMerges(db, { minSimilarity: 0.95, limit: 3 });
+        for (const s of suggestions) {
+          if (s.fromCount <= 50) {
+            const result = applyTagMerge(db, s.from, s.to);
+            console.log(`[scheduler] Auto-merged tag "${s.from}" → "${s.to}": ${result.updated} memories updated`);
+          }
+        }
+      } catch (err) {
+        console.error("[scheduler] Tag cleanup error:", err);
+      }
     } catch (err) {
       console.error("[scheduler] Archival error:", err);
     }
@@ -255,9 +327,9 @@ export function startScheduler(): void {
   );
 
   // Run maintenance on startup (short delay to not block server init)
-  setTimeout(() => {
+  setTimeout(async () => {
     console.log("[maintenance] Running startup maintenance...");
-    runMaintenanceNow();
+    await runMaintenanceNow();
   }, 5000);
 
   // Re-embed memories with missing embeddings on startup

@@ -75,6 +75,67 @@ export async function reembedMissing(
   return { processed, failed, skipped: 0, dry_run: false };
 }
 
+// --- A1b: Re-embed All (Model Migration) ---
+
+export interface ReembedAllResult {
+  processed: number;
+  failed: number;
+  total: number;
+  dry_run: boolean;
+}
+
+/**
+ * Re-embed ALL active memories (not just those with NULL embeddings).
+ * Use for model migration when switching embedding providers.
+ * Sets the embedding_model column on each updated row.
+ */
+export async function reembedAll(
+  db: DatabaseSync,
+  provider: EmbeddingProvider,
+  opts?: { dryRun?: boolean; batchSize?: number; limit?: number; modelName?: string }
+): Promise<ReembedAllResult> {
+  const dryRun = opts?.dryRun ?? false;
+  const batchSize = opts?.batchSize ?? 50;
+  const limit = opts?.limit ?? 10000;
+  const modelName = opts?.modelName ?? "unknown";
+
+  const rows = db
+    .prepare(
+      `SELECT id, content FROM memories
+       WHERE is_active = 1
+       LIMIT ?`
+    )
+    .all(limit) as unknown as Array<{ id: string; content: string }>;
+
+  if (dryRun) {
+    return { processed: 0, failed: 0, total: rows.length, dry_run: true };
+  }
+
+  let processed = 0;
+  let failed = 0;
+
+  const update = db.prepare(
+    "UPDATE memories SET embedding = ?, embedding_model = ?, updated_at = ? WHERE id = ?"
+  );
+
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+
+    for (const row of batch) {
+      try {
+        const embedding = await provider.embed(row.content);
+        const buffer = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
+        update.run(buffer, modelName, new Date().toISOString().replace("T", " ").replace("Z", ""), row.id);
+        processed++;
+      } catch {
+        failed++;
+      }
+    }
+  }
+
+  return { processed, failed, total: rows.length, dry_run: false };
+}
+
 // --- A2: Entity Graph Backfill ---
 
 export interface BackfillEntitiesResult {

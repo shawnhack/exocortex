@@ -9,6 +9,7 @@ import {
   frequencyScore,
   usefulnessScore,
   valenceScore,
+  qualityScore,
   goalRelevanceScore,
   computeHybridScore,
   getWeights,
@@ -134,6 +135,11 @@ export class MemorySearch {
       params.push(...normalizedTagFilter);
     }
 
+    if (query.namespace) {
+      conditions.push("m.namespace = ?");
+      params.push(query.namespace);
+    }
+
     let excludedMetadataCount = 0;
     if (!metadataRequested && metadataMode === "exclude") {
       if (metadataTags.size > 0) {
@@ -179,9 +185,11 @@ export class MemorySearch {
         const extraTermsStr = extraFtsTerms.map((t) => `"${t.replace(/"/g, "")}"`).join(" OR ");
         ftsQuery = `${ftsQuery} OR ${extraTermsStr}`;
       }
+      const rawKeywordBoost = parseFloat(getSetting(this.db, "scoring.keyword_boost") ?? "2.0");
+      const keywordBoost = Number.isFinite(rawKeywordBoost) ? rawKeywordBoost : 2.0;
       const ftsRows = this.db
         .prepare(
-          "SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT 200"
+          `SELECT rowid, bm25(memories_fts, 1.0, ${keywordBoost}) as rank FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT 200`
         )
         .all(ftsQuery) as unknown as FtsMatch[];
 
@@ -288,7 +296,27 @@ export class MemorySearch {
       .get() as { max: number | null };
     const maxAccessCount = maxAccess?.max ?? 0;
 
+    // Batch-fetch link counts for quality score computation
+    const linkCountMap = new Map<string, number>();
+    if (rows.length > 0 && weights.quality > 0) {
+      const ids = rows.map((r) => r.id);
+      const placeholders = ids.map(() => "?").join(", ");
+      const linkRows = this.db
+        .prepare(
+          `SELECT id, COUNT(*) as lc FROM (
+            SELECT source_id as id FROM memory_links WHERE source_id IN (${placeholders})
+            UNION ALL
+            SELECT target_id as id FROM memory_links WHERE target_id IN (${placeholders})
+          ) GROUP BY id`
+        )
+        .all(...ids, ...ids) as Array<{ id: string; lc: number }>;
+      for (const lr of linkRows) {
+        linkCountMap.set(lr.id, lr.lc);
+      }
+    }
+
     // Compute per-candidate component scores
+    const now = Date.now();
     const candidates: Array<{
       row: MemoryRow & { _rowid: number };
       vectorScore: number;
@@ -297,6 +325,7 @@ export class MemorySearch {
       freq: number;
       usefulness: number;
       valence: number;
+      quality: number;
       goalRelevance: number;
     }> = [];
 
@@ -311,12 +340,15 @@ export class MemorySearch {
       const ftsScore = ftsMatches.get(String(row._rowid)) ?? 0;
       const recency = recencyScore(row.created_at, weights.recencyDecay, row.importance);
       const freq = frequencyScore(row.access_count, maxAccessCount);
-      const usefulness = usefulnessScore((row as any).useful_count ?? 0);
+      const usefulCount = (row as any).useful_count ?? 0;
+      const usefulness = usefulnessScore(usefulCount);
       const valence = valenceScore((row as any).valence ?? 0);
       const memTags = candidateTagMap.get(row.id) ?? [];
       const goalRelevance = goalRelevanceScore(memTags, goalKeywords);
+      const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
+      const quality = qualityScore(row.importance, usefulCount, row.access_count, linkCountMap.get(row.id) ?? 0, ageDays);
 
-      candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness, valence, goalRelevance });
+      candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness, valence, quality, goalRelevance });
     }
 
     // Graph-proximity scores (if weight > 0)
@@ -331,7 +363,7 @@ export class MemorySearch {
 
     // RRF or legacy scoring
     const rrfConfig = getRRFConfig(this.db);
-    const scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number; valence: number; goalRelevance: number }> = [];
+    const scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number; valence: number; quality: number; goalRelevance: number }> = [];
     let penalizedMetadataCount = 0;
 
     if (rrfConfig.enabled) {
@@ -388,8 +420,8 @@ export class MemorySearch {
           }
         }
 
-        // Post-RRF multiplicative boost from recency + frequency + usefulness + valence
-        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.goalGated * c.goalRelevance;
+        // Post-RRF multiplicative boost from recency + frequency + usefulness + valence + quality
+        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.quality * c.quality + weights.goalGated * c.goalRelevance;
         let score = baseRrf * boostMultiplier;
 
         // Tag boost scaled to RRF range
@@ -409,7 +441,7 @@ export class MemorySearch {
         }
 
         if (score >= rrfMinScore) {
-          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, goalRelevance: c.goalRelevance });
+          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, quality: c.quality, goalRelevance: c.goalRelevance });
         }
       }
     } else {
@@ -423,9 +455,10 @@ export class MemorySearch {
           weights
         );
 
-        // Additive usefulness + valence + goal boosts (only positive, never penalizes)
+        // Additive usefulness + valence + quality + goal boosts (only positive, never penalizes)
         score += weights.usefulness * c.usefulness;
         score += weights.valence * c.valence;
+        score += weights.quality * c.quality;
         score += weights.goalGated * c.goalRelevance;
 
         if (tagBoost > 0 && queryTerms.length > 0) {
@@ -451,7 +484,7 @@ export class MemorySearch {
         }
 
         if (score >= minScore) {
-          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, goalRelevance: c.goalRelevance });
+          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, quality: c.quality, goalRelevance: c.goalRelevance });
         }
       }
     }
@@ -527,6 +560,13 @@ export class MemorySearch {
         fts_score: p.ftsScore,
         recency_score: p.recency,
         frequency_score: p.freq,
+        score_breakdown: {
+          usefulness: p.usefulness,
+          valence: p.valence,
+          quality: p.quality,
+          goal_relevance: p.goalRelevance,
+          graph: graphScores.get(p.row.id) ?? 0,
+        },
       };
     });
   }

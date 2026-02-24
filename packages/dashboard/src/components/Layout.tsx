@@ -360,7 +360,7 @@ export function Layout() {
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", position: "relative" }}>
+    <div style={{ display: "flex", height: "100vh", position: "relative", overflow: "hidden" }}>
       {/* Sidebar wrapper */}
       <div
         style={{
@@ -368,6 +368,7 @@ export function Layout() {
           flexShrink: 0,
           position: "relative",
           transition: "width 0.25s ease",
+          overflowY: "auto",
         }}
       >
         {sidebarContent}
@@ -388,19 +389,24 @@ export function Layout() {
         />
       </div>
 
-      {/* Main content */}
-      <main
+      {/* Main content scroller — scrollbar hugs viewport edge */}
+      <div
         style={{
           flex: 1,
-          padding: "32px 40px",
-          maxWidth: isFullWidth ? "none" : 1000,
-          minHeight: "100vh",
+          overflowY: "auto",
           position: "relative",
           zIndex: 1,
         }}
       >
-        <Outlet />
-      </main>
+        <main
+          style={{
+            maxWidth: isFullWidth ? "none" : 1000,
+            padding: "32px 40px",
+          }}
+        >
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

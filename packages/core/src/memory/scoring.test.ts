@@ -232,6 +232,7 @@ describe("scoring", () => {
         graph: 0,
         usefulness: 0.05,
         valence: 0.05,
+        quality: 0.10,
         goalGated: 0.10,
       };
 
@@ -249,6 +250,7 @@ describe("scoring", () => {
         graph: 0,
         usefulness: 0.05,
         valence: 0.05,
+        quality: 0.10,
         goalGated: 0.10,
       };
 

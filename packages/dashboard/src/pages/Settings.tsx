@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect, useCallback } from "react";
-import { api } from "../api/client";
+import { api, type EmbeddingHealth } from "../api/client";
 import { useToast } from "../components/Toast";
 
 type Tab = "config" | "data";
@@ -59,6 +59,12 @@ export function Settings() {
   const { data: settings, isLoading } = useQuery({
     queryKey: ["settings"],
     queryFn: () => api.getSettings(),
+  });
+
+  const { data: embeddingHealth } = useQuery({
+    queryKey: ["embedding-health"],
+    queryFn: () => api.getEmbeddingHealth(),
+    staleTime: 5 * 60 * 1000,
   });
 
   const [edited, setEdited] = useState<Record<string, string>>({});
@@ -374,6 +380,58 @@ export function Settings() {
       {/* Configuration Tab */}
       {tab === "config" && (
         <div>
+          {/* Embedding Health */}
+          {embeddingHealth && (
+            <div
+              style={{
+                background: "#0c0c1d",
+                border: "1px solid #16163a",
+                borderRadius: 12,
+                padding: 20,
+                marginBottom: 16,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#22d3ee",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  marginBottom: 16,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                Embedding Status
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+                <div style={{ background: "rgba(8, 8, 26, 0.6)", border: "1px solid #16163a", borderRadius: 10, padding: "12px 16px" }}>
+                  <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4 }}>Model</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#e8e8f4", fontFamily: "var(--font-mono)" }}>
+                    {embeddingHealth.currentModel}
+                  </div>
+                </div>
+                <div style={{ background: "rgba(8, 8, 26, 0.6)", border: "1px solid #16163a", borderRadius: 10, padding: "12px 16px" }}>
+                  <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4 }}>Embedded</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: "#34d399", fontFamily: "var(--font-mono)" }}>
+                    {embeddingHealth.totalEmbedded}
+                  </div>
+                </div>
+                <div style={{ background: "rgba(8, 8, 26, 0.6)", border: "1px solid #16163a", borderRadius: 10, padding: "12px 16px" }}>
+                  <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4 }}>Mismatched Model</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: embeddingHealth.mismatchedModel > 0 ? "#f59e0b" : "#34d399", fontFamily: "var(--font-mono)" }}>
+                    {embeddingHealth.mismatchedModel}
+                  </div>
+                </div>
+              </div>
+              {embeddingHealth.missingEmbedding > 0 && (
+                <div style={{ marginTop: 12, padding: "8px 12px", background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.2)", borderRadius: 8, fontSize: 12, color: "#f59e0b" }}>
+                  {embeddingHealth.missingEmbedding} memories missing embeddings — run maintenance reembed to fix
+                </div>
+              )}
+            </div>
+          )}
+
           {Object.entries(groups).map(([group, keys]) => (
             <div
               key={group}

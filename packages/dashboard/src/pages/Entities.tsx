@@ -82,52 +82,54 @@ export function Entities() {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-        <div>
-          <h1>Entities</h1>
-          <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 20 }}>
-            Extracted knowledge graph nodes
-          </p>
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--bg-root, #06060e)", margin: "-32px -40px 0", padding: "32px 40px 4px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+          <div>
+            <h1>Entities</h1>
+            <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 20 }}>
+              Extracted knowledge graph nodes
+            </p>
+          </div>
+          {data && data.results.length > 0 && (
+            <button
+              className="btn-ghost btn-sm"
+              onClick={() => {
+                setSelectMode(!selectMode);
+                setSelectedIds(new Set());
+                lastClickedIdx.current = null;
+              }}
+            >
+              {selectMode ? "Cancel" : "Select"}
+            </button>
+          )}
         </div>
-        {data && data.results.length > 0 && (
-          <button
-            className="btn-ghost btn-sm"
-            onClick={() => {
-              setSelectMode(!selectMode);
-              setSelectedIds(new Set());
-              lastClickedIdx.current = null;
-            }}
-          >
-            {selectMode ? "Cancel" : "Select"}
-          </button>
+
+        {/* Tag filter pills */}
+        {allTags.length > 0 && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+            <button
+              className={`filter-pill${selectedTags.length === 0 ? " active" : ""}`}
+              onClick={() => setSelectedTags([])}
+            >
+              All
+            </button>
+            {allTags.map((tag) => {
+              const color = tagColor(tag);
+              const isActive = selectedTags.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  className={`filter-pill${isActive ? " active" : ""}`}
+                  onClick={() => toggleTag(tag)}
+                  style={isActive ? { borderColor: color, color } : undefined}
+                >
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
-
-      {/* Tag filter pills */}
-      {allTags.length > 0 && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
-          <button
-            className={`filter-pill${selectedTags.length === 0 ? " active" : ""}`}
-            onClick={() => setSelectedTags([])}
-          >
-            All
-          </button>
-          {allTags.map((tag) => {
-            const color = tagColor(tag);
-            const isActive = selectedTags.includes(tag);
-            return (
-              <button
-                key={tag}
-                className={`filter-pill${isActive ? " active" : ""}`}
-                onClick={() => toggleTag(tag)}
-                style={isActive ? { borderColor: color, color } : undefined}
-              >
-                {tag}
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {selectMode && (
         <p style={{ color: "#8080a0", fontSize: 12, marginBottom: 12, fontFamily: "var(--font-mono)" }}>

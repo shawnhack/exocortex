@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks } from "@exocortex/core";
+import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution } from "@exocortex/core";
 import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 
@@ -186,6 +186,8 @@ server.tool(
     metadata: z.record(z.string(), z.any()).optional().describe("Arbitrary JSON metadata (e.g. { model: 'claude-opus-4-6' })"),
     is_metadata: z.boolean().optional().describe("Explicitly mark this memory as metadata/system artifact"),
     benchmark: z.boolean().optional().describe("Store as benchmark artifact (low default importance, reduced indexing/chunking)"),
+    expires_at: z.string().optional().describe("ISO timestamp when this memory should auto-expire (e.g. '2026-03-01T00:00:00Z')"),
+    namespace: z.string().optional().describe("Project namespace for scoped retrieval (e.g. 'exocortex', 'moodarc')"),
   },
   async (args) => {
     try {
@@ -207,6 +209,8 @@ server.tool(
         metadata: args.metadata,
         is_metadata: args.is_metadata,
         benchmark: args.benchmark,
+        expires_at: args.expires_at,
+        namespace: args.namespace,
       });
 
       const meta: string[] = [`id: ${result.memory.id}`];
@@ -216,6 +220,8 @@ server.tool(
         const pct = Math.round((result.dedup_similarity ?? 0) * 100);
         if (result.dedup_action === "skipped") {
           meta.push(`dedup reused ${result.superseded_id} — ${pct}% similar`);
+        } else if (result.dedup_action === "merged") {
+          meta.push(`merged into ${result.superseded_id} — ${pct}% similar`);
         } else {
           meta.push(`superseded ${result.superseded_id} — ${pct}% similar`);
         }
@@ -357,6 +363,7 @@ server.tool(
     include_metadata: z.boolean().optional().describe("Include benchmark/progress/regression metadata memories (default false)"),
     compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
     max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
+    namespace: z.string().optional().describe("Filter by project namespace"),
   },
   async (args) => {
     try {
@@ -375,6 +382,7 @@ server.tool(
         content_type: args.content_type,
         min_score: args.min_score,
         include_metadata: args.include_metadata,
+        namespace: args.namespace,
       });
 
       if (results.length === 0) {
@@ -490,6 +498,7 @@ server.tool(
     limit: z.number().min(1).max(30).optional().describe("Max memories (default 15)"),
     compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
     max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
+    namespace: z.string().optional().describe("Filter by project namespace"),
   },
   async (args) => {
     try {
@@ -501,6 +510,7 @@ server.tool(
       const results = await search.search({
         query: args.topic,
         limit: fetchLimit,
+        namespace: args.namespace,
       });
 
       if (results.length === 0) {
@@ -838,6 +848,8 @@ server.tool(
     is_metadata: z.boolean().optional().describe("Explicitly set metadata/system classification"),
     tags: z.array(z.string()).optional().describe("Replace all tags with these"),
     metadata: z.record(z.string(), z.any()).optional().describe("Merge metadata keys (set value to null to delete a key)"),
+    expires_at: z.string().nullable().optional().describe("Set/clear expiry timestamp (ISO format)"),
+    namespace: z.string().nullable().optional().describe("Set/clear project namespace"),
   },
   async (args) => {
     try {
@@ -856,13 +868,15 @@ server.tool(
         updates.importance === undefined &&
         updates.valence === undefined &&
         updates.is_metadata === undefined &&
+        updates.expires_at === undefined &&
+        updates.namespace === undefined &&
         !updates.tags &&
         !updates.metadata
       ) {
         return {
           content: [{
             type: "text",
-            text: "No update fields provided. Specify at least one of: content, content_type, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, valence, is_metadata, tags, metadata.",
+            text: "No update fields provided. Specify at least one of: content, content_type, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, valence, is_metadata, expires_at, namespace, tags, metadata.",
           }],
         };
       }
@@ -896,12 +910,18 @@ server.tool(
     before: z.string().optional().describe("Only before this date (YYYY-MM-DD)"),
     limit: z.number().min(1).max(50).optional().describe("Max results (default 20)"),
     compact: z.boolean().optional().describe("Return compact results (ID + preview) to save tokens"),
+    namespace: z.string().optional().describe("Filter by project namespace"),
   },
   async (args) => {
     try {
       const limit = args.limit ?? 20;
       const conditions: string[] = ["m.is_active = 1", "m.parent_id IS NULL"];
       const params: (string | number)[] = [];
+
+      if (args.namespace) {
+        conditions.push("m.namespace = ?");
+        params.push(args.namespace);
+      }
 
       let tagJoin = "";
       if (args.tags && args.tags.length > 0) {
@@ -1090,6 +1110,8 @@ server.tool(
     densify_graph: z.boolean().optional().describe("Create co_occurs relationships between entities sharing memories"),
     build_co_retrieval_links: z.boolean().optional().describe("Build memory links from co-retrieval patterns"),
     tune_weights: z.boolean().optional().describe("Auto-adjust scoring weights based on usefulness feedback data"),
+    reembed_all: z.boolean().optional().describe("Re-embed ALL memories (model migration). Use with limit to test first."),
+    reembed_all_limit: z.number().optional().describe("Max memories to re-embed when using reembed_all (default 100)"),
   },
   async (args) => {
     try {
@@ -1158,6 +1180,14 @@ server.tool(
         } else {
           parts.push(`\nHealth: OK — all checks passed`);
         }
+      } catch {
+        // Non-critical
+      }
+
+      // Quality distribution summary
+      try {
+        const qd = getQualityDistribution(db);
+        parts.push(`\nQuality distribution (${qd.total} memories): avg=${qd.avg}, median=${qd.median}, P10=${qd.p10}, P90=${qd.p90}, high(≥0.5)=${qd.highQuality}, low(<0.2)=${qd.lowQuality}`);
       } catch {
         // Non-critical
       }
@@ -1245,6 +1275,21 @@ server.tool(
         }
       }
 
+      // Re-embed ALL memories (model migration)
+      if (args.reembed_all) {
+        try {
+          const provider = await getEmbeddingProvider();
+          const modelName = getSetting(db, "embedding.model") ?? "unknown";
+          const reembedAllResult = await reembedAll(db, provider, {
+            limit: args.reembed_all_limit ?? 100,
+            modelName,
+          });
+          parts.push(`\nRe-embed all: ${reembedAllResult.processed} processed, ${reembedAllResult.failed} failed, ${reembedAllResult.total} total`);
+        } catch (err) {
+          parts.push(`\nRe-embed all: error — ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       // Dangling entities — entities with very few linked memories (structural knowledge gaps)
       try {
         const danglingRows = db.prepare(`
@@ -1282,6 +1327,74 @@ server.tool(
       }
 
       return { content: [{ type: "text", text: `Maintenance complete:\n\n${parts.join("\n")}` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
+  }
+);
+
+// memory_tag_cleanup
+server.tool(
+  "memory_tag_cleanup",
+  "Find and merge near-duplicate tags. Preview mode shows suggestions; apply mode merges them.",
+  {
+    min_similarity: z.number().min(0).max(1).optional().describe("Minimum string similarity for suggestions (default 0.8)"),
+    limit: z.number().optional().describe("Max suggestions to return (default 20)"),
+    apply: z.boolean().optional().describe("If true, apply the top suggestion or specified from/to pair"),
+    from_tag: z.string().optional().describe("Specific tag to merge FROM (use with apply:true)"),
+    to_tag: z.string().optional().describe("Specific tag to merge TO (use with apply:true)"),
+  },
+  async (args) => {
+    try {
+      if (args.apply) {
+        // Apply mode: merge a specific pair or the top suggestion
+        if (args.from_tag && args.to_tag) {
+          const result = applyTagMerge(db, args.from_tag, args.to_tag);
+          return {
+            content: [{
+              type: "text",
+              text: `Merged tag "${args.from_tag}" → "${args.to_tag}": ${result.updated} memory tag(s) updated. Alias added to settings.`,
+            }],
+          };
+        }
+
+        // No specific pair — merge top suggestion
+        const suggestions = suggestTagMerges(db, {
+          minSimilarity: args.min_similarity,
+          limit: 1,
+        });
+        if (suggestions.length === 0) {
+          return { content: [{ type: "text", text: "No merge suggestions found at this similarity threshold." }] };
+        }
+        const top = suggestions[0];
+        const result = applyTagMerge(db, top.from, top.to);
+        return {
+          content: [{
+            type: "text",
+            text: `Merged tag "${top.from}" (${top.fromCount}) → "${top.to}" (${top.toCount}): ${result.updated} memory tag(s) updated (similarity: ${top.similarity}).`,
+          }],
+        };
+      }
+
+      // Preview mode: show suggestions
+      const suggestions = suggestTagMerges(db, {
+        minSimilarity: args.min_similarity,
+        limit: args.limit,
+      });
+
+      if (suggestions.length === 0) {
+        return { content: [{ type: "text", text: "No near-duplicate tags found at this similarity threshold." }] };
+      }
+
+      const lines = [`Found ${suggestions.length} merge suggestion(s):\n`];
+      for (const s of suggestions) {
+        lines.push(
+          `- "${s.from}" (${s.fromCount}) → "${s.to}" (${s.toCount}) — similarity: ${s.similarity}, co-occurrence: ${s.coOccurrence}`
+        );
+      }
+      lines.push(`\nTo merge, call with apply:true or specify from_tag and to_tag.`);
+
+      return { content: [{ type: "text", text: lines.join("\n") }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
     }
@@ -2037,6 +2150,176 @@ server.tool(
       }
 
       return { content: [{ type: "text", text: `Removed milestone ${args.milestone_id}` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
+  }
+);
+
+// memory_project_snapshot
+server.tool(
+  "memory_project_snapshot",
+  "Get a quick project snapshot: recent activity, active goals, recent decisions, open threads, and learned techniques. Use at start of a project session.",
+  {
+    project: z.string().optional().describe("Project name to snapshot (auto-detected from cwd if omitted)"),
+    cwd: z.string().optional().describe("Working directory for auto-detecting project name via path.basename()"),
+    days: z.number().optional().describe("Lookback days (default 14)"),
+  },
+  async (args) => {
+    try {
+      const projectName = args.project || (args.cwd ? path.basename(args.cwd) : undefined);
+      if (!projectName) {
+        return { content: [{ type: "text", text: "Error: provide either 'project' or 'cwd' parameter" }], isError: true };
+      }
+
+      const days = args.days ?? 14;
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      const sinceStr = since.toISOString();
+
+      const search = new MemorySearch(db);
+      const goalStore = new GoalStore(db);
+
+      // Run queries in parallel
+      const [recentResults, decisionResults, goals, openThreadResults, techniqueResults] = await Promise.all([
+        search.search({
+          query: projectName,
+          limit: 10,
+          after: sinceStr,
+        }),
+        search.search({
+          query: `${projectName} decision`,
+          limit: 5,
+          tags: ["decision"],
+          after: sinceStr,
+        }),
+        Promise.resolve(goalStore.list("active")),
+        // Open threads: plan/todo/next-steps/in-progress, unsuperseded, last 14 days
+        search.search({
+          query: projectName,
+          limit: 5,
+          tags: ["plan", "todo", "next-steps", "in-progress"],
+          after: sinceStr,
+        }),
+        // Learned techniques: top 5 by importance
+        search.search({
+          query: projectName,
+          limit: 5,
+          tags: ["technique"],
+        }),
+      ]);
+
+      // Format output
+      const sections: string[] = [];
+
+      sections.push(`# Project Snapshot: ${projectName}\n*Last ${days} days*\n`);
+
+      // Recent Activity
+      sections.push("## Recent Activity");
+      if (recentResults.length === 0) {
+        sections.push("No recent activity found.\n");
+      } else {
+        for (const r of recentResults) {
+          const preview = r.memory.content.slice(0, 150).replace(/\n/g, " ");
+          sections.push(`- **${r.memory.id}** (${r.memory.created_at.slice(0, 10)}, imp=${r.memory.importance}): ${preview}...`);
+        }
+        sections.push("");
+      }
+
+      // Active Goals
+      sections.push("## Active Goals");
+      if (goals.length === 0) {
+        sections.push("No active goals.\n");
+      } else {
+        for (const g of goals) {
+          const deadline = g.deadline ? ` (due: ${g.deadline})` : "";
+          sections.push(`- **${g.title}** [${g.priority}]${deadline}`);
+          if (g.description) sections.push(`  ${g.description.slice(0, 100)}`);
+        }
+        sections.push("");
+      }
+
+      // Recent Decisions
+      sections.push("## Recent Decisions");
+      if (decisionResults.length === 0) {
+        sections.push("No recent decisions found.\n");
+      } else {
+        for (const d of decisionResults) {
+          const preview = d.memory.content.slice(0, 200).replace(/\n/g, " ");
+          sections.push(`- (${d.memory.created_at.slice(0, 10)}) ${preview}`);
+        }
+        sections.push("");
+      }
+
+      // Open Threads
+      sections.push("## Open Threads");
+      if (openThreadResults.length === 0) {
+        sections.push("No open threads.\n");
+      } else {
+        for (const t of openThreadResults) {
+          const preview = t.memory.content.slice(0, 150).replace(/\n/g, " ");
+          sections.push(`- (${t.memory.created_at.slice(0, 10)}) ${preview}`);
+        }
+        sections.push("");
+      }
+
+      // Learned Techniques
+      sections.push("## Learned Techniques");
+      if (techniqueResults.length === 0) {
+        sections.push("No techniques recorded.\n");
+      } else {
+        for (const t of techniqueResults) {
+          const preview = t.memory.content.slice(0, 150).replace(/\n/g, " ");
+          sections.push(`- (imp=${t.memory.importance}) ${preview}`);
+        }
+        sections.push("");
+      }
+
+      return { content: [{ type: "text", text: sections.join("\n") }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
+  }
+);
+
+// memory_diff
+server.tool(
+  "memory_diff",
+  "See what changed since a timestamp — new, updated, and archived memories.",
+  {
+    since: z.string().describe("ISO timestamp to diff from (e.g. 2026-02-24T00:00:00Z)"),
+    limit: z.number().optional().describe("Max results per category (default 50)"),
+    namespace: z.string().optional().describe("Optional namespace filter"),
+  },
+  async (args) => {
+    try {
+      const store = new MemoryStore(db);
+      const diff = await store.getDiff(args.since, args.limit ?? 50, args.namespace);
+
+      const sections: string[] = [];
+      sections.push(`# Changes since ${args.since}\n`);
+
+      sections.push(`## Created (${diff.created.length})`);
+      for (const m of diff.created) {
+        const preview = m.content.slice(0, 120).replace(/\n/g, " ");
+        sections.push(`- **${m.id}** (${m.created_at.slice(0, 10)}): ${preview}`);
+      }
+      sections.push("");
+
+      sections.push(`## Updated (${diff.updated.length})`);
+      for (const m of diff.updated) {
+        const preview = m.content.slice(0, 120).replace(/\n/g, " ");
+        sections.push(`- **${m.id}** (${m.updated_at.slice(0, 10)}): ${preview}`);
+      }
+      sections.push("");
+
+      sections.push(`## Archived (${diff.archived.length})`);
+      for (const m of diff.archived) {
+        const preview = m.content.slice(0, 120).replace(/\n/g, " ");
+        sections.push(`- **${m.id}** (${m.updated_at.slice(0, 10)}): ${preview}`);
+      }
+
+      return { content: [{ type: "text", text: sections.join("\n") }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
     }

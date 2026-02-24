@@ -240,7 +240,16 @@ export function Graph() {
       graph.d3Force("link")?.distance(45);
       graph.d3Force("x", forceX(0).strength(0.06));
       graph.d3Force("y", forceY(0).strength(0.06));
-      graph.warmupTicks(80).cooldownTicks(300);
+      // Three layers to prevent render loop from ever stopping:
+      // 1. Large finite cooldown limits (avoid Infinity edge cases in library)
+      // 2. d3AlphaMin(0) prevents d3 simulation from self-stopping
+      // 3. onEngineStop safety net reheats if engine somehow stops
+      graph
+        .warmupTicks(80)
+        .cooldownTicks(1e15)
+        .cooldownTime(1e15)
+        .d3AlphaMin(0)
+        .onEngineStop(() => graph.d3ReheatSimulation());
 
       graphRef.current = graph;
       setTimeout(() => graph.zoomToFit(400, 60), 1500);

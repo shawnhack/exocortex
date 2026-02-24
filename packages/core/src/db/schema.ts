@@ -221,7 +221,13 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "scoring.graph_weight": "0.10",
   "scoring.usefulness_weight": "0.05",
   "scoring.valence_weight": "0.05",
+  "scoring.quality_weight": "0.10",
   "scoring.goal_gated_weight": "0.10",
+  "dedup.merge_enabled": "false",
+  "dedup.merge_threshold": "0.75",
+  "consolidation.auto_enabled": "true",
+  "sentinel.report_ttl_days": "30",
+  "scoring.keyword_boost": "2.0",
 };
 
 function toNormalizedString(value: unknown): string | null {
@@ -604,6 +610,20 @@ export function initializeSchema(db: DatabaseSync): void {
 
   if (!colNames.has("valence")) {
     db.exec("ALTER TABLE memories ADD COLUMN valence REAL NOT NULL DEFAULT 0.0");
+  }
+
+  if (!colNames.has("expires_at")) {
+    db.exec("ALTER TABLE memories ADD COLUMN expires_at TEXT");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at)");
+  }
+
+  if (!colNames.has("namespace")) {
+    db.exec("ALTER TABLE memories ADD COLUMN namespace TEXT");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace)");
+  }
+
+  if (!colNames.has("embedding_model")) {
+    db.exec("ALTER TABLE memories ADD COLUMN embedding_model TEXT");
   }
 
   if (!colNames.has("keywords")) {

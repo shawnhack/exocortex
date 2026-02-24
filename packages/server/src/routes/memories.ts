@@ -44,6 +44,8 @@ const createSchema = z.object({
   metadata: z.record(z.string(), z.any()).optional(),
   is_metadata: z.boolean().optional(),
   benchmark: z.boolean().optional(),
+  expires_at: z.string().optional(),
+  namespace: z.string().optional(),
 });
 
 const updateSchema = z.object({
@@ -64,6 +66,8 @@ const updateSchema = z.object({
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.string(), z.any()).optional(),
   is_metadata: z.boolean().optional(),
+  expires_at: z.string().nullable().optional(),
+  namespace: z.string().nullable().optional(),
 });
 
 const searchSchema = z.object({
@@ -91,6 +95,7 @@ const searchSchema = z.object({
   min_score: z.number().min(0).max(1).optional(),
   include_metadata: z.boolean().optional(),
   compact: z.boolean().optional(),
+  namespace: z.string().optional(),
 });
 
 const settingsPatchSchema = z.record(z.string(), z.string());
@@ -154,12 +159,13 @@ memories.get("/api/memories/recent", async (c) => {
   const before = c.req.query("before");
   const minImportanceParam = c.req.query("min_importance");
   const minImportance = minImportanceParam !== undefined ? Number.parseFloat(minImportanceParam) : undefined;
+  const namespace = c.req.query("namespace");
 
   const db = getDb();
   const store = new MemoryStore(db);
   // Fetch extra rows to account for filtering, then trim to requested limit
   const fetchLimit = (contentType || after || before || minImportance !== undefined) ? limit * 5 : limit;
-  let results = await store.getRecent(fetchLimit, offset, tags);
+  let results = await store.getRecent(fetchLimit, offset, tags, namespace);
 
   if (contentType) {
     results = results.filter((m) => m.content_type === contentType);
@@ -370,6 +376,41 @@ memories.post("/api/memories/:id/restore", async (c) => {
   return c.json({ ok: true });
 });
 
+// GET /api/memories/namespaces — Distinct namespaces (must be before :id)
+memories.get("/api/memories/namespaces", (c) => {
+  const db = getDb();
+  const rows = db
+    .prepare("SELECT DISTINCT namespace FROM memories WHERE namespace IS NOT NULL AND is_active = 1 ORDER BY namespace")
+    .all() as Array<{ namespace: string }>;
+  return c.json({ namespaces: rows.map((r) => r.namespace) });
+});
+
+// GET /api/memories/diff — Changes since a timestamp (must be before :id)
+memories.get("/api/memories/diff", async (c) => {
+  const since = c.req.query("since");
+  if (!since) {
+    return c.json({ error: "Missing required query parameter: since" }, 400);
+  }
+
+  const limit = parseIntQuery(c.req.query("limit"), 50, 1, 200);
+  const namespace = c.req.query("namespace");
+
+  const db = getDb();
+  const store = new MemoryStore(db);
+  const diff = await store.getDiff(since, limit, namespace);
+
+  return c.json({
+    created: diff.created.map(stripEmbedding),
+    updated: diff.updated.map(stripEmbedding),
+    archived: diff.archived.map(stripEmbedding),
+    counts: {
+      created: diff.created.length,
+      updated: diff.updated.length,
+      archived: diff.archived.length,
+    },
+  });
+});
+
 // GET /api/memories/:id
 memories.get("/api/memories/:id", async (c) => {
   const db = getDb();
@@ -439,6 +480,59 @@ memories.patch("/api/settings", async (c) => {
     setSetting(db, key, value);
   }
   return c.json(maskSensitiveSettings(getAllSettings(db)));
+});
+
+// POST /api/memories/bulk-tag — Bulk add/remove tags
+const bulkTagSchema = z.object({
+  ids: z.array(z.string()).min(1),
+  add_tags: z.array(z.string()).optional(),
+  remove_tags: z.array(z.string()).optional(),
+});
+
+memories.post("/api/memories/bulk-tag", async (c) => {
+  const body = await c.req.json();
+  const parsed = bulkTagSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten() }, 400);
+  }
+
+  const { ids, add_tags, remove_tags } = parsed.data;
+  if (!add_tags?.length && !remove_tags?.length) {
+    return c.json({ error: "Must provide add_tags or remove_tags" }, 400);
+  }
+
+  const db = getDb();
+  const store = new MemoryStore(db);
+
+  if (add_tags?.length) store.bulkAddTags(ids, add_tags);
+  if (remove_tags?.length) store.bulkRemoveTags(ids, remove_tags);
+
+  return c.json({ ok: true, affected: ids.length });
+});
+
+// POST /api/memories/bulk-update — Bulk update importance
+const bulkUpdateSchema = z.object({
+  ids: z.array(z.string()).min(1),
+  importance: z.number().min(0).max(1).optional(),
+});
+
+memories.post("/api/memories/bulk-update", async (c) => {
+  const body = await c.req.json();
+  const parsed = bulkUpdateSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten() }, 400);
+  }
+
+  const { ids, importance } = parsed.data;
+  if (importance === undefined) {
+    return c.json({ error: "Must provide importance" }, 400);
+  }
+
+  const db = getDb();
+  const store = new MemoryStore(db);
+  store.bulkUpdateImportance(ids, importance);
+
+  return c.json({ ok: true, affected: ids.length });
 });
 
 export default memories;

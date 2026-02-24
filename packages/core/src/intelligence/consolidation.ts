@@ -312,6 +312,56 @@ export function generateBasicSummary(
   return summary;
 }
 
+// --- Auto-consolidation (no LLM needed) ---
+
+export interface AutoConsolidateResult {
+  clustersFound: number;
+  clustersConsolidated: number;
+  memoriesMerged: number;
+  summaryIds: string[];
+}
+
+/**
+ * Automatically consolidate the top N clusters using basic summary generation.
+ * Uses a higher similarity threshold (0.85) than manual consolidation to be conservative.
+ * No LLM needed — uses generateBasicSummary for summaries.
+ */
+export async function autoConsolidate(
+  db: DatabaseSync,
+  embeddingProvider?: EmbeddingProvider,
+  opts?: { maxClusters?: number; minSimilarity?: number; minClusterSize?: number }
+): Promise<AutoConsolidateResult> {
+  const maxClusters = opts?.maxClusters ?? 5;
+  const minSimilarity = opts?.minSimilarity ?? 0.85;
+  const minClusterSize = opts?.minClusterSize ?? 3;
+
+  const clusters = findClusters(db, { minSimilarity, minClusterSize });
+
+  if (clusters.length === 0) {
+    return { clustersFound: 0, clustersConsolidated: 0, memoriesMerged: 0, summaryIds: [] };
+  }
+
+  const toProcess = clusters.slice(0, maxClusters);
+  const summaryIds: string[] = [];
+  let memoriesMerged = 0;
+
+  for (const cluster of toProcess) {
+    const summary = generateBasicSummary(db, cluster.memberIds);
+    if (!summary) continue;
+
+    const summaryId = await consolidateCluster(db, cluster, summary, embeddingProvider);
+    summaryIds.push(summaryId);
+    memoriesMerged += cluster.memberIds.length;
+  }
+
+  return {
+    clustersFound: clusters.length,
+    clustersConsolidated: summaryIds.length,
+    memoriesMerged,
+    summaryIds,
+  };
+}
+
 /**
  * Get consolidation history.
  */

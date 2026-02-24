@@ -1,5 +1,5 @@
-import { useState, useRef } from "react";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useState, useRef, useEffect } from "react";
+import { useInfiniteQuery, useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api, type SearchResult } from "../api/client";
 import { SearchBar } from "../components/SearchBar";
@@ -34,13 +34,21 @@ export function Search() {
   const { toast, confirmToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
-  const [page, setPage] = useState(0);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [showBulkTagInput, setShowBulkTagInput] = useState(false);
+  const [bulkTagValue, setBulkTagValue] = useState("");
+  const [bulkingTags, setBulkingTags] = useState(false);
+  const [showBulkImportance, setShowBulkImportance] = useState(false);
+  const [bulkImportanceValue, setBulkImportanceValue] = useState(0.5);
+  const [bulkingImportance, setBulkingImportance] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const searchBarRef = useRef<HTMLInputElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const stickyRef = useRef<HTMLDivElement>(null);
+  const [stickyHeight, setStickyHeight] = useState(0);
   const limit = 20;
 
   // Filter state
@@ -48,15 +56,15 @@ export function Search() {
   const filterAfter = searchParams.get("after") || "";
   const filterBefore = searchParams.get("before") || "";
   const filterMinImportance = searchParams.get("min_importance") || "";
+  const filterNamespace = searchParams.get("namespace") || "";
 
-  const activeFilterCount = [filterContentType, filterAfter, filterBefore, filterMinImportance].filter(Boolean).length;
+  const activeFilterCount = [filterContentType, filterAfter, filterBefore, filterMinImportance, filterNamespace].filter(Boolean).length;
 
   const setFilterParam = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams);
     if (value) params.set(key, value);
     else params.delete(key);
     setSearchParams(params);
-    setPage(0);
   };
 
   const filterTags = searchParams.getAll("tag");
@@ -66,31 +74,90 @@ export function Search() {
     after: filterAfter || undefined,
     before: filterBefore || undefined,
     min_importance: filterMinImportance ? Number(filterMinImportance) : undefined,
+    namespace: filterNamespace || undefined,
   };
 
   // Search mode: query + optional tag filter
-  const { data: searchData, isLoading: searchLoading, error: searchError } = useQuery({
-    queryKey: ["search", query, filterTags, page, extraFilters],
-    queryFn: () => api.searchMemories(query, limit, filterTags.length > 0 ? filterTags : undefined, page * limit, extraFilters),
+  const {
+    data: searchData,
+    isLoading: searchLoading,
+    error: searchError,
+    fetchNextPage: fetchNextSearch,
+    hasNextPage: hasNextSearch,
+    isFetchingNextPage: isFetchingNextSearch,
+  } = useInfiniteQuery({
+    queryKey: ["search", query, filterTags, extraFilters],
+    queryFn: ({ pageParam = 0 }) =>
+      api.searchMemories(query, limit, filterTags.length > 0 ? filterTags : undefined, pageParam, extraFilters),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.results.length < limit) return undefined;
+      return allPages.reduce((n, p) => n + p.results.length, 0);
+    },
     enabled: query.length > 0,
   });
 
   // Browse mode: tag filter only, no query
-  const { data: browseData, isLoading: browseLoading, error: browseError } = useQuery({
-    queryKey: ["browse-tags", filterTags, page, extraFilters],
-    queryFn: () => api.getRecent(limit, page * limit, filterTags, extraFilters),
+  const {
+    data: browseData,
+    isLoading: browseLoading,
+    error: browseError,
+    fetchNextPage: fetchNextBrowse,
+    hasNextPage: hasNextBrowse,
+    isFetchingNextPage: isFetchingNextBrowse,
+  } = useInfiniteQuery({
+    queryKey: ["browse-tags", filterTags, extraFilters],
+    queryFn: ({ pageParam = 0 }) =>
+      api.getRecent(limit, pageParam, filterTags, extraFilters),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.results.length < limit) return undefined;
+      return allPages.reduce((n, p) => n + p.results.length, 0);
+    },
     enabled: query.length === 0,
   });
 
-  const data = query.length > 0
-    ? searchData && { results: searchData.results.map((r) => r.memory), count: searchData.count, searchResults: searchData.results as SearchResult[] | undefined }
-    : browseData && { ...browseData, searchResults: undefined as SearchResult[] | undefined };
+  const allResults = query.length > 0
+    ? searchData?.pages.flatMap(p => p.results.map(r => r.memory)) ?? []
+    : browseData?.pages.flatMap(p => p.results) ?? [];
+
+  const allSearchResults = query.length > 0
+    ? searchData?.pages.flatMap(p => p.results) ?? []
+    : [];
+
+  const totalCount = allResults.length;
+  const hasData = query.length > 0 ? !!searchData : !!browseData;
   const isLoading = searchLoading || browseLoading;
   const error = searchError || browseError;
+  const isFetchingNext = isFetchingNextSearch || isFetchingNextBrowse;
+  const hasNext = query.length > 0 ? hasNextSearch : hasNextBrowse;
+
+  // IntersectionObserver for infinite scroll
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const fetchNext = query.length > 0 ? fetchNextSearch : fetchNextBrowse;
+    if (!hasNext || isFetchingNext) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) fetchNext(); },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [query, hasNextSearch, hasNextBrowse, fetchNextSearch, fetchNextBrowse, isFetchingNextSearch, isFetchingNextBrowse]);
+
+  // Measure sticky header height for date sub-headers
+  useEffect(() => {
+    const el = stickyRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setStickyHeight(entry.borderBoxSize[0].blockSize));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Reset page when query changes
   const handleSearch = (q: string) => {
-    setPage(0);
     setQuery(q);
   };
 
@@ -108,7 +175,6 @@ export function Search() {
       const params = new URLSearchParams(searchParams);
       params.append("tag", tag);
       setSearchParams(params);
-      setPage(0);
     }
   };
 
@@ -118,7 +184,6 @@ export function Search() {
     const remaining = filterTags.filter((t) => t !== tag);
     remaining.forEach((t) => params.append("tag", t));
     setSearchParams(params);
-    setPage(0);
   };
 
   const handleBulkDelete = () => {
@@ -139,6 +204,40 @@ export function Search() {
         setDeleting(false);
       }
     });
+  };
+
+  const handleBulkAddTags = async () => {
+    const tags = bulkTagValue.split(",").map(t => t.trim()).filter(Boolean);
+    if (tags.length === 0 || selectedIds.size === 0) return;
+    setBulkingTags(true);
+    try {
+      await api.bulkTag([...selectedIds], tags);
+      toast(`Added ${tags.length} tag(s) to ${selectedIds.size} memories`, "success");
+      setBulkTagValue("");
+      setShowBulkTagInput(false);
+      queryClient.invalidateQueries({ queryKey: ["search"] });
+      queryClient.invalidateQueries({ queryKey: ["browse-tags"] });
+    } catch {
+      toast("Failed to add tags", "error");
+    } finally {
+      setBulkingTags(false);
+    }
+  };
+
+  const handleBulkImportance = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkingImportance(true);
+    try {
+      await api.bulkUpdateImportance([...selectedIds], bulkImportanceValue);
+      toast(`Set importance to ${bulkImportanceValue.toFixed(2)} on ${selectedIds.size} memories`, "success");
+      setShowBulkImportance(false);
+      queryClient.invalidateQueries({ queryKey: ["search"] });
+      queryClient.invalidateQueries({ queryKey: ["browse-tags"] });
+    } catch {
+      toast("Failed to update importance", "error");
+    } finally {
+      setBulkingImportance(false);
+    }
   };
 
   // New memory form
@@ -195,8 +294,12 @@ export function Search() {
         setSelectedIds(new Set());
       }
     },
-    ArrowLeft: () => { if (data && page > 0) setPage((p) => p - 1); },
-    ArrowRight: () => { if (data && data.count >= limit) setPage((p) => p + 1); },
+  });
+
+  const { data: namespacesData } = useQuery({
+    queryKey: ["namespaces"],
+    queryFn: () => api.getNamespaces(),
+    staleTime: 5 * 60 * 1000,
   });
 
   const statsQuery = useQuery({
@@ -206,127 +309,161 @@ export function Search() {
 
   return (
     <div>
-      <h1>Memories</h1>
-      <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
-        Search, browse, and manage your second brain
-      </p>
+      {/* Sticky header — negative margin extends into <main> padding so it sticks flush at top */}
+      <div ref={stickyRef} style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--bg-root, #06060e)", margin: "-32px -40px 0", padding: "32px 40px 4px" }}>
+        <h1>Memories</h1>
+        <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
+          Search, browse, and manage your second brain
+        </p>
 
-      <SearchBar onSearch={handleSearch} inputRef={searchBarRef} />
+        <SearchBar onSearch={handleSearch} inputRef={searchBarRef} />
 
-      {/* Quick filters */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, marginTop: 12, flexWrap: "wrap" }}>
-        {([
-          { tag: "session-fact", label: "Facts", color: "#38bdf8" },
-          { tag: "decision", label: "Decisions", color: "#38bdf8" },
-          { tag: "discovery", label: "Discoveries", color: "#22d3ee" },
-          { tag: "architecture", label: "Architecture", color: "#34d399" },
-          { tag: "learning", label: "Learnings", color: "#fbbf24" },
-        ] as const).map((f) => {
-          const active = filterTags.includes(f.tag);
-          return (
-            <button
-              key={f.tag}
-              onClick={() => handleTagClick(f.tag)}
-              style={{
-                background: active ? `${f.color}20` : `${f.color}0a`,
-                color: active ? f.color : `${f.color}99`,
-                border: `1px solid ${active ? `${f.color}55` : `${f.color}22`}`,
-                borderRadius: 20,
-                padding: "4px 14px",
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: "pointer",
-                transition: "all 0.15s",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-              }}
-              onMouseEnter={(e) => { if (!active) e.currentTarget.style.borderColor = `${f.color}44`; }}
-              onMouseLeave={(e) => { if (!active) e.currentTarget.style.borderColor = `${f.color}22`; }}
-            >
-              {f.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Active tag filters */}
-      {filterTags.length > 0 && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "#8080a0", marginRight: 4 }}>Filtered by:</span>
-          {filterTags.map((tag) => (
-            <span
-              key={tag}
-              style={{
-                background: "rgba(34, 211, 238, 0.25)",
-                color: "#a5f3fc",
-                padding: "3px 10px",
-                borderRadius: 20,
-                fontSize: 12,
-                fontWeight: 600,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              {tag}
-              <span
-                onClick={() => removeTagFilter(tag)}
-                style={{ cursor: "pointer", opacity: 0.7, fontSize: 14, lineHeight: 1 }}
+        {/* Quick filters */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, marginTop: 12, flexWrap: "wrap" }}>
+          {([
+            { tag: "session-fact", label: "Facts", color: "#38bdf8" },
+            { tag: "decision", label: "Decisions", color: "#38bdf8" },
+            { tag: "discovery", label: "Discoveries", color: "#22d3ee" },
+            { tag: "architecture", label: "Architecture", color: "#34d399" },
+            { tag: "learning", label: "Learnings", color: "#fbbf24" },
+          ] as const).map((f) => {
+            const active = filterTags.includes(f.tag);
+            return (
+              <button
+                key={f.tag}
+                onClick={() => handleTagClick(f.tag)}
+                style={{
+                  background: active ? `${f.color}20` : `${f.color}0a`,
+                  color: active ? f.color : `${f.color}99`,
+                  border: `1px solid ${active ? `${f.color}55` : `${f.color}22`}`,
+                  borderRadius: 20,
+                  padding: "4px 14px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.borderColor = `${f.color}44`; }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.borderColor = `${f.color}22`; }}
               >
-                &times;
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Active tag filters */}
+        {filterTags.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: "#8080a0", marginRight: 4 }}>Filtered by:</span>
+            {filterTags.map((tag) => (
+              <span
+                key={tag}
+                style={{
+                  background: "rgba(34, 211, 238, 0.25)",
+                  color: "#a5f3fc",
+                  padding: "3px 10px",
+                  borderRadius: 20,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                {tag}
+                <span
+                  onClick={() => removeTagFilter(tag)}
+                  style={{ cursor: "pointer", opacity: 0.7, fontSize: 14, lineHeight: 1 }}
+                >
+                  &times;
+                </span>
               </span>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Stat pills */}
-      {statsQuery.data && !query && filterTags.length === 0 && (
-        <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
-          <div className="stat-pill">
-            <strong>{statsQuery.data.total_memories}</strong> memories
+            ))}
           </div>
-          {statsQuery.data.total_entities > 0 && (
-            <div className="stat-pill">
-              <strong>{statsQuery.data.total_entities}</strong> entities
-            </div>
-          )}
-          {statsQuery.data.total_tags > 0 && (
-            <div className="stat-pill">
-              <strong>{statsQuery.data.total_tags}</strong> tags
-            </div>
-          )}
-        </div>
-      )}
+        )}
 
-      {/* Enhanced Filters */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-        <button
-          data-testid="search-filters-toggle"
-          className="btn-ghost btn-sm"
-          onClick={() => setShowFilters(!showFilters)}
-          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="4" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="16" y2="12" /><line x1="11" y1="18" x2="13" y2="18" />
-          </svg>
-          Filters
-          {activeFilterCount > 0 && (
-            <span style={{
-              background: "#22d3ee",
-              color: "#000",
-              borderRadius: 10,
-              padding: "1px 6px",
-              fontSize: 10,
-              fontWeight: 700,
-              minWidth: 16,
-              textAlign: "center",
-            }}>
-              {activeFilterCount}
-            </span>
-          )}
-        </button>
+        {/* Stat pills */}
+        {statsQuery.data && !query && filterTags.length === 0 && (
+          <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+            <div className="stat-pill">
+              <strong>{statsQuery.data.total_memories}</strong> memories
+            </div>
+            {statsQuery.data.total_entities > 0 && (
+              <div className="stat-pill">
+                <strong>{statsQuery.data.total_entities}</strong> entities
+              </div>
+            )}
+            {statsQuery.data.total_tags > 0 && (
+              <div className="stat-pill">
+                <strong>{statsQuery.data.total_tags}</strong> tags
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Enhanced Filters toggle */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 0, alignItems: "center" }}>
+          <button
+            data-testid="search-filters-toggle"
+            className="btn-ghost btn-sm"
+            onClick={() => setShowFilters(!showFilters)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="4" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="16" y2="12" /><line x1="11" y1="18" x2="13" y2="18" />
+            </svg>
+            Filters
+            {activeFilterCount > 0 && (
+              <span style={{
+                background: "#22d3ee",
+                color: "#000",
+                borderRadius: 10,
+                padding: "1px 6px",
+                fontSize: 10,
+                fontWeight: 700,
+                minWidth: 16,
+                textAlign: "center",
+              }}>
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Result count bar */}
+        {hasData && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingBottom: 4 }}>
+            <p style={{ color: "#8080a0", fontSize: 13, fontFamily: "var(--font-mono)", margin: 0 }}>
+              {totalCount} result{totalCount !== 1 ? "s" : ""}{hasNext ? "+" : ""}
+            </p>
+            <div style={{ display: "flex", gap: 6 }}>
+              {!showNewForm && (
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={() => setShowNewForm(true)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  New
+                </button>
+              )}
+              {!selectMode && (
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={() => setSelectMode(true)}
+                >
+                  Select
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {showFilters && (
@@ -361,6 +498,23 @@ export function Search() {
               <option value="conversation">Conversation</option>
             </select>
           </div>
+          {namespacesData && namespacesData.namespaces.length > 0 && (
+            <div style={{ minWidth: 140 }}>
+              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+                Namespace
+              </div>
+              <select
+                value={filterNamespace}
+                onChange={(e) => setFilterParam("namespace", e.target.value)}
+                style={{ padding: "6px 10px", fontSize: 12 }}
+              >
+                <option value="">All</option>
+                {namespacesData.namespaces.map((ns) => (
+                  <option key={ns} value={ns}>{ns}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div style={{ minWidth: 140 }}>
             <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
               After
@@ -415,8 +569,8 @@ export function Search() {
                 params.delete("after");
                 params.delete("before");
                 params.delete("min_importance");
+                params.delete("namespace");
                 setSearchParams(params);
-                setPage(0);
               }}
               style={{ color: "#8080a0" }}
             >
@@ -659,38 +813,11 @@ export function Search() {
       )}
 
       {/* Results */}
-      {data && (
+      {hasData && (
         <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <p style={{ color: "#8080a0", fontSize: 13, fontFamily: "var(--font-mono)", margin: 0 }}>
-              {data.count} result{data.count !== 1 ? "s" : ""}{page > 0 ? ` (page ${page + 1})` : ""}
-            </p>
-            <div style={{ display: "flex", gap: 6 }}>
-              {!showNewForm && (
-                <button
-                  className="btn-ghost btn-sm"
-                  onClick={() => setShowNewForm(true)}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                  New
-                </button>
-              )}
-              {!selectMode && (
-                <button
-                  className="btn-ghost btn-sm"
-                  onClick={() => setSelectMode(true)}
-                >
-                  Select
-                </button>
-              )}
-            </div>
-          </div>
           {query.length > 0 ? (
-            data.results.map((memory, i) => {
-              const sr = data.searchResults?.[i];
+            allResults.map((memory, i) => {
+              const sr = allSearchResults[i];
               return (
                 <MemoryCard
                   key={memory.id}
@@ -701,6 +828,7 @@ export function Search() {
                     fts_score: sr.fts_score,
                     recency_score: sr.recency_score,
                     frequency_score: sr.frequency_score,
+                    ...(sr.score_breakdown ?? {}),
                   } : undefined}
                   selectable={selectMode}
                   selected={selectedIds.has(memory.id)}
@@ -710,7 +838,7 @@ export function Search() {
               );
             })
           ) : (
-            groupByDate(data.results as any).map(([date, memories]) => (
+            groupByDate(allResults as any).map(([date, memories]) => (
               <div key={date} style={{ marginBottom: 24 }}>
                 <div
                   style={{
@@ -719,11 +847,11 @@ export function Search() {
                     gap: 12,
                     marginBottom: 12,
                     position: "sticky",
-                    top: 0,
-                    background: "#06060e",
+                    top: stickyHeight,
+                    background: "var(--bg-root, #06060e)",
                     paddingTop: 8,
                     paddingBottom: 8,
-                    zIndex: 1,
+                    zIndex: 5,
                   }}
                 >
                   <div
@@ -761,32 +889,18 @@ export function Search() {
             ))
           )}
 
-          {/* Pagination */}
-          <div style={{ display: "flex", gap: 10, marginTop: 20, marginBottom: selectMode ? 80 : 0, alignItems: "center" }}>
-            <button
-              className="btn-ghost"
-              disabled={page === 0}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              Previous
-            </button>
-            <button
-              className="btn-ghost"
-              disabled={data.results.length < limit}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </button>
-            <span
-              style={{
-                color: "#8080a0",
-                fontSize: 12,
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              Page {page + 1}
-            </span>
-          </div>
+          {/* Infinite scroll sentinel */}
+          <div ref={sentinelRef} style={{ height: 1 }} />
+          {isFetchingNext && (
+            <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
+              <div className="spinner" />
+            </div>
+          )}
+          {!hasNext && allResults.length > 0 && allResults.length >= limit && (
+            <p style={{ textAlign: "center", color: "#606080", fontSize: 12, padding: 16, marginBottom: selectMode ? 80 : 0 }}>
+              All {totalCount} memories loaded
+            </p>
+          )}
 
           {/* Floating select action bar */}
           {selectMode && (
@@ -825,14 +939,14 @@ export function Search() {
               <button
                 className="btn-ghost btn-sm"
                 onClick={() => {
-                  if (selectedIds.size === data.results.length) {
+                  if (selectedIds.size === allResults.length) {
                     setSelectedIds(new Set());
                   } else {
-                    setSelectedIds(new Set(data.results.map((m) => m.id)));
+                    setSelectedIds(new Set(allResults.map((m) => m.id)));
                   }
                 }}
               >
-                {selectedIds.size === data.results.length ? "Deselect all" : "Select all"}
+                {selectedIds.size === allResults.length ? "Deselect all" : "Select all"}
               </button>
 
               <button
@@ -849,6 +963,74 @@ export function Search() {
                 {deleting ? "Deleting..." : "Delete"}
               </button>
 
+              {/* Bulk Add Tags */}
+              {!showBulkTagInput ? (
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={() => setShowBulkTagInput(true)}
+                  disabled={selectedIds.size === 0}
+                >
+                  Add Tags
+                </button>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input
+                    type="text"
+                    value={bulkTagValue}
+                    onChange={(e) => setBulkTagValue(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleBulkAddTags(); }}
+                    placeholder="tag1, tag2"
+                    autoFocus
+                    style={{
+                      background: "#06060e",
+                      border: "1px solid #16163a",
+                      borderRadius: 6,
+                      color: "#d0d0e0",
+                      padding: "4px 8px",
+                      fontSize: 12,
+                      width: 120,
+                      outline: "none",
+                    }}
+                  />
+                  <button className="btn-primary btn-sm" onClick={handleBulkAddTags} disabled={bulkingTags}>
+                    {bulkingTags ? "..." : "Add"}
+                  </button>
+                  <button className="btn-ghost btn-sm" onClick={() => { setShowBulkTagInput(false); setBulkTagValue(""); }} style={{ padding: "4px 6px" }}>
+                    &times;
+                  </button>
+                </div>
+              )}
+
+              {/* Bulk Set Importance */}
+              {!showBulkImportance ? (
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={() => setShowBulkImportance(true)}
+                  disabled={selectedIds.size === 0}
+                >
+                  Set Importance
+                </button>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={bulkImportanceValue}
+                    onChange={(e) => setBulkImportanceValue(Number(e.target.value))}
+                    style={{ width: 80, height: 4, appearance: "none", WebkitAppearance: "none", background: `linear-gradient(90deg, #22d3ee ${bulkImportanceValue * 100}%, #16163a ${bulkImportanceValue * 100}%)`, borderRadius: 2, outline: "none", cursor: "pointer" }}
+                  />
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#22d3ee", minWidth: 28 }}>{bulkImportanceValue.toFixed(2)}</span>
+                  <button className="btn-primary btn-sm" onClick={handleBulkImportance} disabled={bulkingImportance}>
+                    {bulkingImportance ? "..." : "Set"}
+                  </button>
+                  <button className="btn-ghost btn-sm" onClick={() => setShowBulkImportance(false)} style={{ padding: "4px 6px" }}>
+                    &times;
+                  </button>
+                </div>
+              )}
+
               <div style={{ width: 1, height: 20, background: "#16163a" }} />
 
               <button
@@ -856,6 +1038,8 @@ export function Search() {
                 onClick={() => {
                   setSelectMode(false);
                   setSelectedIds(new Set());
+                  setShowBulkTagInput(false);
+                  setShowBulkImportance(false);
                 }}
                 style={{ color: "#8080a0" }}
               >

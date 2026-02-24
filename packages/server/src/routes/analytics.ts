@@ -1,11 +1,17 @@
 import { Hono } from "hono";
 import {
   getDb,
+  getSetting,
   getAnalyticsSummary,
   getAccessDistribution,
   getTagEffectiveness,
   getProducerQuality,
   getQualityTrend,
+  getQualityDistribution,
+  getArchiveCandidates,
+  suggestTagMerges,
+  getTagAliasMap,
+  getSearchMisses,
 } from "@exocortex/core";
 
 const analytics = new Hono();
@@ -51,6 +57,71 @@ analytics.get("/api/analytics/quality-trend", (c) => {
     c.req.query("granularity") === "week" ? "week" : "month";
   const limit = parseIntQuery(c.req.query("limit"), 12, 1, 52);
   return c.json(getQualityTrend(db, granularity, limit));
+});
+
+analytics.get("/api/analytics/quality-distribution", (c) => {
+  const db = getDb();
+  return c.json(getQualityDistribution(db));
+});
+
+// Imp 1: Embedding health
+analytics.get("/api/analytics/embedding-health", (c) => {
+  const db = getDb();
+  const currentModel = getSetting(db, "embedding.model") ?? "unknown";
+  const dimensions = parseInt(getSetting(db, "embedding.dimensions") ?? "0", 10);
+
+  const totalEmbedded = (
+    db.prepare("SELECT COUNT(*) as count FROM memories WHERE embedding IS NOT NULL AND is_active = 1").get() as { count: number }
+  ).count;
+
+  const mismatchedModel = (
+    db.prepare(
+      "SELECT COUNT(*) as count FROM memories WHERE embedding IS NOT NULL AND embedding_model IS NOT NULL AND embedding_model != ? AND is_active = 1"
+    ).get(currentModel) as { count: number }
+  ).count;
+
+  const missingEmbedding = (
+    db.prepare("SELECT COUNT(*) as count FROM memories WHERE embedding IS NULL AND is_active = 1").get() as { count: number }
+  ).count;
+
+  return c.json({ currentModel, dimensions, totalEmbedded, mismatchedModel, missingEmbedding });
+});
+
+// Imp 3: Decay preview
+analytics.get("/api/analytics/decay-preview", (c) => {
+  const db = getDb();
+  const candidates = getArchiveCandidates(db);
+  const total = candidates.length;
+  const top50 = candidates.slice(0, 50).map((c) => ({
+    ...c,
+    content: c.content.length > 120 ? c.content.slice(0, 120) + "..." : c.content,
+  }));
+  return c.json({ candidates: top50, total });
+});
+
+// Imp 4: Tag health
+analytics.get("/api/analytics/tag-health", (c) => {
+  const db = getDb();
+
+  const totalTags = (
+    db.prepare("SELECT COUNT(DISTINCT tag) as count FROM memory_tags").get() as { count: number }
+  ).count;
+
+  const aliasMap = getTagAliasMap(db);
+  const mergeCount = Object.keys(aliasMap).length;
+
+  const suggestions = suggestTagMerges(db, { limit: 10 });
+
+  return c.json({ totalTags, mergeCount, aliasMap, suggestions });
+});
+
+// Imp 5: Search misses
+analytics.get("/api/analytics/search-misses", (c) => {
+  const db = getDb();
+  const limit = parseIntQuery(c.req.query("limit"), 20, 1, 100);
+  const days = parseIntQuery(c.req.query("days"), 7, 1, 90);
+  const misses = getSearchMisses(db, limit, days);
+  return c.json(misses);
 });
 
 export default analytics;

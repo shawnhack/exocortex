@@ -13,6 +13,12 @@ export function Analytics() {
     queryFn: () => api.getAnalyticsSummary(),
   });
 
+  const { data: qualityDist } = useQuery({
+    queryKey: ["analytics-quality-distribution"],
+    queryFn: () => api.getQualityDistribution(),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: distribution } = useQuery({
     queryKey: ["analytics-distribution"],
     queryFn: () => api.getAccessDistribution(),
@@ -33,6 +39,30 @@ export function Analytics() {
     queryFn: () => api.getQualityTrend(trendGranularity),
   });
 
+  const { data: decayPreview } = useQuery({
+    queryKey: ["analytics-decay-preview"],
+    queryFn: () => api.getDecayPreview(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: tagHealth } = useQuery({
+    queryKey: ["analytics-tag-health"],
+    queryFn: () => api.getTagHealth(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: searchMisses } = useQuery({
+    queryKey: ["analytics-search-misses"],
+    queryFn: () => api.getSearchMisses(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: consolidationPreview } = useQuery({
+    queryKey: ["analytics-consolidation-preview"],
+    queryFn: () => api.getConsolidationPreview(),
+    staleTime: 10 * 60 * 1000,
+  });
+
   if (isLoading)
     return (
       <div className="loading">
@@ -51,6 +81,25 @@ export function Analytics() {
       <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
         Memory quality and usage insights
       </p>
+
+      {/* Quality distribution */}
+      {qualityDist && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr",
+            gap: 14,
+            marginBottom: 14,
+          }}
+        >
+          <StatCard label="Avg Quality" value={qualityDist.avg.toFixed(3)} accent="#a78bfa" />
+          <StatCard label="Median Quality" value={qualityDist.median.toFixed(3)} accent="#a78bfa" />
+          <StatCard label="P10" value={qualityDist.p10.toFixed(3)} accent="#f87171" />
+          <StatCard label="P90" value={qualityDist.p90.toFixed(3)} accent="#34d399" />
+          <StatCard label="High Quality" value={qualityDist.highQuality} accent="#22d3ee" />
+          <StatCard label="Low Quality" value={qualityDist.lowQuality} accent="#f59e0b" />
+        </div>
+      )}
 
       {/* Stat cards */}
       {summary && (
@@ -194,6 +243,80 @@ export function Analytics() {
               String(t.created),
               t.avgUseful.toFixed(2),
               `${t.neverAccessedPct}%`,
+            ])}
+          />
+        </Section>
+      )}
+
+      {/* Decay preview */}
+      {decayPreview && decayPreview.candidates.length > 0 && (
+        <Section title={`Decay Candidates (${decayPreview.total})`}>
+          <Table
+            headers={["Content", "Importance", "Accesses", "Reason", "Created"]}
+            rows={decayPreview.candidates.slice(0, 20).map((c) => [
+              c.content,
+              c.importance.toFixed(2),
+              String(c.access_count),
+              c.reason,
+              c.created_at.slice(0, 10),
+            ])}
+          />
+        </Section>
+      )}
+
+      {/* Tag health */}
+      {tagHealth && (
+        <Section title="Tag Health">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 14,
+              marginBottom: 14,
+            }}
+          >
+            <StatCard label="Total Tags" value={tagHealth.totalTags} accent="#22d3ee" />
+            <StatCard label="Alias Merges" value={tagHealth.mergeCount} accent="#a78bfa" />
+          </div>
+          {tagHealth.suggestions.length > 0 && (
+            <Table
+              headers={["From", "To", "Similarity", "From Count", "To Count"]}
+              rows={tagHealth.suggestions.map((s) => [
+                s.from,
+                s.to,
+                s.similarity.toFixed(2),
+                String(s.fromCount),
+                String(s.toCount),
+              ])}
+            />
+          )}
+        </Section>
+      )}
+
+      {/* Search misses */}
+      {searchMisses && searchMisses.length > 0 && (
+        <Section title="Search Misses (7d)">
+          <Table
+            headers={["Query", "Count", "Avg Max Score", "Last Seen"]}
+            rows={searchMisses.map((m) => [
+              m.query,
+              String(m.count),
+              m.avg_max_score !== null ? m.avg_max_score.toFixed(4) : "—",
+              m.last_seen.slice(0, 10),
+            ])}
+          />
+        </Section>
+      )}
+
+      {/* Consolidation preview */}
+      {consolidationPreview && consolidationPreview.clusters.length > 0 && (
+        <Section title={`Consolidation Candidates (${consolidationPreview.clusters.length})`}>
+          <Table
+            headers={["Topic", "Members", "Avg Similarity"]}
+            rows={consolidationPreview.clusters.map((cl) => [
+              cl.topic,
+              String(cl.memberIds.length),
+              cl.avgSimilarity.toFixed(3),
             ])}
           />
         </Section>

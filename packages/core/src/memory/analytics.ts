@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { qualityScore } from "./scoring.js";
 
 // --- Types ---
 
@@ -184,4 +185,61 @@ export function getQualityTrend(
     avgUseful: r.avg_useful,
     neverAccessedPct: r.never_accessed_pct,
   }));
+}
+
+// --- Quality Distribution ---
+
+export interface QualityDistribution {
+  avg: number;
+  median: number;
+  p10: number;
+  p90: number;
+  highQuality: number;
+  lowQuality: number;
+  total: number;
+}
+
+export function getQualityDistribution(db: DatabaseSync): QualityDistribution {
+  const rows = db
+    .prepare(
+      `SELECT m.importance, m.useful_count, m.access_count, m.created_at,
+              (SELECT COUNT(*) FROM memory_links WHERE source_id = m.id OR target_id = m.id) as link_count
+       FROM memories m
+       WHERE m.is_active = 1`
+    )
+    .all() as Array<{
+    importance: number;
+    useful_count: number;
+    access_count: number;
+    created_at: string;
+    link_count: number;
+  }>;
+
+  if (rows.length === 0) {
+    return { avg: 0, median: 0, p10: 0, p90: 0, highQuality: 0, lowQuality: 0, total: 0 };
+  }
+
+  const now = Date.now();
+  const scores = rows.map((r) => {
+    const ageDays = (now - new Date(r.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
+    return qualityScore(r.importance, r.useful_count, r.access_count, r.link_count, ageDays);
+  });
+
+  scores.sort((a, b) => a - b);
+
+  const avg = Math.round((scores.reduce((s, v) => s + v, 0) / scores.length) * 1000) / 1000;
+  const percentile = (p: number) => {
+    const idx = Math.floor((p / 100) * (scores.length - 1));
+    return Math.round(scores[idx] * 1000) / 1000;
+  };
+
+  return {
+    avg,
+    median: percentile(50),
+    p10: percentile(10),
+    p90: percentile(90),
+    highQuality: scores.filter((s) => s >= 0.5).length,
+    lowQuality: scores.filter((s) => s < 0.2).length,
+    total: scores.length,
+  };
 }

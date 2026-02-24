@@ -31,6 +31,7 @@ export {
   recencyScore,
   frequencyScore,
   usefulnessScore,
+  qualityScore,
   computeHybridScore,
   getWeights,
   getRRFConfig,
@@ -77,10 +78,12 @@ export {
   consolidateCluster,
   generateBasicSummary,
   getConsolidations,
+  autoConsolidate,
 } from "./intelligence/consolidation.js";
 export type {
   ConsolidationCluster,
   ConsolidationResult,
+  AutoConsolidateResult,
 } from "./intelligence/consolidation.js";
 export {
   detectContradictions,
@@ -97,11 +100,14 @@ export type { TimelineEntry, TemporalStats, LineageEntry, DecisionTimelineEntry,
 export {
   getArchiveCandidates,
   archiveStaleMemories,
+  archiveExpired,
+  expireSentinelReports,
 } from "./intelligence/decay.js";
 export type {
   ArchiveOptions,
   ArchiveCandidate,
   ArchiveResult,
+  ExpireSentinelReportsResult,
 } from "./intelligence/decay.js";
 export {
   getPurgeCandidates,
@@ -123,6 +129,7 @@ export { generateSynthesis } from "./intelligence/synthesis.js";
 export type { SynthesisOptions } from "./intelligence/synthesis.js";
 export {
   reembedMissing,
+  reembedAll,
   backfillEntities,
   recalibrateImportance,
   tuneWeights,
@@ -131,6 +138,7 @@ export {
 } from "./intelligence/maintenance.js";
 export type {
   ReembedResult,
+  ReembedAllResult,
   BackfillEntitiesResult,
   RecalibrateResult,
   TuneWeightsResult,
@@ -183,7 +191,11 @@ export {
   getTagAliasMap,
   normalizeTag,
   normalizeTags,
+  stringSimilarity,
+  suggestTagMerges,
+  applyTagMerge,
 } from "./memory/tag-normalization.js";
+export type { TagMergeSuggestion } from "./memory/tag-normalization.js";
 
 // Analytics
 export {
@@ -192,6 +204,7 @@ export {
   getTagEffectiveness,
   getProducerQuality,
   getQualityTrend,
+  getQualityDistribution,
 } from "./memory/analytics.js";
 export type {
   AnalyticsSummary,
@@ -199,6 +212,7 @@ export type {
   TagEffectiveness,
   ProducerQuality,
   QualityTrendEntry,
+  QualityDistribution,
 } from "./memory/analytics.js";
 
 // Observability

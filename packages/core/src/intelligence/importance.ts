@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { getSetting } from "../db/schema.js";
 import { computeCentrality } from "../entities/graph.js";
+import { qualityScore } from "../memory/scoring.js";
 
 export interface ImportanceAdjustOptions {
   dryRun?: boolean;
@@ -41,27 +42,38 @@ export function adjustImportance(
   const details: ImportanceAdjustResult["details"] = [];
 
   // Boost: access_count >= threshold, importance < 0.8, importance != 1.0
+  // Quality-aware: bigger boost for high-quality memories
   const boostCandidates = db
     .prepare(
-      `SELECT id, importance FROM memories
-       WHERE is_active = 1
-         AND access_count >= ?
-         AND importance < 0.8
-         AND ROUND(importance, 2) != 1.0`
+      `SELECT m.id, m.importance, m.useful_count, m.access_count, m.created_at,
+              (SELECT COUNT(*) FROM memory_links WHERE source_id = m.id OR target_id = m.id) as link_count
+       FROM memories m
+       WHERE m.is_active = 1
+         AND m.access_count >= ?
+         AND m.importance < 0.8
+         AND ROUND(m.importance, 2) != 1.0`
     )
-    .all(boostThreshold) as Array<{ id: string; importance: number }>;
+    .all(boostThreshold) as Array<{ id: string; importance: number; useful_count: number; access_count: number; created_at: string; link_count: number }>;
 
+  const now = Date.now();
   for (const row of boostCandidates) {
-    const newImportance = Math.min(0.9, row.importance + 0.1);
-    details.push({
-      id: row.id,
-      action: "boost",
-      old_importance: row.importance,
-      new_importance: Math.round(newImportance * 100) / 100,
-    });
+    const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
+    const quality = qualityScore(row.importance, row.useful_count, row.access_count, row.link_count, ageDays);
+    // Higher quality → bigger boost: +0.10 if quality >= 0.7, +0.05 otherwise
+    const boost = quality >= 0.7 ? 0.10 : 0.05;
+    const newImportance = Math.min(0.9, row.importance + boost);
+    if (newImportance !== row.importance) {
+      details.push({
+        id: row.id,
+        action: "boost",
+        old_importance: row.importance,
+        new_importance: Math.round(newImportance * 100) / 100,
+      });
+    }
   }
 
   // Decay: access_count = 0, age > decayAgeDays, importance > 0.3, importance != 1.0
+  // Quality-aware: only decay if quality < 0.2 (protects memories with usefulness signals or links)
   const cutoffDate = new Date(
     Date.now() - decayAgeDays * 24 * 60 * 60 * 1000
   )
@@ -71,16 +83,22 @@ export function adjustImportance(
 
   const decayCandidates = db
     .prepare(
-      `SELECT id, importance FROM memories
-       WHERE is_active = 1
-         AND access_count = 0
-         AND created_at < ?
-         AND importance > 0.3
-         AND ROUND(importance, 2) != 1.0`
+      `SELECT m.id, m.importance, m.useful_count, m.access_count, m.created_at,
+              (SELECT COUNT(*) FROM memory_links WHERE source_id = m.id OR target_id = m.id) as link_count
+       FROM memories m
+       WHERE m.is_active = 1
+         AND m.access_count = 0
+         AND m.created_at < ?
+         AND m.importance > 0.3
+         AND ROUND(m.importance, 2) != 1.0`
     )
-    .all(cutoffDate) as Array<{ id: string; importance: number }>;
+    .all(cutoffDate) as Array<{ id: string; importance: number; useful_count: number; access_count: number; created_at: string; link_count: number }>;
 
   for (const row of decayCandidates) {
+    const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
+    const quality = qualityScore(row.importance, row.useful_count, row.access_count, row.link_count, ageDays);
+    // Only decay if quality is low — protects memories with usefulness signals or links
+    if (quality >= 0.2) continue;
     const newImportance = Math.max(0.1, row.importance - 0.05);
     details.push({
       id: row.id,

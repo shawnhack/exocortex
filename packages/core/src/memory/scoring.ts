@@ -10,6 +10,7 @@ export interface ScoringWeights {
   graph: number;
   usefulness: number;
   valence: number;
+  quality: number;
   goalGated: number;
 }
 
@@ -23,6 +24,7 @@ export function getWeights(db: DatabaseSync): ScoringWeights {
     graph: parseFloat(getSetting(db, "scoring.graph_weight") ?? "0.10"),
     usefulness: parseFloat(getSetting(db, "scoring.usefulness_weight") ?? "0.05"),
     valence: parseFloat(getSetting(db, "scoring.valence_weight") ?? "0.05"),
+    quality: parseFloat(getSetting(db, "scoring.quality_weight") ?? "0.10"),
     goalGated: parseFloat(getSetting(db, "scoring.goal_gated_weight") ?? "0.10"),
   };
 }
@@ -109,6 +111,37 @@ export function goalRelevanceScore(
 
   // Normalize: 3+ matching tags = full relevance
   return Math.min(1.0, matchCount / Math.min(goalKeywords.size, 3));
+}
+
+/**
+ * Composite quality score for a memory. Used by importance adjustment
+ * to make boost/decay decisions based on multiple signals, not just access count.
+ *
+ * Weighted: 0.30 importance + 0.25 usefulness + 0.15 access + 0.15 links + 0.15 freshness
+ */
+export function qualityScore(
+  importance: number,
+  usefulCount: number,
+  accessCount: number,
+  linkCount: number,
+  ageDays: number
+): number {
+  // Usefulness: saturates at 5
+  const usefulness = usefulCount > 0 ? Math.min(1.0, Math.log(1 + usefulCount) / Math.log(6)) : 0;
+  // Access: saturates at 20
+  const access = accessCount > 0 ? Math.min(1.0, Math.log(1 + accessCount) / Math.log(21)) : 0;
+  // Links: saturates at 5
+  const links = linkCount > 0 ? Math.min(1.0, linkCount / 5) : 0;
+  // Freshness: exponential decay over 90 days
+  const freshness = Math.exp(-0.02 * ageDays);
+
+  return (
+    0.30 * importance +
+    0.25 * usefulness +
+    0.15 * access +
+    0.15 * links +
+    0.15 * freshness
+  );
 }
 
 export function computeHybridScore(

@@ -44,6 +44,11 @@ export function MemoryCard({
     fts_score: number;
     recency_score: number;
     frequency_score: number;
+    usefulness?: number;
+    valence?: number;
+    quality?: number;
+    goal_relevance?: number;
+    graph?: number;
   };
   selectable?: boolean;
   selected?: boolean;
@@ -114,7 +119,7 @@ export function MemoryCard({
           }}
           title={
             scoreBreakdown
-              ? `vector: ${scoreBreakdown.vector_score.toFixed(3)} | fts: ${scoreBreakdown.fts_score.toFixed(3)} | recency: ${scoreBreakdown.recency_score.toFixed(3)} | freq: ${scoreBreakdown.frequency_score.toFixed(3)}`
+              ? `vector: ${scoreBreakdown.vector_score.toFixed(3)} | fts: ${scoreBreakdown.fts_score.toFixed(3)} | recency: ${scoreBreakdown.recency_score.toFixed(3)} | freq: ${scoreBreakdown.frequency_score.toFixed(3)}${scoreBreakdown.usefulness ? ` | useful: ${scoreBreakdown.usefulness.toFixed(3)}` : ""}${scoreBreakdown.valence ? ` | valence: ${scoreBreakdown.valence.toFixed(3)}` : ""}${scoreBreakdown.quality ? ` | quality: ${scoreBreakdown.quality.toFixed(3)}` : ""}${scoreBreakdown.goal_relevance ? ` | goal: ${scoreBreakdown.goal_relevance.toFixed(3)}` : ""}${scoreBreakdown.graph ? ` | graph: ${scoreBreakdown.graph.toFixed(3)}` : ""}`
               : `score: ${score.toFixed(3)}`
           }
         >

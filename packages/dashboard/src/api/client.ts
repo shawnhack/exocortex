@@ -34,6 +34,8 @@ export interface Memory {
   parent_id: string | null;
   superseded_by: string | null;
   is_active: boolean;
+  expires_at: string | null;
+  namespace: string | null;
   metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -47,6 +49,58 @@ export interface SearchResult {
   fts_score: number;
   recency_score: number;
   frequency_score: number;
+  score_breakdown?: {
+    usefulness: number;
+    valence: number;
+    quality: number;
+    goal_relevance: number;
+    graph: number;
+  };
+}
+
+export interface EmbeddingHealth {
+  currentModel: string;
+  dimensions: number;
+  totalEmbedded: number;
+  mismatchedModel: number;
+  missingEmbedding: number;
+}
+
+export interface DecayCandidate {
+  id: string;
+  content: string;
+  importance: number;
+  access_count: number;
+  created_at: string;
+  last_accessed_at: string | null;
+  reason: string;
+}
+
+export interface TagHealth {
+  totalTags: number;
+  mergeCount: number;
+  aliasMap: Record<string, string>;
+  suggestions: Array<{
+    from: string;
+    to: string;
+    similarity: number;
+    fromCount: number;
+    toCount: number;
+  }>;
+}
+
+export interface SearchMiss {
+  query: string;
+  count: number;
+  avg_max_score: number | null;
+  last_seen: string;
+}
+
+export interface ConsolidationCluster {
+  centroidId: string;
+  memberIds: string[];
+  avgSimilarity: number;
+  topic: string;
 }
 
 export interface Entity {
@@ -133,6 +187,16 @@ export interface QualityTrendEntry {
   neverAccessedPct: number;
 }
 
+export interface QualityDistribution {
+  avg: number;
+  median: number;
+  p10: number;
+  p90: number;
+  highQuality: number;
+  lowQuality: number;
+  total: number;
+}
+
 export interface HierarchyEpisode {
   id: string;
   content: string;
@@ -184,7 +248,7 @@ export const api = {
     limit = 20,
     tags?: string[],
     offset = 0,
-    filters?: { content_type?: string; after?: string; before?: string; min_importance?: number }
+    filters?: { content_type?: string; after?: string; before?: string; min_importance?: number; namespace?: string }
   ) {
     return request<{ results: SearchResult[]; count: number }>(
       "/api/memories/search",
@@ -274,6 +338,20 @@ export const api = {
       "/api/memories/import",
       { method: "POST", body: JSON.stringify({ memories }) }
     );
+  },
+
+  bulkTag(ids: string[], addTags?: string[], removeTags?: string[]) {
+    return request<{ ok: boolean; affected: number }>("/api/memories/bulk-tag", {
+      method: "POST",
+      body: JSON.stringify({ ids, add_tags: addTags, remove_tags: removeTags }),
+    });
+  },
+
+  bulkUpdateImportance(ids: string[], importance: number) {
+    return request<{ ok: boolean; affected: number }>("/api/memories/bulk-update", {
+      method: "POST",
+      body: JSON.stringify({ ids, importance }),
+    });
   },
 
   // Entities
@@ -490,5 +568,40 @@ export const api = {
     return request<QualityTrendEntry[]>(
       `/api/analytics/quality-trend?granularity=${granularity}&limit=${limit}`
     );
+  },
+
+  getQualityDistribution() {
+    return request<QualityDistribution>("/api/analytics/quality-distribution");
+  },
+
+  getEmbeddingHealth() {
+    return request<EmbeddingHealth>("/api/analytics/embedding-health");
+  },
+
+  getDecayPreview() {
+    return request<{ candidates: DecayCandidate[]; total: number }>(
+      "/api/analytics/decay-preview"
+    );
+  },
+
+  getTagHealth() {
+    return request<TagHealth>("/api/analytics/tag-health");
+  },
+
+  getSearchMisses(limit = 20, days = 7) {
+    return request<SearchMiss[]>(
+      `/api/analytics/search-misses?limit=${limit}&days=${days}`
+    );
+  },
+
+  getConsolidationPreview() {
+    return request<{ dry_run: boolean; clusters: ConsolidationCluster[] }>(
+      "/api/consolidate",
+      { method: "POST", body: JSON.stringify({ dry_run: true }) }
+    );
+  },
+
+  getNamespaces() {
+    return request<{ namespaces: string[] }>("/api/memories/namespaces");
   },
 };
