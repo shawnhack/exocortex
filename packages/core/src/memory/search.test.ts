@@ -4,6 +4,36 @@ import { initializeSchema, setSetting } from "../db/schema.js";
 import { MemorySearch } from "./search.js";
 import type { DatabaseSync } from "node:sqlite";
 
+describe("MemorySearch expanded_query", () => {
+  let db: DatabaseSync;
+
+  beforeEach(() => {
+    db = getDbForTesting();
+    initializeSchema(db);
+    setSetting(db, "search.query_expansion", "true");
+  });
+
+  it("should use expanded_query for entity expansion input", () => {
+    const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+    db.prepare(
+      "INSERT INTO entities (id, name, type, aliases, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run("ent-auth", "authentication", "concept", JSON.stringify(["auth", "authn"]), "{}", now, now);
+
+    const search = new MemorySearch(db);
+    // expanded_query includes "authentication" which matches the entity
+    const expansion = (search as any).expandQuery("auth flow authentication login");
+    expect(expansion).not.toBeNull();
+    expect(expansion!.expandedTerms).toContain("authn");
+  });
+
+  it("should work without expanded_query (baseline)", () => {
+    const search = new MemorySearch(db);
+    // No entity matches for "auth" alone — no expansion
+    const expansion = (search as any).expandQuery("auth flow");
+    expect(expansion).toBeNull();
+  });
+});
+
 describe("MemorySearch.expandQuery", () => {
   let db: DatabaseSync;
 

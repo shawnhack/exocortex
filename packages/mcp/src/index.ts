@@ -347,6 +347,7 @@ server.tool(
   "Search Exocortex memories using hybrid retrieval (semantic + keyword + recency + frequency). Use this to recall stored information or find relevant context.",
   {
     query: z.string().describe("Natural language search query"),
+    expanded_query: z.string().optional().describe("Semantic rephrasings of the query to bridge vocabulary gaps. Provide 2-3 alternative phrasings with different words that capture the same intent (e.g. for 'auth flow' → 'login authentication JWT session tokens'). Feeds into both vector and keyword search."),
     limit: z.number().min(1).max(50).optional().describe("Max results (default 10)"),
     tags: z.array(z.string()).optional().describe("Filter by tags"),
     after: z.string().optional().describe("Only after this date (YYYY-MM-DD)"),
@@ -366,6 +367,7 @@ server.tool(
 
       const results = await search.search({
         query: args.query,
+        expanded_query: args.expanded_query,
         limit: fetchLimit,
         tags: args.tags,
         after: args.after,

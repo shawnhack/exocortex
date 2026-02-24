@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { getDb, EntityStore, MemoryStore } from "@exocortex/core";
+import { getDb, EntityStore, MemoryStore, computeCentrality, detectCommunities, computeGraphStats } from "@exocortex/core";
 import type { EntityType } from "@exocortex/core";
 import { stripEmbedding } from "../utils.js";
 
@@ -46,6 +46,15 @@ entities.get("/api/entities/graph", (c) => {
   }));
 
   return c.json({ entities: allEntities, relationships });
+});
+
+// GET /api/entities/graph/analysis — centrality, communities, stats for visualization
+entities.get("/api/entities/graph/analysis", (c) => {
+  const db = getDb();
+  const centrality = computeCentrality(db);
+  const communities = detectCommunities(db);
+  const stats = computeGraphStats(db);
+  return c.json({ centrality, communities, stats });
 });
 
 // GET /api/entities/tags — distinct tags across all entities

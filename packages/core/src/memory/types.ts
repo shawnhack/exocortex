@@ -81,6 +81,13 @@ export interface UpdateMemoryInput {
 
 export interface SearchQuery {
   query: string;
+  /**
+   * LLM-provided semantic rephrasings of the query.
+   * The calling LLM can supply alternative phrasings to bridge vocabulary gaps
+   * (e.g. "auth flow" → "login authentication JWT tokens").
+   * These feed into both vector embedding and FTS expansion.
+   */
+  expanded_query?: string;
   limit?: number;
   offset?: number;
   content_type?: ContentType;

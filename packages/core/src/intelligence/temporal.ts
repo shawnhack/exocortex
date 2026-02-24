@@ -214,7 +214,7 @@ export function getDecisionTimeline(
       `SELECT m.id, m.content, m.importance, m.created_at, m.superseded_by
        FROM memories m
        WHERE ${conditions.join(" AND ")}
-       ORDER BY m.created_at ASC
+       ORDER BY m.created_at DESC
        LIMIT ?`
     )
     .all(...params) as unknown as Array<{

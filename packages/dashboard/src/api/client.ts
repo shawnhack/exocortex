@@ -369,6 +369,25 @@ export const api = {
     }>("/api/entities/graph");
   },
 
+  getEntityGraphAnalysis() {
+    return request<{
+      centrality: Array<{
+        entityId: string;
+        entityName: string;
+        degree: number;
+        betweenness: number;
+        memoryCount: number;
+      }>;
+      communities: Array<{
+        id: number;
+        members: Array<{ entityId: string; entityName: string }>;
+        size: number;
+        internalEdges: number;
+      }>;
+      stats: { nodeCount: number; edgeCount: number; components: number; avgDegree: number };
+    }>("/api/entities/graph/analysis");
+  },
+
   getHierarchy(options?: { month?: string; after?: string; before?: string; maxEpisodes?: number }) {
     const params = new URLSearchParams();
     if (options?.month) params.set("month", options.month);

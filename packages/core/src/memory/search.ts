@@ -158,9 +158,14 @@ export class MemorySearch {
     // Candidate pool: fetch enough rows for scoring, but cap proportionally
     const candidateLimit = Math.min(1000, Math.max(100, (offset + limit) * 10));
 
+    // Use LLM-provided expanded query for richer retrieval if supplied
+    const baseQuery = query.expanded_query
+      ? `${query.query} ${query.expanded_query}`
+      : query.query;
+
     // Query expansion via entity graph
-    const expansion = this.expandQuery(query.query);
-    const embeddingText = expansion ? expansion.expandedText : query.query;
+    const expansion = this.expandQuery(baseQuery);
+    const embeddingText = expansion ? expansion.expandedText : baseQuery;
     const ftsText = query.query;
     const extraFtsTerms = expansion ? expansion.expandedTerms : [];
 

@@ -13,11 +13,59 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
+import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 
 const DB_PATH = path.join(os.homedir(), ".exocortex", "exocortex.db");
+
+function buildContextKeywords(cwd) {
+  const keywords = new Set();
+  const projectName = path.basename(cwd).toLowerCase();
+  keywords.add(projectName);
+
+  // Extract deps from package.json
+  try {
+    const pkgPath = path.join(cwd, "package.json");
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+      if (pkg.name) keywords.add(pkg.name.toLowerCase());
+      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+      for (const dep of Object.keys(allDeps)) {
+        const name = dep.replace(/^@[^/]+\//, "").toLowerCase();
+        if (name.length >= 3) keywords.add(name);
+      }
+    }
+  } catch {}
+
+  // Extract words from recent git log subjects
+  try {
+    const log = execSync("git log --oneline -5 --format=%s", {
+      cwd,
+      timeout: 3000,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const STOP = new Set(["the", "and", "for", "with", "from", "that", "this", "add", "fix", "update", "remove"]);
+    for (const line of log.split("\n")) {
+      for (const word of line.toLowerCase().split(/[\s\-_:,/]+/)) {
+        if (word.length >= 3 && !STOP.has(word)) keywords.add(word);
+      }
+    }
+  } catch {}
+
+  return keywords;
+}
+
+function scoreRelevance(content, keywords) {
+  const lower = content.toLowerCase();
+  let score = 0;
+  for (const kw of keywords) {
+    if (lower.includes(kw)) score++;
+  }
+  return score;
+}
 
 async function main() {
   let input = "";
@@ -112,40 +160,62 @@ async function main() {
       .toISOString()
       .split("T")[0];
 
-    const decisions = db
+    const decisionCandidates = db
       .prepare(
         `SELECT DISTINCT m.id, m.content, m.created_at
          FROM memories m
          INNER JOIN memory_tags mt ON m.id = mt.memory_id
          WHERE mt.tag = 'decision' AND m.is_active = 1 AND m.created_at >= ?
          ORDER BY m.created_at DESC
-         LIMIT 3`
+         LIMIT 10`
       )
       .all(thirtyDaysAgo);
 
-    if (decisions.length > 0) {
-      const lines = decisions.map(
+    if (decisionCandidates.length > 0) {
+      // buildContextKeywords may not exist yet at this point — build early keywords from project name
+      const earlyKeywords = buildContextKeywords(cwd);
+      const scored = decisionCandidates.map((m) => ({
+        ...m,
+        relevance: scoreRelevance(m.content, earlyKeywords),
+      }));
+      scored.sort((a, b) => {
+        if (b.relevance !== a.relevance) return b.relevance - a.relevance;
+        return b.created_at > a.created_at ? 1 : -1;
+      });
+      const top = scored.slice(0, 3);
+      const lines = top.map(
         (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
       );
       sections.push(`**Recent decisions:**\n${lines.join("\n")}`);
     }
 
     // 4. Technique memories — reusable procedures learned by AI agents
-    const techniques = db
+    //    Over-fetch and rerank by project relevance
+    const contextKeywords = buildContextKeywords(cwd);
+    const techniqueCandidates = db
       .prepare(
         `SELECT DISTINCT m.id, m.content, m.importance, m.created_at
          FROM memories m
          INNER JOIN memory_tags mt ON m.id = mt.memory_id
          WHERE mt.tag = 'technique' AND m.is_active = 1
          ORDER BY m.importance DESC, m.created_at DESC
-         LIMIT 5`
+         LIMIT 15`
       )
       .all();
 
-    if (techniques.length > 0) {
-      const lines = techniques.map(
-        (m) => `- ${truncate(m.content, 150)}`
-      );
+    if (techniqueCandidates.length > 0) {
+      const scored = techniqueCandidates.map((m) => ({
+        ...m,
+        relevance: scoreRelevance(m.content, contextKeywords),
+      }));
+      scored.sort((a, b) => {
+        const aRelevant = a.relevance > 0 ? 1 : 0;
+        const bRelevant = b.relevance > 0 ? 1 : 0;
+        if (bRelevant !== aRelevant) return bRelevant - aRelevant;
+        return b.importance - a.importance;
+      });
+      const top = scored.slice(0, 5);
+      const lines = top.map((m) => `- ${truncate(m.content, 150)}`);
       sections.push(`**Learned techniques:**\n${lines.join("\n")}`);
     }
 
@@ -154,7 +224,7 @@ async function main() {
       .toISOString()
       .split("T")[0];
 
-    const openThreads = db
+    const threadCandidates = db
       .prepare(
         `SELECT DISTINCT m.id, m.content, m.created_at
          FROM memories m
@@ -164,12 +234,21 @@ async function main() {
            AND m.superseded_by IS NULL
            AND m.created_at >= ?
          ORDER BY m.created_at DESC
-         LIMIT 3`
+         LIMIT 8`
       )
       .all(fourteenDaysAgo);
 
-    if (openThreads.length > 0) {
-      const lines = openThreads.map(
+    if (threadCandidates.length > 0) {
+      const scored = threadCandidates.map((m) => ({
+        ...m,
+        relevance: scoreRelevance(m.content, contextKeywords),
+      }));
+      scored.sort((a, b) => {
+        if (b.relevance !== a.relevance) return b.relevance - a.relevance;
+        return b.created_at > a.created_at ? 1 : -1;
+      });
+      const top = scored.slice(0, 3);
+      const lines = top.map(
         (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
       );
       sections.push(`**Open threads:**\n${lines.join("\n")}`);
