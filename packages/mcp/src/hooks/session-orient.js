@@ -182,11 +182,13 @@ async function main() {
         if (b.relevance !== a.relevance) return b.relevance - a.relevance;
         return b.created_at > a.created_at ? 1 : -1;
       });
-      const top = scored.slice(0, 3);
-      const lines = top.map(
-        (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
-      );
-      sections.push(`**Recent decisions:**\n${lines.join("\n")}`);
+      const top = scored.filter((m) => m.relevance > 0).slice(0, 3);
+      if (top.length > 0) {
+        const lines = top.map(
+          (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
+        );
+        sections.push(`**Recent decisions:**\n${lines.join("\n")}`);
+      }
     }
 
     // 4. Technique memories — reusable procedures learned by AI agents
@@ -214,9 +216,11 @@ async function main() {
         if (bRelevant !== aRelevant) return bRelevant - aRelevant;
         return b.importance - a.importance;
       });
-      const top = scored.slice(0, 5);
-      const lines = top.map((m) => `- ${truncate(m.content, 150)}`);
-      sections.push(`**Learned techniques:**\n${lines.join("\n")}`);
+      const top = scored.filter((m) => m.relevance > 0).slice(0, 5);
+      if (top.length > 0) {
+        const lines = top.map((m) => `- ${truncate(m.content, 150)}`);
+        sections.push(`**Learned techniques:**\n${lines.join("\n")}`);
+      }
     }
 
     // 5. Open threads — recent plan/todo/in-progress memories not yet resolved
@@ -247,11 +251,13 @@ async function main() {
         if (b.relevance !== a.relevance) return b.relevance - a.relevance;
         return b.created_at > a.created_at ? 1 : -1;
       });
-      const top = scored.slice(0, 3);
-      const lines = top.map(
-        (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
-      );
-      sections.push(`**Open threads:**\n${lines.join("\n")}`);
+      const top = scored.filter((m) => m.relevance > 0).slice(0, 3);
+      if (top.length > 0) {
+        const lines = top.map(
+          (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
+        );
+        sections.push(`**Open threads:**\n${lines.join("\n")}`);
+      }
     }
     // 6. Self-model functional directives
     const selfModel = db
@@ -276,6 +282,16 @@ async function main() {
         );
       }
     }
+
+    // 7. Pending contradictions count
+    try {
+      const contradictionCount = db
+        .prepare("SELECT COUNT(*) as cnt FROM contradictions WHERE status = 'pending'")
+        .get();
+      if (contradictionCount && contradictionCount.cnt > 0) {
+        sections.push(`**Pending contradictions:** ${contradictionCount.cnt} (use \`memory_contradictions\` to review)`);
+      }
+    } catch {}
   } catch {
     // Query failures are non-critical — just skip
   } finally {

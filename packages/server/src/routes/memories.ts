@@ -199,7 +199,7 @@ memories.post("/api/memories/search", async (c) => {
   if (parsed.data.compact) {
     const compactResults = results.map((r) => ({
       id: r.memory.id,
-      preview: r.memory.content.substring(0, 80) + (r.memory.content.length > 80 ? "..." : ""),
+      preview: r.memory.content.substring(0, 200) + (r.memory.content.length > 200 ? "..." : ""),
       score: r.score,
       tags: r.memory.tags ?? [],
       created_at: r.memory.created_at,

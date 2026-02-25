@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution } from "@exocortex/core";
+import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction } from "@exocortex/core";
 import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 
@@ -41,7 +41,7 @@ function packByTokenBudget<T>(
   return { packed, formatted, totalTokens };
 }
 
-function smartPreview(content: string, query: string, maxLen = 120): string {
+function smartPreview(content: string, query: string, maxLen = 200): string {
   const sentences = content.split(/(?<=[.!?])\s+/).filter((s) => s.length > 0);
   if (sentences.length === 0) return content.substring(0, maxLen);
 
@@ -980,7 +980,7 @@ server.tool(
 
       if (args.compact) {
         const lines = rows.map((r) => {
-          const preview = r.content.substring(0, 120) + (r.content.length > 120 ? "..." : "");
+          const preview = r.content.substring(0, 200) + (r.content.length > 200 ? "..." : "");
           const tags = tagMap.get(r.id);
           const tagStr = tags?.length ? ` [${tags.join(", ")}]` : "";
           return `[${r.id}] ${preview}${tagStr}`;
@@ -2320,6 +2320,67 @@ server.tool(
       }
 
       return { content: [{ type: "text", text: sections.join("\n") }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "memory_contradictions",
+  "List or resolve detected contradictions between memories. Contradictions are detected nightly and can be dismissed or resolved inline.",
+  {
+    status: z.enum(["pending", "resolved", "dismissed"]).optional().describe("Filter by status (default: pending)"),
+    limit: z.number().optional().describe("Max results (default 10)"),
+    resolve_id: z.string().optional().describe("Contradiction ID to resolve/dismiss"),
+    resolution: z.string().optional().describe("Resolution text (required when resolving, optional when dismissing)"),
+    resolve_status: z.enum(["resolved", "dismissed"]).optional().describe("New status for resolve_id (default: resolved)"),
+  },
+  async (args) => {
+    try {
+      // If resolving/dismissing a specific contradiction
+      if (args.resolve_id) {
+        const newStatus = args.resolve_status ?? "resolved";
+        const result = updateContradiction(db, args.resolve_id, {
+          status: newStatus,
+          resolution: args.resolution,
+        });
+        if (!result) {
+          return { content: [{ type: "text", text: `Contradiction ${args.resolve_id} not found.` }], isError: true };
+        }
+        return {
+          content: [{ type: "text", text: `Contradiction ${args.resolve_id} marked as ${newStatus}.${args.resolution ? ` Resolution: ${args.resolution}` : ""}` }],
+        };
+      }
+
+      // List contradictions
+      const status = args.status ?? "pending";
+      const limit = args.limit ?? 10;
+      const contradictions = getContradictions(db, status, limit);
+
+      if (contradictions.length === 0) {
+        return { content: [{ type: "text", text: `No ${status} contradictions found.` }] };
+      }
+
+      const store = new MemoryStore(db);
+      const lines = await Promise.all(contradictions.map(async (c) => {
+        const memA = await store.getById(c.memory_a_id);
+        const memB = await store.getById(c.memory_b_id);
+        const previewA = memA ? memA.content.substring(0, 120).replace(/\n/g, " ") : "(deleted)";
+        const previewB = memB ? memB.content.substring(0, 120).replace(/\n/g, " ") : "(deleted)";
+        const parts = [
+          `**${c.id}** (${c.status}) — ${c.created_at.slice(0, 10)}`,
+          `  A [${c.memory_a_id}]: ${previewA}`,
+          `  B [${c.memory_b_id}]: ${previewB}`,
+          `  Reason: ${c.description}`,
+        ];
+        if (c.resolution) parts.push(`  Resolution: ${c.resolution}`);
+        return parts.join("\n");
+      }));
+
+      return {
+        content: [{ type: "text", text: `${status} contradictions (${contradictions.length}):\n\n${lines.join("\n\n")}` }],
+      };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
     }
