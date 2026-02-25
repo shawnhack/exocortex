@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { useToast } from "../components/Toast";
 
 export function Analytics() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [producerBy, setProducerBy] = useState<"model" | "agent">("model");
   const [trendGranularity, setTrendGranularity] = useState<"month" | "week">(
     "month"
@@ -51,10 +54,27 @@ export function Analytics() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: searchMisses } = useQuery({
-    queryKey: ["analytics-search-misses"],
-    queryFn: () => api.getSearchMisses(),
+  const { data: knowledgeGaps } = useQuery({
+    queryKey: ["analytics-knowledge-gaps"],
+    queryFn: () => api.getKnowledgeGaps(),
     staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: regressionLatest } = useQuery({
+    queryKey: ["regression-latest"],
+    queryFn: () => api.getRegressionLatest(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const consolidateMutation = useMutation({
+    mutationFn: () => api.triggerAutoConsolidate(),
+    onSuccess: (data) => {
+      toast(`Consolidated ${data.clustersConsolidated} clusters (${data.memoriesMerged} memories)`, "success");
+      queryClient.invalidateQueries({ queryKey: ["analytics-consolidation-preview"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+    },
+    onError: (err) => toast((err as Error).message, "error"),
   });
 
   const { data: consolidationPreview } = useQuery({
@@ -293,24 +313,187 @@ export function Analytics() {
         </Section>
       )}
 
-      {/* Search misses */}
-      {searchMisses && searchMisses.length > 0 && (
-        <Section title="Search Misses (7d)">
-          <Table
-            headers={["Query", "Count", "Avg Max Score", "Last Seen"]}
-            rows={searchMisses.map((m) => [
-              m.query,
-              String(m.count),
-              m.avg_max_score !== null ? m.avg_max_score.toFixed(4) : "—",
-              m.last_seen.slice(0, 10),
-            ])}
-          />
+      {/* Knowledge Gaps */}
+      {knowledgeGaps && knowledgeGaps.length > 0 && (
+        <Section title="Knowledge Gaps (14d)">
+          <div
+            style={{
+              border: "1px solid #16163a",
+              borderRadius: 8,
+              overflow: "hidden",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 13,
+              }}
+            >
+              <thead>
+                <tr>
+                  {["Query", "Occurrences", "Avg Max Score", "Last Seen", "Severity"].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: "left",
+                        padding: "10px 14px",
+                        color: "#8080a0",
+                        fontWeight: 500,
+                        fontSize: 12,
+                        borderBottom: "1px solid #16163a",
+                        background: "rgba(8, 8, 26, 0.4)",
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {knowledgeGaps.map((g, i) => (
+                  <tr key={i}>
+                    <td style={{ padding: "8px 14px", color: "#e8e8f4", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.query}</td>
+                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.count}</td>
+                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.avg_max_score !== null ? g.avg_max_score.toFixed(4) : "\u2014"}</td>
+                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.last_seen.slice(0, 10)}</td>
+                    <td style={{ padding: "8px 14px", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>
+                      <span style={{
+                        padding: "2px 10px",
+                        borderRadius: 12,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        background: g.severity === "critical" ? "rgba(248, 113, 113, 0.15)" : g.severity === "warning" ? "rgba(245, 158, 11, 0.15)" : "rgba(128, 128, 160, 0.15)",
+                        color: g.severity === "critical" ? "#f87171" : g.severity === "warning" ? "#f59e0b" : "#8080a0",
+                      }}>
+                        {g.severity}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
+
+      {/* Retrieval Regression */}
+      {regressionLatest && (
+        <Section title="Retrieval Regression">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: 14,
+              marginBottom: 14,
+            }}
+          >
+            <StatCard
+              label="Golden Queries"
+              value={regressionLatest.golden_count}
+              accent="#22d3ee"
+            />
+            <StatCard
+              label="Last Run Alerts"
+              value={regressionLatest.results.filter((r) => r.alert).length}
+              accent={regressionLatest.results.some((r) => r.alert) ? "#f87171" : "#34d399"}
+            />
+            <StatCard
+              label="Avg Overlap@10"
+              value={
+                regressionLatest.results.length > 0
+                  ? (regressionLatest.results.reduce((s, r) => s + r.overlap_at_10, 0) / regressionLatest.results.length).toFixed(2)
+                  : "\u2014"
+              }
+              accent="#a78bfa"
+            />
+          </div>
+          {regressionLatest.results.length > 0 ? (
+            <div
+              style={{
+                border: "1px solid #16163a",
+                borderRadius: 8,
+                overflow: "hidden",
+              }}
+            >
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: 13,
+                }}
+              >
+                <thead>
+                  <tr>
+                    {["Query", "Overlap@10", "Avg Rank Shift", "Exact Order", "Alert"].map((h) => (
+                      <th
+                        key={h}
+                        style={{
+                          textAlign: "left",
+                          padding: "10px 14px",
+                          color: "#8080a0",
+                          fontWeight: 500,
+                          fontSize: 12,
+                          borderBottom: "1px solid #16163a",
+                          background: "rgba(8, 8, 26, 0.4)",
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {regressionLatest.results.map((r, i) => (
+                    <tr key={i}>
+                      <td style={{ padding: "8px 14px", color: "#e8e8f4", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>{r.query}</td>
+                      <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>{r.overlap_at_10.toFixed(2)}</td>
+                      <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>{r.avg_rank_shift.toFixed(2)}</td>
+                      <td style={{ padding: "8px 14px", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>
+                        <span style={{ color: r.exact_order ? "#34d399" : "#f87171" }}>{r.exact_order ? "\u2713" : "\u2717"}</span>
+                      </td>
+                      <td style={{ padding: "8px 14px", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>
+                        <span style={{ color: r.alert ? "#f87171" : "#34d399", fontWeight: r.alert ? 600 : 400 }}>{r.alert ? "ALERT" : "OK"}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ color: "#8080a0", fontSize: 13 }}>No regression runs yet</div>
+          )}
         </Section>
       )}
 
       {/* Consolidation preview */}
       {consolidationPreview && consolidationPreview.clusters.length > 0 && (
-        <Section title={`Consolidation Candidates (${consolidationPreview.clusters.length})`}>
+        <Section
+          title={`Consolidation Candidates (${consolidationPreview.clusters.length})`}
+          actions={
+            <button
+              onClick={() => consolidateMutation.mutate()}
+              disabled={consolidateMutation.isPending}
+              style={{
+                padding: "4px 12px",
+                fontSize: 12,
+                border: "1px solid rgba(34, 211, 238, 0.3)",
+                borderRadius: 6,
+                cursor: consolidateMutation.isPending ? "wait" : "pointer",
+                background: "rgba(34, 211, 238, 0.15)",
+                color: "#22d3ee",
+                fontFamily: "var(--font-mono)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                opacity: consolidateMutation.isPending ? 0.6 : 1,
+              }}
+            >
+              {consolidateMutation.isPending && <span className="spinner" style={{ width: 12, height: 12 }} />}
+              {consolidateMutation.isPending ? "Running..." : "Run Now"}
+            </button>
+          }
+        >
           <Table
             headers={["Topic", "Members", "Avg Similarity"]}
             rows={consolidationPreview.clusters.map((cl) => [

@@ -96,6 +96,43 @@ export interface SearchMiss {
   last_seen: string;
 }
 
+export interface RegressionRunSummary {
+  run_id: string;
+  query_count: number;
+  alerts: number;
+  avg_overlap: number;
+  created_at: string;
+}
+
+export interface RegressionQueryResult {
+  query: string;
+  overlap_at_10: number;
+  avg_rank_shift: number;
+  exact_order: boolean;
+  alert: boolean;
+  created_at: string;
+}
+
+export interface ReembedResult {
+  processed: number;
+  failed: number;
+}
+
+export interface AutoConsolidateResult {
+  clustersFound: number;
+  clustersConsolidated: number;
+  memoriesMerged: number;
+  summaryIds: string[];
+}
+
+export interface KnowledgeGap {
+  query: string;
+  count: number;
+  avg_max_score: number | null;
+  last_seen: string;
+  severity: "critical" | "warning" | "info";
+}
+
 export interface ConsolidationCluster {
   centroidId: string;
   memberIds: string[];
@@ -603,5 +640,37 @@ export const api = {
 
   getNamespaces() {
     return request<{ namespaces: string[] }>("/api/memories/namespaces");
+  },
+
+  // Retrieval regression
+  getRegressionRuns(limit = 10) {
+    return request<{ runs: RegressionRunSummary[] }>(
+      `/api/retrieval-regression/runs?limit=${limit}`
+    );
+  },
+
+  getRegressionLatest() {
+    return request<{ run_id: string | null; golden_count: number; results: RegressionQueryResult[] }>(
+      "/api/retrieval-regression/latest"
+    );
+  },
+
+  // Reembed
+  triggerReembed() {
+    return request<ReembedResult>("/api/reembed", { method: "POST" });
+  },
+
+  // Auto-consolidation
+  triggerAutoConsolidate() {
+    return request<AutoConsolidateResult>("/api/auto-consolidate", {
+      method: "POST",
+    });
+  },
+
+  // Knowledge gaps
+  getKnowledgeGaps(minCount = 3, days = 14) {
+    return request<KnowledgeGap[]>(
+      `/api/analytics/knowledge-gaps?min_count=${minCount}&days=${days}`
+    );
   },
 };

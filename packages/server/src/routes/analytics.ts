@@ -124,4 +124,20 @@ analytics.get("/api/analytics/search-misses", (c) => {
   return c.json(misses);
 });
 
+// Knowledge gaps: persistent search misses over threshold
+analytics.get("/api/analytics/knowledge-gaps", (c) => {
+  const minCount = parseIntQuery(c.req.query("min_count"), 3, 1, 100);
+  const days = parseIntQuery(c.req.query("days"), 14, 1, 90);
+  const limit = parseIntQuery(c.req.query("limit"), 20, 1, 100);
+  const db = getDb();
+  const misses = getSearchMisses(db, limit, days);
+  const gaps = misses
+    .filter((m) => m.count >= minCount)
+    .map((m) => ({
+      ...m,
+      severity: m.count >= 10 ? "critical" : m.count >= 5 ? "warning" : "info",
+    }));
+  return c.json(gaps);
+});
+
 export default analytics;

@@ -15,6 +15,11 @@ import {
   getTemporalHierarchy,
   archiveStaleMemories,
   adjustImportance,
+  getGoldenQueries,
+  getLatestRetrievalRegressionRunId,
+  reembedMissing,
+  getEmbeddingProvider,
+  autoConsolidate,
 } from "@exocortex/core";
 
 const intelligence = new Hono();
@@ -181,6 +186,92 @@ intelligence.get("/api/hierarchy", (c) => {
   return c.json(
     getTemporalHierarchy(db, { month, after, before, maxEpisodes })
   );
+});
+
+// GET /api/retrieval-regression/runs — regression run history
+intelligence.get("/api/retrieval-regression/runs", (c) => {
+  const limit = parseIntQuery(c.req.query("limit"), 10, 1, 100);
+  const db = getDb();
+  const runs = db
+    .prepare(
+      `SELECT run_group_id, COUNT(*) as query_count, SUM(alert) as alerts,
+              AVG(overlap_at_10) as avg_overlap, MAX(created_at) as created_at
+       FROM retrieval_regression_runs
+       WHERE run_group_id != ''
+       GROUP BY run_group_id
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(limit) as Array<{
+    run_group_id: string;
+    query_count: number;
+    alerts: number;
+    avg_overlap: number;
+    created_at: string;
+  }>;
+
+  return c.json({
+    runs: runs.map((r) => ({
+      run_id: r.run_group_id,
+      query_count: r.query_count,
+      alerts: r.alerts,
+      avg_overlap: r.avg_overlap,
+      created_at: r.created_at,
+    })),
+  });
+});
+
+// GET /api/retrieval-regression/latest — latest run per-query breakdown
+intelligence.get("/api/retrieval-regression/latest", (c) => {
+  const db = getDb();
+  const runId = getLatestRetrievalRegressionRunId(db);
+  if (!runId) {
+    return c.json({ run_id: null, golden_count: getGoldenQueries(db).length, results: [] });
+  }
+
+  const results = db
+    .prepare(
+      `SELECT query, overlap_at_10, avg_rank_shift, exact_order, alert, created_at
+       FROM retrieval_regression_runs
+       WHERE run_group_id = ?`
+    )
+    .all(runId) as Array<{
+    query: string;
+    overlap_at_10: number;
+    avg_rank_shift: number;
+    exact_order: number;
+    alert: number;
+    created_at: string;
+  }>;
+
+  return c.json({
+    run_id: runId,
+    golden_count: getGoldenQueries(db).length,
+    results: results.map((r) => ({
+      query: r.query,
+      overlap_at_10: r.overlap_at_10,
+      avg_rank_shift: r.avg_rank_shift,
+      exact_order: r.exact_order === 1,
+      alert: r.alert === 1,
+      created_at: r.created_at,
+    })),
+  });
+});
+
+// POST /api/reembed — reembed memories with missing embeddings
+intelligence.post("/api/reembed", async (c) => {
+  const db = getDb();
+  const provider = await getEmbeddingProvider();
+  const result = await reembedMissing(db, provider);
+  return c.json({ processed: result.processed, failed: result.failed });
+});
+
+// POST /api/auto-consolidate — run auto-consolidation
+intelligence.post("/api/auto-consolidate", async (c) => {
+  const db = getDb();
+  const provider = await getEmbeddingProvider();
+  const result = await autoConsolidate(db, provider);
+  return c.json(result);
 });
 
 export default intelligence;

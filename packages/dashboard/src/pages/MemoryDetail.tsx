@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type Memory } from "../api/client";
+import { api, type Memory, type MemoryLinkResult } from "../api/client";
 import { useToast } from "../components/Toast";
 
 const FACT_TAG_COLORS: Record<string, { color: string; bg: string }> = {
@@ -823,6 +823,125 @@ const LINK_TYPE_COLORS: Record<string, string> = {
   derived_from: "#f472b6",
 };
 
+function MiniLinkGraph({ memoryId, links }: { memoryId: string; links: MemoryLinkResult[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const graphRef = useRef<any>(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || links.length === 0) return;
+
+    // Build graph data
+    interface GNode { id: string; label: string; color: string; isCenter: boolean }
+    interface GLink { source: string; target: string; color: string; width: number }
+
+    const nodes: GNode[] = [
+      { id: memoryId, label: memoryId.slice(-6), color: "#22d3ee", isCenter: true },
+    ];
+    const nodeIds = new Set([memoryId]);
+    const graphLinks: GLink[] = [];
+
+    for (const link of links) {
+      if (!nodeIds.has(link.memory_id)) {
+        nodeIds.add(link.memory_id);
+        nodes.push({
+          id: link.memory_id,
+          label: link.memory_id.slice(-6),
+          color: LINK_TYPE_COLORS[link.link_type] ?? "#22d3ee",
+          isCenter: false,
+        });
+      }
+      graphLinks.push({
+        source: memoryId,
+        target: link.memory_id,
+        color: LINK_TYPE_COLORS[link.link_type] ?? "#22d3ee",
+        width: Math.max(1, link.strength * 3),
+      });
+    }
+
+    import("force-graph").then((fg2d) => {
+      if (!containerRef.current) return;
+      const ForceGraph = fg2d.default as any;
+
+      const graph = ForceGraph()(el)
+        .graphData({ nodes, links: graphLinks })
+        .nodeId("id")
+        .backgroundColor("#06060e")
+        .width(el.clientWidth)
+        .height(250)
+        .cooldownTicks(100)
+        .linkCanvasObjectMode(() => "replace" as const)
+        .linkCanvasObject((link: any, ctx: CanvasRenderingContext2D) => {
+          const l = link as GLink & { source: GNode & { x: number; y: number }; target: GNode & { x: number; y: number } };
+          if (l.source.x == null || l.target.x == null) return;
+          ctx.beginPath();
+          ctx.moveTo(l.source.x, l.source.y);
+          ctx.lineTo(l.target.x, l.target.y);
+          ctx.strokeStyle = l.color;
+          ctx.lineWidth = l.width;
+          ctx.stroke();
+        })
+        .nodeCanvasObject((node: any, ctx: CanvasRenderingContext2D) => {
+          const n = node as GNode & { x: number; y: number };
+          const radius = n.isCenter ? 8 : 5;
+          const x = n.x ?? 0;
+          const y = n.y ?? 0;
+
+          ctx.beginPath();
+          ctx.arc(x, y, radius, 0, Math.PI * 2);
+          ctx.fillStyle = n.color;
+          if (n.isCenter) {
+            ctx.shadowColor = "rgba(34, 211, 238, 0.5)";
+            ctx.shadowBlur = 8;
+          }
+          ctx.fill();
+          ctx.shadowBlur = 0;
+
+          // Label
+          ctx.font = "10px 'JetBrains Mono', monospace";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.fillStyle = "rgba(232, 232, 244, 0.7)";
+          ctx.fillText(n.label, x, y + radius + 3);
+        })
+        .onNodeClick((node: any) => {
+          if (node.id !== memoryId) {
+            navigate(`/memory/${node.id}`);
+          }
+        });
+
+      // Better spacing for small graph
+      graph.d3Force("charge")?.strength(-200);
+
+      graphRef.current = graph;
+    });
+
+    return () => {
+      if (graphRef.current) {
+        graphRef.current._destructor?.();
+        graphRef.current = null;
+      }
+    };
+  }, [memoryId, links, navigate]);
+
+  if (links.length === 0) return null;
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        width: "100%",
+        height: 250,
+        borderRadius: 8,
+        overflow: "hidden",
+        marginBottom: 14,
+        border: "1px solid #16163a",
+      }}
+    />
+  );
+}
+
 function LinkedMemories({ memoryId }: { memoryId: string }) {
   const navigate = useNavigate();
 
@@ -864,6 +983,10 @@ function LinkedMemories({ memoryId }: { memoryId: string }) {
         </svg>
         Linked Memories ({data.count})
       </div>
+
+      {/* Mini neighborhood graph */}
+      <MiniLinkGraph memoryId={memoryId} links={data.links} />
+
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {data.links.map((link) => (
           <div

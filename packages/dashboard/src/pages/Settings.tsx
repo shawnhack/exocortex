@@ -67,6 +67,15 @@ export function Settings() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const reembedMutation = useMutation({
+    mutationFn: () => api.triggerReembed(),
+    onSuccess: (data) => {
+      toast(`Reembedded ${data.processed} memories${data.failed > 0 ? ` (${data.failed} failed)` : ""}`, "success");
+      queryClient.invalidateQueries({ queryKey: ["embedding-health"] });
+    },
+    onError: (err) => toast((err as Error).message, "error"),
+  });
+
   const [edited, setEdited] = useState<Record<string, string>>({});
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -425,8 +434,30 @@ export function Settings() {
                 </div>
               </div>
               {embeddingHealth.missingEmbedding > 0 && (
-                <div style={{ marginTop: 12, padding: "8px 12px", background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.2)", borderRadius: 8, fontSize: 12, color: "#f59e0b" }}>
-                  {embeddingHealth.missingEmbedding} memories missing embeddings — run maintenance reembed to fix
+                <div style={{ marginTop: 12, padding: "8px 12px", background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.2)", borderRadius: 8, fontSize: 12, color: "#f59e0b", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span>{embeddingHealth.missingEmbedding} memories missing embeddings</span>
+                  <button
+                    onClick={() => reembedMutation.mutate()}
+                    disabled={reembedMutation.isPending}
+                    style={{
+                      padding: "4px 12px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      border: "1px solid rgba(245, 158, 11, 0.4)",
+                      borderRadius: 6,
+                      cursor: reembedMutation.isPending ? "wait" : "pointer",
+                      background: "rgba(245, 158, 11, 0.15)",
+                      color: "#f59e0b",
+                      fontFamily: "var(--font-mono)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      opacity: reembedMutation.isPending ? 0.6 : 1,
+                    }}
+                  >
+                    {reembedMutation.isPending && <span className="spinner" style={{ width: 10, height: 10 }} />}
+                    {reembedMutation.isPending ? "Reembedding..." : "Reembed Now"}
+                  </button>
                 </div>
               )}
             </div>
