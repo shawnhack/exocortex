@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { ulid } from "ulid";
 import type { Entity, EntityType, CreateEntityInput, EntityRelationship } from "./types.js";
+import { safeJsonParse } from "../db/schema.js";
 
 interface EntityRow {
   id: string;
@@ -15,8 +16,8 @@ interface EntityRow {
 function rowToEntity(row: EntityRow, tags: string[] = []): Entity {
   return {
     ...row,
-    aliases: JSON.parse(row.aliases),
-    metadata: JSON.parse(row.metadata),
+    aliases: safeJsonParse<string[]>(row.aliases, []),
+    metadata: safeJsonParse<Record<string, unknown>>(row.metadata, {}),
     tags,
   };
 }

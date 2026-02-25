@@ -13,6 +13,7 @@ import type {
   Milestone,
   CreateMilestoneInput,
 } from "./types.js";
+import { safeJsonParse } from "../db/schema.js";
 
 interface GoalRow {
   id: string;
@@ -36,7 +37,7 @@ function rowToGoal(row: GoalRow): Goal {
     status: row.status as Goal["status"],
     priority: row.priority as Goal["priority"],
     deadline: row.deadline,
-    metadata: JSON.parse(row.metadata),
+    metadata: safeJsonParse<Record<string, unknown>>(row.metadata, {}),
     created_at: row.created_at,
     updated_at: row.updated_at,
     completed_at: row.completed_at,
@@ -392,9 +393,7 @@ export class GoalStore {
     const row = this.db
       .prepare("SELECT metadata FROM memories WHERE id = ?")
       .get(memoryId) as { metadata: string | null } | undefined;
-    const existing: Record<string, unknown> = row?.metadata
-      ? JSON.parse(row.metadata)
-      : {};
+    const existing: Record<string, unknown> = safeJsonParse<Record<string, unknown>>(row?.metadata ?? null, {});
     existing.goal_id = goal.id;
     this.db
       .prepare("UPDATE memories SET metadata = ? WHERE id = ?")

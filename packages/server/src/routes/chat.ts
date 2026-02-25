@@ -6,6 +6,22 @@ import { stripEmbedding } from "../utils.js";
 
 const chat = new Hono();
 
+// Simple sliding window rate limiter (20 req/min global)
+const RATE_LIMIT = 20;
+const RATE_WINDOW_MS = 60_000;
+const requestTimestamps: number[] = [];
+
+function isRateLimited(): boolean {
+  const now = Date.now();
+  // Remove timestamps outside the window
+  while (requestTimestamps.length > 0 && requestTimestamps[0] <= now - RATE_WINDOW_MS) {
+    requestTimestamps.shift();
+  }
+  if (requestTimestamps.length >= RATE_LIMIT) return true;
+  requestTimestamps.push(now);
+  return false;
+}
+
 const chatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string(),
@@ -19,6 +35,10 @@ const chatSchema = z.object({
 
 // POST /api/chat — RAG chat endpoint
 chat.post("/api/chat", async (c) => {
+  if (isRateLimited()) {
+    return c.json({ error: "Too many requests. Try again later." }, 429);
+  }
+
   const body = await c.req.json();
   const parsed = chatSchema.safeParse(body);
   if (!parsed.success) {

@@ -6,6 +6,7 @@ export {
   getSetting,
   setSetting,
   getAllSettings,
+  safeJsonParse,
 } from "./db/schema.js";
 
 // Memory

@@ -10,7 +10,7 @@ import os from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import type { MemoryRow } from "./memory/types.js";
 import type { Entity } from "./entities/types.js";
-import { initializeSchema } from "./db/schema.js";
+import { initializeSchema, safeJsonParse } from "./db/schema.js";
 
 export interface BackupData {
   version: 1;
@@ -136,7 +136,7 @@ export function exportData(db: DatabaseSync): BackupData {
     const { metadata: rawMeta, ...rest } = m;
     return {
       ...rest,
-      metadata: rawMeta ? JSON.parse(rawMeta) as Record<string, unknown> : undefined,
+      metadata: safeJsonParse<Record<string, unknown> | undefined>(rawMeta, undefined),
       tags,
     };
   });
@@ -156,8 +156,8 @@ export function exportData(db: DatabaseSync): BackupData {
   const entityTagStmt = db.prepare("SELECT tag FROM entity_tags WHERE entity_id = ?");
   const parsedEntities = entities.map((e) => ({
     ...e,
-    aliases: JSON.parse(e.aliases),
-    metadata: JSON.parse(e.metadata),
+    aliases: safeJsonParse<string[]>(e.aliases, []),
+    metadata: safeJsonParse<Record<string, unknown>>(e.metadata, {}),
     tags: (entityTagStmt.all(e.id) as Array<{ tag: string }>).map((t) => t.tag),
   }));
 
@@ -188,7 +188,7 @@ export function exportData(db: DatabaseSync): BackupData {
 
   const parsedGoals = goals.map((g) => ({
     ...g,
-    metadata: JSON.parse(g.metadata),
+    metadata: safeJsonParse<Record<string, unknown>>(g.metadata, {}),
   }));
 
   const memoryLinks = db

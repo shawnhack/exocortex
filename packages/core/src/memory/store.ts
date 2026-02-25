@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { ulid } from "ulid";
 import { getEmbeddingProvider } from "../embedding/manager.js";
-import { getSetting } from "../db/schema.js";
+import { getSetting, safeJsonParse } from "../db/schema.js";
 import { cosineSimilarity } from "./scoring.js";
 import { splitIntoChunks } from "./chunking.js";
 import { extractEntities, extractRelationships } from "../entities/extractor.js";
@@ -42,7 +42,7 @@ function rowToMemory(row: MemoryRow, tags?: string[]): Memory {
     superseded_by: rowData.superseded_by ?? null,
     chunk_index: rowData.chunk_index ?? null,
     keywords: rowData.keywords ?? undefined,
-    metadata: rowData.metadata ? JSON.parse(rowData.metadata) : undefined,
+    metadata: safeJsonParse<Record<string, unknown> | undefined>(rowData.metadata, undefined),
     expires_at: rowData.expires_at ?? null,
     namespace: rowData.namespace ?? null,
     tags,
@@ -597,9 +597,7 @@ export class MemoryStore {
             conversation_id: string | null;
           }
         | undefined;
-      const currentMeta: Record<string, unknown> = existingRow?.metadata
-        ? JSON.parse(existingRow.metadata)
-        : {};
+      const currentMeta: Record<string, unknown> = safeJsonParse<Record<string, unknown>>(existingRow?.metadata ?? null, {});
       const mergedMeta =
         input.metadata && Object.keys(input.metadata).length > 0
           ? { ...currentMeta, ...input.metadata }
@@ -682,16 +680,12 @@ export class MemoryStore {
     // Skip semantic dedup for memories with exempt tags (e.g. sentinel reports)
     // Hash dedup still catches exact duplicates upstream
     if (input.tags && input.tags.length > 0) {
-      try {
-        const exemptRaw = getSetting(this.db, "dedup.exempt_tags") ?? "[]";
-        const exemptTags: string[] = JSON.parse(exemptRaw);
-        if (exemptTags.length > 0) {
-          const exemptSet = new Set(exemptTags.map((t) => t.toLowerCase().trim()));
-          const hasExempt = input.tags.some((t) => exemptSet.has(t.toLowerCase().trim()));
-          if (hasExempt) return null;
-        }
-      } catch {
-        // Malformed setting — proceed with normal dedup
+      const exemptRaw = getSetting(this.db, "dedup.exempt_tags") ?? "[]";
+      const exemptTags: string[] = safeJsonParse<string[]>(exemptRaw, []);
+      if (exemptTags.length > 0) {
+        const exemptSet = new Set(exemptTags.map((t) => t.toLowerCase().trim()));
+        const hasExempt = input.tags.some((t) => exemptSet.has(t.toLowerCase().trim()));
+        if (hasExempt) return null;
       }
     }
 

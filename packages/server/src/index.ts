@@ -4,6 +4,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { serve } from "@hono/node-server";
 import { getDb, initializeSchema } from "@exocortex/core";
 import { errorHandler } from "./middleware/error.js";
+import { authMiddleware } from "./middleware/auth.js";
 import memoriesRoutes from "./routes/memories.js";
 import entitiesRoutes from "./routes/entities.js";
 import importRoutes from "./routes/import.js";
@@ -46,6 +47,21 @@ export function createApp(): Hono {
   }
   app.use("*", errorHandler);
 
+  // Security headers
+  app.use("*", async (c, next) => {
+    await next();
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("X-Frame-Options", "DENY");
+    c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    c.header(
+      "Content-Security-Policy",
+      "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
+    );
+  });
+
+  // Auth middleware on API routes (health exempt above)
+  app.use("/api/*", authMiddleware);
+
   app.route("/", healthRoutes);
   app.route("/", memoriesRoutes);
   app.route("/", entitiesRoutes);
@@ -73,6 +89,14 @@ export function createApp(): Hono {
       const urlPath = new URL(c.req.url).pathname;
       if (urlPath !== "/" && !urlPath.startsWith("/api/")) {
         const filePath = path.join(dashboardDist, urlPath);
+        const resolved = path.resolve(filePath);
+        if (
+          !resolved.startsWith(path.resolve(dashboardDist) + path.sep) &&
+          resolved !== path.resolve(dashboardDist)
+        ) {
+          await next();
+          return;
+        }
         if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
           const ext = path.extname(filePath).toLowerCase();
           const mimeTypes: Record<string, string> = {

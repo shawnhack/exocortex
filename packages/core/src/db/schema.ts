@@ -690,6 +690,11 @@ export function initializeSchema(db: DatabaseSync): void {
   initializedDbs.add(db);
 }
 
+export function safeJsonParse<T>(json: string | null | undefined, fallback: T): T {
+  if (!json) return fallback;
+  try { return JSON.parse(json); } catch { return fallback; }
+}
+
 export function getSetting(db: DatabaseSync, key: string): string | undefined {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
     | { value: string }
