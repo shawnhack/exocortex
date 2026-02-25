@@ -143,8 +143,8 @@ User prompt → Agent reads/writes memories via MCP tools
 | `@exocortex/core` | Storage, retrieval, embedding, scoring, entity extraction, intelligence, ingestion |
 | `@exocortex/mcp` | MCP server — exposes all memory tools via stdio (works with any MCP client) |
 | `@exocortex/server` | Hono REST API on port 3210 + serves the React dashboard |
-| `@exocortex/cli` | CLI tool (`exo`) — add, search, import/export, serve, consolidate, retrieval-regression, backfill |
-| `@exocortex/dashboard` | React SPA with Neural Interface theme — memories, chat, graph, entities, goals, trash, mobile-responsive |
+| `@exocortex/cli` | CLI tool (`exo`) — add, search, import/export, serve, consolidate, retrieval-regression, backfill, verify-backup |
+| `@exocortex/dashboard` | React SPA with Neural Interface theme — memories, chat, graph, entities, goals, analytics, timeline, skills, trash, mobile-responsive |
 
 ---
 
@@ -172,6 +172,10 @@ The MCP server exposes all Exocortex tools over stdio. See [Quick Start](#connec
 | `memory_maintenance` | Run maintenance: importance adjustment, archival, health checks, search friction, re-embedding, entity backfill, importance recalibration, graph densification, co-retrieval links, adaptive weight tuning, entity orphan pruning |
 | `memory_consolidate` | Find and merge clusters of similar memories into summaries |
 | `memory_graph` | Entity graph analysis — full graph, bridge detection, community detection |
+| `memory_contradictions` | List and resolve detected contradictions between memories |
+| `memory_tag_cleanup` | Find and merge near-duplicate tags (preview or apply) |
+| `memory_diff` | See what changed since a timestamp — new, updated, and archived memories |
+| `memory_project_snapshot` | Quick project snapshot: recent activity, goals, decisions, techniques |
 | `memory_decay_preview` | Dry-run preview of what maintenance would archive |
 | `memory_ping` | Health check — memory counts, entity/tag stats, date range, uptime |
 | `goal_create` | Create a persistent goal |
@@ -247,7 +251,9 @@ pnpm exec exo <command> [options]
 | `entities` | List and manage entities. Options: `--type`, `--search`, `--memories` |
 | `contradictions` | View and manage contradictions. Options: `--status`, `--detect`, `--resolve <id>`, `--dismiss <id>` |
 | `export` | Export JSON backup (memories, entities, goals, links, settings) |
+| `obsidian-export` | Export memories to Obsidian-compatible markdown vault |
 | `retrieval-regression` | Run golden-query retrieval drift checks and baseline management |
+| `verify-backup` | Verify backup integrity — checks row counts, embeddings, entity links |
 | `backfill` | Backfill canonical memory state. Options: `--dry-run`, `--limit` |
 
 ---
@@ -274,6 +280,10 @@ POST   /api/memories/import     — Bulk import
 GET    /api/memories/archived   — List archived/trashed memories
 POST   /api/memories/:id/restore — Restore an archived memory
 GET    /api/memories/:id/links  — List memory-to-memory links
+GET    /api/memories/namespaces — List available namespaces
+GET    /api/memories/diff       — Changes since a timestamp (new, updated, archived)
+POST   /api/memories/bulk-tag   — Add/remove tags on multiple memories
+POST   /api/memories/bulk-update — Bulk update memory fields
 ```
 
 ### Entities
@@ -287,7 +297,8 @@ PATCH  /api/entities/:id        — Update (name, aliases, tags, optional manual
 DELETE /api/entities/:id        — Delete
 GET    /api/entities/:id/memories       — Linked memories
 GET    /api/entities/:id/relationships  — Entity relationships
-GET    /api/entities/graph             — All entities + relationships (single query)
+GET    /api/entities/graph              — All entities + relationships (single query)
+GET    /api/entities/graph/analysis     — Centrality, communities, stats
 ```
 
 ### Chat
@@ -311,6 +322,27 @@ POST   /api/archive             — Archive stale memories
 POST   /api/importance-adjust   — Adjust importance from access patterns
 GET    /api/timeline            — Memory timeline with filters
 GET    /api/temporal-stats      — Temporal analysis (streaks, averages)
+GET    /api/hierarchy           — Temporal hierarchy (epoch → theme → episode)
+POST   /api/reembed             — Re-embed memories with missing embeddings
+POST   /api/auto-consolidate    — Run auto-consolidation
+GET    /api/retrieval-regression/runs   — Regression run history
+GET    /api/retrieval-regression/latest — Latest run per-query breakdown
+```
+
+### Analytics
+
+```
+GET    /api/analytics/summary             — Overview stats (counts, trends)
+GET    /api/analytics/access-distribution — Access count distribution
+GET    /api/analytics/tag-effectiveness   — Tag usage and effectiveness
+GET    /api/analytics/tag-health          — Tag quality metrics
+GET    /api/analytics/producer-quality    — Quality by provider/model/agent
+GET    /api/analytics/quality-trend       — Quality over time
+GET    /api/analytics/quality-distribution — Quality score distribution
+GET    /api/analytics/embedding-health    — Embedding coverage and gaps
+GET    /api/analytics/decay-preview       — Preview importance decay candidates
+GET    /api/analytics/search-misses       — Zero-result queries
+GET    /api/analytics/knowledge-gaps      — Detected knowledge gaps
 ```
 
 ### Goals

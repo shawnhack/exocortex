@@ -53,7 +53,8 @@ describe("importance auto-adjustment", () => {
       expect(result.boosted).toBe(1);
 
       const row = db.prepare("SELECT importance FROM memories WHERE id = ?").get("freq-1") as { importance: number };
-      expect(row.importance).toBeCloseTo(0.6);
+      // Quality-aware boost: no useful_count or links → quality < 0.7 → +0.05
+      expect(row.importance).toBeCloseTo(0.55);
     });
 
     it("should not boost past 0.9", () => {
