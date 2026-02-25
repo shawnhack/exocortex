@@ -225,6 +225,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "scoring.goal_gated_weight": "0.10",
   "dedup.merge_enabled": "false",
   "dedup.merge_threshold": "0.75",
+  "dedup.exempt_tags": "[]",
   "consolidation.auto_enabled": "true",
   "sentinel.report_ttl_days": "30",
   "scoring.keyword_boost": "2.0",

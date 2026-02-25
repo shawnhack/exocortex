@@ -679,6 +679,22 @@ export class MemoryStore {
     const dedupEnabled = getSetting(this.db, "dedup.enabled") !== "false";
     if (!dedupEnabled) return null;
 
+    // Skip semantic dedup for memories with exempt tags (e.g. sentinel reports)
+    // Hash dedup still catches exact duplicates upstream
+    if (input.tags && input.tags.length > 0) {
+      try {
+        const exemptRaw = getSetting(this.db, "dedup.exempt_tags") ?? "[]";
+        const exemptTags: string[] = JSON.parse(exemptRaw);
+        if (exemptTags.length > 0) {
+          const exemptSet = new Set(exemptTags.map((t) => t.toLowerCase().trim()));
+          const hasExempt = input.tags.some((t) => exemptSet.has(t.toLowerCase().trim()));
+          if (hasExempt) return null;
+        }
+      } catch {
+        // Malformed setting — proceed with normal dedup
+      }
+    }
+
     // Skip dedup for very short content — too likely to get false positives
     if (input.content.length < 50) return null;
 
