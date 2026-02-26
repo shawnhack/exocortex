@@ -96,10 +96,12 @@ export {
   recordContradiction,
   getContradictions,
   updateContradiction,
+  autoDismissContradictions,
 } from "./intelligence/contradictions.js";
 export type {
   Contradiction,
   ContradictionCandidate,
+  AutoDismissResult,
 } from "./intelligence/contradictions.js";
 export { getTimeline, getTemporalStats, getMemoryLineage, getDecisionTimeline, getTemporalHierarchy } from "./intelligence/temporal.js";
 export type { TimelineEntry, TemporalStats, LineageEntry, DecisionTimelineEntry, HierarchyEpoch, HierarchyTheme, HierarchyEpisode, TemporalHierarchy, TemporalHierarchyOptions } from "./intelligence/temporal.js";
@@ -216,6 +218,7 @@ export {
   getProducerQuality,
   getQualityTrend,
   getQualityDistribution,
+  getQualityHistogram,
   getQueryOutcomes,
 } from "./memory/analytics.js";
 export type {
@@ -225,6 +228,7 @@ export type {
   ProducerQuality,
   QualityTrendEntry,
   QualityDistribution,
+  QualityHistogramBucket,
   QueryOutcome,
 } from "./memory/analytics.js";
 

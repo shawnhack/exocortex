@@ -8,6 +8,7 @@ import {
   getProducerQuality,
   getQualityTrend,
   getQualityDistribution,
+  getQualityHistogram,
   getArchiveCandidates,
   suggestTagMerges,
   getTagAliasMap,
@@ -63,6 +64,11 @@ analytics.get("/api/analytics/quality-trend", (c) => {
 analytics.get("/api/analytics/quality-distribution", (c) => {
   const db = getDb();
   return c.json(getQualityDistribution(db));
+});
+
+analytics.get("/api/analytics/quality-histogram", (c) => {
+  const db = getDb();
+  return c.json(getQualityHistogram(db));
 });
 
 // Imp 1: Embedding health

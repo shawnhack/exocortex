@@ -187,6 +187,37 @@ export function getQualityTrend(
   }));
 }
 
+// --- Quality Histogram ---
+
+export interface QualityHistogramBucket {
+  bucket: string;
+  count: number;
+}
+
+export function getQualityHistogram(db: DatabaseSync): QualityHistogramBucket[] {
+  const buckets: QualityHistogramBucket[] = [];
+
+  for (let i = 0; i < 10; i++) {
+    const lo = i / 10;
+    const hi = (i + 1) / 10;
+    const label = `${lo.toFixed(1)}-${hi.toFixed(1)}`;
+
+    // Last bucket is inclusive on the right: [0.9, 1.0]
+    const op = i === 9 ? "<=" : "<";
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) as count FROM memories
+         WHERE is_active = 1 AND quality_score IS NOT NULL
+           AND quality_score >= ? AND quality_score ${op} ?`
+      )
+      .get(lo, hi) as { count: number };
+
+    buckets.push({ bucket: label, count: row.count });
+  }
+
+  return buckets;
+}
+
 // --- Quality Distribution ---
 
 export interface QualityDistribution {

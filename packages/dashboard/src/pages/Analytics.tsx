@@ -23,6 +23,12 @@ export function Analytics() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: qualityHistogram } = useQuery({
+    queryKey: ["analytics-quality-histogram"],
+    queryFn: () => api.getQualityHistogram(),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: distribution } = useQuery({
     queryKey: ["analytics-distribution"],
     queryFn: () => api.getAccessDistribution(),
@@ -127,6 +133,69 @@ export function Analytics() {
           <StatCard label="Low Quality" value={qualityDist.lowQuality} accent="#f59e0b" />
         </div>
       )}
+
+      {/* Quality histogram */}
+      {qualityHistogram && qualityHistogram.some((b) => b.count > 0) && (() => {
+        const maxHistCount = Math.max(...qualityHistogram.map((b) => b.count), 1);
+        const HIST_COLORS = [
+          "#f87171", "#f59e0b", "#fbbf24", "#facc15",
+          "#a3e635", "#4ade80", "#34d399", "#2dd4bf",
+          "#22d3ee", "#22d3ee",
+        ];
+        return (
+          <Section title="Quality Score Distribution">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {qualityHistogram.map((b, i) => (
+                <div
+                  key={b.bucket}
+                  style={{ display: "flex", alignItems: "center", gap: 12 }}
+                >
+                  <span
+                    style={{
+                      width: 60,
+                      textAlign: "right",
+                      fontSize: 13,
+                      color: "#a0a0be",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {b.bucket}
+                  </span>
+                  <div
+                    style={{
+                      flex: 1,
+                      height: 22,
+                      background: "rgba(34, 211, 238, 0.06)",
+                      borderRadius: 4,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${(b.count / maxHistCount) * 100}%`,
+                        height: "100%",
+                        background: `linear-gradient(90deg, ${HIST_COLORS[i]}66, ${HIST_COLORS[i]}33)`,
+                        borderRadius: 4,
+                        minWidth: b.count > 0 ? 2 : 0,
+                      }}
+                    />
+                  </div>
+                  <span
+                    style={{
+                      width: 50,
+                      fontSize: 13,
+                      color: "#e8e8f4",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {b.count}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Section>
+        );
+      })()}
 
       {/* Stat cards */}
       {summary && (

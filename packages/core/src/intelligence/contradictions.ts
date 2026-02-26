@@ -303,6 +303,98 @@ export function getContradictions(
 /**
  * Update a contradiction's status and optional resolution.
  */
+export interface AutoDismissResult {
+  dismissed: number;
+  reasons: Record<string, number>;
+}
+
+/**
+ * Auto-dismiss low-signal contradictions in bulk.
+ * Identifies false positives from deleted sources, consolidation artifacts,
+ * low-quality pairs, and trivial version/date changes.
+ */
+export function autoDismissContradictions(
+  db: DatabaseSync,
+  opts: { dryRun?: boolean } = {}
+): AutoDismissResult {
+  const pending = db
+    .prepare(
+      `SELECT c.id, c.memory_a_id, c.memory_b_id, c.description
+       FROM contradictions c
+       WHERE c.status = 'pending'`
+    )
+    .all() as unknown as Array<{
+    id: string;
+    memory_a_id: string;
+    memory_b_id: string;
+    description: string;
+  }>;
+
+  const reasons: Record<string, number> = {};
+  let dismissed = 0;
+
+  for (const c of pending) {
+    const memA = db
+      .prepare("SELECT id, content, is_active, quality_score FROM memories WHERE id = ?")
+      .get(c.memory_a_id) as
+      | { id: string; content: string; is_active: number; quality_score: number | null }
+      | undefined;
+    const memB = db
+      .prepare("SELECT id, content, is_active, quality_score FROM memories WHERE id = ?")
+      .get(c.memory_b_id) as
+      | { id: string; content: string; is_active: number; quality_score: number | null }
+      | undefined;
+
+    let reason: string | null = null;
+
+    // 1. Deleted source — either memory is gone or inactive
+    if (!memA || !memB || memA.is_active === 0 || memB.is_active === 0) {
+      reason = "deleted_source";
+    }
+
+    // 2. Consolidation artifact
+    if (!reason && memA && memB) {
+      if (memA.content.startsWith("[Consolidated") || memB.content.startsWith("[Consolidated")) {
+        reason = "consolidation_artifact";
+      }
+    }
+
+    // 3. Low quality — both below 0.20
+    if (!reason && memA && memB) {
+      const qA = memA.quality_score ?? 1;
+      const qB = memB.quality_score ?? 1;
+      if (qA < 0.20 && qB < 0.20) {
+        reason = "low_quality";
+      }
+    }
+
+    // 4. Version/date value change
+    if (!reason && c.description.startsWith("value change:")) {
+      const VERSION_OR_DATE = /^\d+\.\d+|\d{4}-\d{2}/;
+      const match = c.description.match(/value change:\s*"([^"]+)"\s*vs\s*"([^"]+)"/);
+      if (match) {
+        const [, valA, valB] = match;
+        if (VERSION_OR_DATE.test(valA.trim()) && VERSION_OR_DATE.test(valB.trim())) {
+          reason = "version_date_change";
+        }
+      }
+    }
+
+    if (reason) {
+      if (!opts.dryRun) {
+        updateContradiction(db, c.id, {
+          status: "dismissed",
+          resolution: `auto-dismissed: ${reason}`,
+        });
+      }
+      reasons[reason] = (reasons[reason] ?? 0) + 1;
+      dismissed++;
+    }
+  }
+
+  return { dismissed, reasons };
+}
+
 export function updateContradiction(
   db: DatabaseSync,
   id: string,

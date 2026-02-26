@@ -25,7 +25,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   private model: string;
   private dims: number;
 
-  constructor(model = "Xenova/all-MiniLM-L6-v2", dimensions = 384) {
+  constructor(model = "Xenova/bge-small-en-v1.5", dimensions = 384) {
     this.model = model;
     this.dims = dimensions;
   }

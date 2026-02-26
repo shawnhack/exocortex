@@ -8,6 +8,7 @@ import {
   generateBasicSummary,
   detectContradictions,
   recordContradiction,
+  autoDismissContradictions,
   archiveStaleMemories,
   archiveExpired,
   adjustImportance,
@@ -189,6 +190,14 @@ export function startScheduler(): void {
       }
 
       console.log(`[scheduler] Detected ${candidates.length} potential contradictions`);
+
+      // Auto-dismiss low-signal contradictions
+      const autoDismissResult = autoDismissContradictions(db);
+      if (autoDismissResult.dismissed > 0) {
+        console.log(
+          `[scheduler] Auto-dismissed ${autoDismissResult.dismissed} contradictions: ${JSON.stringify(autoDismissResult.reasons)}`
+        );
+      }
     } catch (err) {
       console.error("[scheduler] Contradiction detection error:", err);
     }

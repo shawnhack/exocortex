@@ -9,6 +9,7 @@ import {
   recordContradiction,
   getContradictions,
   updateContradiction,
+  autoDismissContradictions,
 } from "@exocortex/core";
 import type { EmbeddingProvider, ContradictionCandidate } from "@exocortex/core";
 
@@ -287,5 +288,98 @@ describe("detectContradictions", () => {
 
     const candidates = detectContradictions(db, { similarityThreshold: 0.9 });
     expect(candidates).toHaveLength(0);
+  });
+});
+
+describe("autoDismissContradictions", () => {
+  function insertContradiction(
+    memAId: string,
+    memBId: string,
+    reason: string
+  ): string {
+    const id = `CONTRA_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+    db.prepare(
+      `INSERT INTO contradictions (id, memory_a_id, memory_b_id, description, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'pending', ?, ?)`
+    ).run(id, memAId, memBId, reason, now, now);
+    return id;
+  }
+
+  it("dismisses when memory is deleted", async () => {
+    const store = new MemoryStore(db);
+    const a = await store.create({ content: "Memory A about testing" });
+    const b = await store.create({ content: "Memory B about testing" });
+
+    insertContradiction(a.memory.id, b.memory.id, "negation conflict: test");
+
+    // Delete memory A
+    db.prepare("UPDATE memories SET is_active = 0 WHERE id = ?").run(a.memory.id);
+
+    const result = autoDismissContradictions(db);
+    expect(result.dismissed).toBe(1);
+    expect(result.reasons.deleted_source).toBe(1);
+    expect(getContradictions(db, "pending")).toHaveLength(0);
+    expect(getContradictions(db, "dismissed")).toHaveLength(1);
+  });
+
+  it("dismisses consolidation artifacts", async () => {
+    const store = new MemoryStore(db);
+    const a = await store.create({ content: "[Consolidated summary of 3 memories from 2026-02-14..." });
+    const b = await store.create({ content: "Normal memory about architecture" });
+
+    insertContradiction(a.memory.id, b.memory.id, "value change: something");
+
+    const result = autoDismissContradictions(db);
+    expect(result.dismissed).toBe(1);
+    expect(result.reasons.consolidation_artifact).toBe(1);
+  });
+
+  it("dismisses low quality pairs", async () => {
+    const store = new MemoryStore(db);
+    const a = await store.create({ content: "Low quality memory A about topic" });
+    const b = await store.create({ content: "Low quality memory B about topic" });
+
+    // Set both to low quality
+    db.prepare("UPDATE memories SET quality_score = 0.10 WHERE id = ?").run(a.memory.id);
+    db.prepare("UPDATE memories SET quality_score = 0.15 WHERE id = ?").run(b.memory.id);
+
+    insertContradiction(a.memory.id, b.memory.id, "negation conflict: test");
+
+    const result = autoDismissContradictions(db);
+    expect(result.dismissed).toBe(1);
+    expect(result.reasons.low_quality).toBe(1);
+  });
+
+  it("dismisses version-number value changes", async () => {
+    const store = new MemoryStore(db);
+    const a = await store.create({ content: "Package version is 2.1" });
+    const b = await store.create({ content: "Package version is 3.0" });
+
+    insertContradiction(a.memory.id, b.memory.id, 'value change: "2.1.0" vs "3.0.0"');
+
+    const result = autoDismissContradictions(db);
+    expect(result.dismissed).toBe(1);
+    expect(result.reasons.version_date_change).toBe(1);
+  });
+
+  it("keeps real contradictions", async () => {
+    const store = new MemoryStore(db);
+    const a = await store.create({ content: "We use PostgreSQL for the database" });
+    const b = await store.create({ content: "We use MySQL for the database" });
+
+    // Set reasonable quality
+    db.prepare("UPDATE memories SET quality_score = 0.60 WHERE id = ?").run(a.memory.id);
+    db.prepare("UPDATE memories SET quality_score = 0.55 WHERE id = ?").run(b.memory.id);
+
+    insertContradiction(
+      a.memory.id,
+      b.memory.id,
+      'value change: "PostgreSQL for the database" vs "MySQL for the database"'
+    );
+
+    const result = autoDismissContradictions(db);
+    expect(result.dismissed).toBe(0);
+    expect(getContradictions(db, "pending")).toHaveLength(1);
   });
 });

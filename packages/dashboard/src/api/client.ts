@@ -620,6 +620,12 @@ export const api = {
     return request<QualityDistribution>("/api/analytics/quality-distribution");
   },
 
+  getQualityHistogram() {
+    return request<Array<{ bucket: string; count: number }>>(
+      "/api/analytics/quality-histogram"
+    );
+  },
+
   getEmbeddingHealth() {
     return request<EmbeddingHealth>("/api/analytics/embedding-health");
   },

@@ -181,7 +181,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "scoring.recency_decay": "0.05",
   "scoring.min_score": "0.15",
   "scoring.tag_boost": "0.10",
-  "embedding.model": "Xenova/all-MiniLM-L6-v2",
+  "embedding.model": "Xenova/bge-small-en-v1.5",
   "embedding.dimensions": "384",
   "server.port": "3210",
   "importance.auto_adjust": "true",
