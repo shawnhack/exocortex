@@ -14,6 +14,7 @@ import goalsRoutes from "./routes/goals.js";
 import linksRoutes from "./routes/links.js";
 import healthRoutes from "./routes/health.js";
 import analyticsRoutes from "./routes/analytics.js";
+import mcpRoutes from "./routes/mcp.js";
 import { startScheduler } from "./scheduler.js";
 import path from "node:path";
 import fs from "node:fs";
@@ -58,6 +59,9 @@ export function createApp(): Hono {
       "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
     );
   });
+
+  // MCP route (before auth — MCP protocol handles its own sessions)
+  app.route("/", mcpRoutes);
 
   // Auth middleware on API routes (health exempt above)
   app.use("/api/*", authMiddleware);

@@ -5,6 +5,11 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./tools": "./dist/tools.js",
+    "./utils": "./dist/utils.js"
+  },
   "bin": {
     "exocortex-mcp": "dist/index.js"
   },
