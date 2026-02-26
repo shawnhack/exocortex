@@ -25,6 +25,7 @@ import {
   expireSentinelReports,
   suggestTagMerges,
   applyTagMerge,
+  recomputeQualityScores,
 } from "@exocortex/core";
 import type { RetrievalRegressionResult } from "@exocortex/core";
 
@@ -74,6 +75,12 @@ export async function runMaintenanceNow(): Promise<void> {
       } catch (err) {
         console.error("[maintenance] Auto-consolidation error:", err);
       }
+    }
+
+    // Recompute quality scores
+    const qResult = recomputeQualityScores(db);
+    if (qResult.updated > 0) {
+      console.log(`[maintenance] Quality scores recomputed: ${qResult.updated}/${qResult.total}`);
     }
 
     // Auto tag cleanup (conservative: max 1 merge per maintenance run)
@@ -232,6 +239,12 @@ export function startScheduler(): void {
       console.log("[scheduler] Running importance auto-adjustment...");
       const result = adjustImportance(db);
       console.log(`[scheduler] Importance adjustment complete: ${result.boosted} boosted, ${result.decayed} decayed`);
+
+      // Recompute quality scores after importance changes
+      const qResult = recomputeQualityScores(db);
+      if (qResult.updated > 0) {
+        console.log(`[scheduler] Quality scores recomputed: ${qResult.updated}/${qResult.total}`);
+      }
     } catch (err) {
       console.error("[scheduler] Importance adjustment error:", err);
     }
