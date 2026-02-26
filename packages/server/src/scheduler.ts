@@ -178,11 +178,14 @@ export function startScheduler(): void {
     }
   });
 
-  // Contradiction detection — every day at 2:30 AM
+  // Contradiction detection — every day at 2:30 AM (disabled by default)
   cron.schedule("30 2 * * *", () => {
     try {
-      console.log("[scheduler] Running contradiction detection...");
       const db = getDb();
+      if (getSetting(db, "contradictions.auto_detect") !== "true") {
+        return;
+      }
+      console.log("[scheduler] Running contradiction detection...");
       const candidates = detectContradictions(db);
 
       for (const candidate of candidates) {

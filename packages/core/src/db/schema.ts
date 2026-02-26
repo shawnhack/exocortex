@@ -231,6 +231,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "consolidation.min_cluster_size": "2",
   "sentinel.report_ttl_days": "30",
   "scoring.keyword_boost": "2.0",
+  "contradictions.auto_detect": "false",
   "reinforcement.access_boost": "0.01",
   "reinforcement.link_boost": "0.005",
   "search.score_gap_ratio": "0.15",
