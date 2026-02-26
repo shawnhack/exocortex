@@ -339,6 +339,7 @@ GET    /api/analytics/tag-health          — Tag quality metrics
 GET    /api/analytics/producer-quality    — Quality by provider/model/agent
 GET    /api/analytics/quality-trend       — Quality over time
 GET    /api/analytics/quality-distribution — Quality score distribution
+GET    /api/analytics/quality-histogram   — Quality score histogram (10 buckets)
 GET    /api/analytics/embedding-health    — Embedding coverage and gaps
 GET    /api/analytics/decay-preview       — Preview importance decay candidates
 GET    /api/analytics/search-misses       — Zero-result queries
@@ -467,7 +468,11 @@ Additional maintenance operations available via `memory_maintenance`:
 - **Importance recalibration** — optional percentile-rank normalization of importance distribution
 - **Graph densification** — creates co-occurrence relationships between entities sharing memories
 
-Consolidation and contradiction detection run nightly only (2:00 AM / 2:30 AM) since they may need human review. Entity extraction for unprocessed memories runs nightly at 3:00 AM.
+**Quality score recompute** recalculates persisted `quality_score` for all memories after importance changes, keeping scores fresh for quality-tiered retrieval. Runs in both periodic maintenance and the nightly importance adjustment.
+
+**Auto tag cleanup** uses string similarity to detect near-duplicate tags (e.g. `react-native` vs `reactnative`) and merges them automatically. Conservative limits: 1 merge per maintenance run, 3 per nightly run, only tags with ≤50 memories.
+
+Consolidation runs nightly at 2:00 AM. Contradiction detection runs at 2:30 AM but is **disabled by default** (`contradictions.auto_detect = false`) — enable it via settings if needed. Entity extraction for unprocessed memories runs nightly at 3:00 AM.
 
 ### Temporal analysis
 
@@ -585,7 +590,7 @@ All settings are stored in the `settings` table and can be changed via the REST 
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `embedding.model` | `Xenova/all-MiniLM-L6-v2` | HuggingFace model identifier |
+| `embedding.model` | `Xenova/bge-small-en-v1.5` | HuggingFace model identifier |
 | `embedding.dimensions` | `384` | Embedding vector dimensions |
 
 ### Importance
@@ -629,6 +634,9 @@ All settings are stored in the `settings` table and can be changed via the REST 
 |-----|---------|-------------|
 | `server.port` | `3210` | REST API / dashboard port |
 | `auto_tagging.enabled` | `true` | Auto-generate tags on memory creation |
+| `contradictions.auto_detect` | `false` | Enable nightly contradiction detection scan |
+| `consolidation.auto_enabled` | `true` | Enable auto-consolidation during maintenance |
+| `backup.max_count` | `7` | Maximum database backups to retain |
 
 ### Tag Normalization
 
@@ -643,7 +651,7 @@ All data is stored in `~/.exocortex/`:
 ```
 ~/.exocortex/
   exocortex.db     # SQLite database (memories, entities, settings)
-  models/          # Cached embedding model (all-MiniLM-L6-v2, ~80MB)
+  models/          # Cached embedding model (bge-small-en-v1.5, ~80MB)
 ```
 
 Override the model cache location with `EXOCORTEX_MODEL_DIR` environment variable.
@@ -670,7 +678,7 @@ Override the model cache location with `EXOCORTEX_MODEL_DIR` environment variabl
 | Dashboard | React 19 + Vite 7 + TanStack Query |
 | Validation | Zod 4 |
 | Testing | Vitest 4 |
-| Embeddings | @huggingface/transformers (all-MiniLM-L6-v2, 384 dims) |
+| Embeddings | @huggingface/transformers (bge-small-en-v1.5, 384 dims) |
 | MCP | @modelcontextprotocol/sdk |
 | IDs | ULID |
 
