@@ -537,6 +537,16 @@ export class MemoryStore {
       }
     }
 
+    // Compute initial quality_score (freshness=1.0, access=0, useful=0, links=0)
+    try {
+      const initialQuality = 0.30 * (input.importance ?? 0.5) + 0.15;
+      this.db
+        .prepare("UPDATE memories SET quality_score = ? WHERE id = ?")
+        .run(Math.round(initialQuality * 1000) / 1000, id);
+    } catch {
+      // Non-critical — quality_score can be backfilled later
+    }
+
     const memory = await this.getById(id) as Memory;
     const result: CreateMemoryResult = { memory };
     if (dedupInfo) {

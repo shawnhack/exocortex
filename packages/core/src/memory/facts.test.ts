@@ -67,6 +67,70 @@ describe("extractFacts", () => {
     expect(portFacts).toHaveLength(1);
   });
 
+  it("extracts 'config' facts", () => {
+    const facts = extractFacts("timeout configured to 30s");
+    const configFact = facts.find((f) => f.predicate === "config");
+    expect(configFact).toBeDefined();
+    expect(configFact!.subject).toBe("timeout");
+    expect(configFact!.object).toBe("30s");
+  });
+
+  it("extracts 'config' from 'set to'", () => {
+    const facts = extractFacts("MaxRetries set to 5");
+    const configFact = facts.find((f) => f.predicate === "config");
+    expect(configFact).toBeDefined();
+    expect(configFact!.subject).toBe("MaxRetries");
+    expect(configFact!.object).toBe("5");
+  });
+
+  it("extracts 'depends_on' facts", () => {
+    const facts = extractFacts("Cortex depends on Exocortex");
+    const depFact = facts.find((f) => f.predicate === "depends_on");
+    expect(depFact).toBeDefined();
+    expect(depFact!.subject).toBe("Cortex");
+    expect(depFact!.object).toBe("Exocortex");
+  });
+
+  it("extracts 'depends_on' from 'requires'", () => {
+    const facts = extractFacts("Dashboard requires Node 20");
+    const depFact = facts.find((f) => f.predicate === "depends_on");
+    expect(depFact).toBeDefined();
+    expect(depFact!.subject).toBe("Dashboard");
+    expect(depFact!.object).toContain("Node");
+  });
+
+  it("extracts 'located_at' facts", () => {
+    const facts = extractFacts("Config located at /home/user/.config");
+    const locFact = facts.find((f) => f.predicate === "located_at");
+    expect(locFact).toBeDefined();
+    expect(locFact!.subject).toBe("Config");
+    expect(locFact!.object).toBe("/home/user/.config");
+  });
+
+  it("extracts 'located_at' from 'lives in'", () => {
+    const facts = extractFacts("Database lives in /var/data/db");
+    const locFact = facts.find((f) => f.predicate === "located_at");
+    expect(locFact).toBeDefined();
+    expect(locFact!.subject).toBe("Database");
+    expect(locFact!.object).toBe("/var/data/db");
+  });
+
+  it("extracts 'runs_as' facts", () => {
+    const facts = extractFacts("Nginx runs as www-data");
+    const runFact = facts.find((f) => f.predicate === "runs_as");
+    expect(runFact).toBeDefined();
+    expect(runFact!.subject).toBe("Nginx");
+    expect(runFact!.object).toBe("www-data");
+  });
+
+  it("extracts 'runs_as' from 'started with'", () => {
+    const facts = extractFacts("Server started with PM2");
+    const runFact = facts.find((f) => f.predicate === "runs_as");
+    expect(runFact).toBeDefined();
+    expect(runFact!.subject).toBe("Server");
+    expect(runFact!.object).toBe("PM2");
+  });
+
   it("returns empty for content with no facts", () => {
     const facts = extractFacts("This is a general observation about the world.");
     // May or may not extract "is" facts depending on pattern, but should not crash

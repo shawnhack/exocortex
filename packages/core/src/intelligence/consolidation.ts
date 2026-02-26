@@ -37,8 +37,8 @@ export function findClusters(
     timeBucket?: 'week' | 'month';
   } = {}
 ): ConsolidationCluster[] {
-  const minSimilarity = options.minSimilarity ?? 0.75;
-  const minClusterSize = options.minClusterSize ?? 3;
+  const minSimilarity = options.minSimilarity ?? 0.80;
+  const minClusterSize = options.minClusterSize ?? 2;
   const maxMemories = options.maxMemories ?? 500;
 
   // Build bucket column expression if time-constrained clustering is requested
@@ -389,9 +389,10 @@ export function validateSummary(
 ): { valid: boolean; reasons: string[] } {
   const reasons: string[] = [];
 
-  // Check minimum length
-  if (summaryContent.length < 100) {
-    reasons.push(`Summary too short (${summaryContent.length} chars, min 100)`);
+  // Relax minimum length for small clusters (2 members)
+  const minLength = sourceContents.length <= 2 ? 80 : 100;
+  if (summaryContent.length < minLength) {
+    reasons.push(`Summary too short (${summaryContent.length} chars, min ${minLength})`);
   }
 
   // Check proper noun preservation (>= 50%)
@@ -437,8 +438,8 @@ export async function autoConsolidate(
   opts?: { maxClusters?: number; minSimilarity?: number; minClusterSize?: number }
 ): Promise<AutoConsolidateResult> {
   const maxClusters = opts?.maxClusters ?? 5;
-  const minSimilarity = opts?.minSimilarity ?? 0.85;
-  const minClusterSize = opts?.minClusterSize ?? 3;
+  const minSimilarity = opts?.minSimilarity ?? 0.80;
+  const minClusterSize = opts?.minClusterSize ?? 2;
 
   const clusters = findClusters(db, { minSimilarity, minClusterSize });
 

@@ -123,6 +123,46 @@ const PATTERNS: Array<{
       };
     },
   },
+  // "X configured to Y" / "X set to Y"
+  {
+    regex: /\b([A-Za-z][\w.-]*)\s+(?:configured|set)\s+to\s+(\S+(?:\s+\S+){0,3})/gi,
+    extract: (m) => ({
+      subject: m[1],
+      predicate: "config",
+      object: m[2].trim().replace(/[.,;]+$/, ""),
+      confidence: 0.8,
+    }),
+  },
+  // "X depends on Y" / "X requires Y"
+  {
+    regex: /\b([A-Za-z][\w.-]*)\s+(?:depends\s+on|requires)\s+([A-Za-z][\w.-]*(?:\s+[\w.-]+){0,2})/gi,
+    extract: (m) => ({
+      subject: m[1],
+      predicate: "depends_on",
+      object: m[2].trim(),
+      confidence: 0.8,
+    }),
+  },
+  // "X located at /path" / "X lives in /dir" / "X located at D:/path"
+  {
+    regex: /\b([A-Za-z][\w.-]*)\s+(?:located\s+at|lives?\s+in|installed\s+(?:at|in))\s+([A-Za-z]:[/\\][^\s,)]+|\/[^\s,)]+)/gi,
+    extract: (m) => ({
+      subject: m[1],
+      predicate: "located_at",
+      object: m[2].replace(/[/\\]+$/, ""),
+      confidence: 0.85,
+    }),
+  },
+  // "X runs as Y" / "X started with Y"
+  {
+    regex: /\b([A-Za-z][\w.-]*)\s+(?:runs\s+as|started\s+with|launched\s+(?:as|with))\s+([A-Za-z][\w.-]*(?:\s+[\w.-]+){0,2})/gi,
+    extract: (m) => ({
+      subject: m[1],
+      predicate: "runs_as",
+      object: m[2].trim(),
+      confidence: 0.8,
+    }),
+  },
 ];
 
 /**

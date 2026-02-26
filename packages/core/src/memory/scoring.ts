@@ -45,18 +45,20 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 export function recencyScore(
   createdAt: string,
   decayRate: number,
-  importance?: number
+  importance?: number,
+  quality?: number
 ): number {
   const now = Date.now();
   const created = new Date(createdAt + "Z").getTime();
   const daysSince = (now - created) / (1000 * 60 * 60 * 24);
 
-  // High-importance memories decay slower: effective rate is reduced by up to 50%
-  // importance=1.0 → multiplier=0.5 (half the decay rate)
-  // importance=0.5 → multiplier=0.75
-  // importance=0.0 or undefined → multiplier=1.0 (default rate)
-  const imp = importance ?? 0;
-  const multiplier = 1 - imp * 0.5;
+  // Use quality as the dampening signal when available; fall back to importance.
+  // High-quality memories decay slower: effective rate is reduced by up to 50%
+  // quality=1.0 → multiplier=0.5 (half the decay rate)
+  // quality=0.5 → multiplier=0.75
+  // quality=0.0 or undefined → multiplier=1.0 (default rate)
+  const signal = quality ?? importance ?? 0;
+  const multiplier = 1 - signal * 0.5;
 
   return Math.exp(-decayRate * multiplier * daysSince);
 }

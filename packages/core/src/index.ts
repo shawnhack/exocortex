@@ -141,6 +141,7 @@ export {
   tuneWeights,
   backfillMemoryCanonicalization,
   pruneOldData,
+  recomputeQualityScores,
 } from "./intelligence/maintenance.js";
 export type {
   ReembedResult,
@@ -150,6 +151,7 @@ export type {
   TuneWeightsResult,
   CanonicalBackfillResult,
   PruneResult,
+  RecomputeQualityResult,
 } from "./intelligence/maintenance.js";
 export { densifyEntityGraph } from "./intelligence/graph-densify.js";
 export type { DensifyOptions, DensifyResult } from "./intelligence/graph-densify.js";

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const CREATE_TABLES = `
   CREATE TABLE IF NOT EXISTS memories (
@@ -227,6 +227,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "dedup.merge_threshold": "0.75",
   "dedup.exempt_tags": "[]",
   "consolidation.auto_enabled": "true",
+  "consolidation.auto_threshold": "0.80",
+  "consolidation.min_cluster_size": "2",
   "sentinel.report_ttl_days": "30",
   "scoring.keyword_boost": "2.0",
   "reinforcement.access_boost": "0.01",
@@ -665,6 +667,11 @@ export function initializeSchema(db: DatabaseSync): void {
     db.exec("ALTER TABLE memories ADD COLUMN keywords TEXT");
     // Rebuild FTS to include keywords column
     needsFtsRebuild = true;
+  }
+
+  if (!colNames.has("quality_score")) {
+    db.exec("ALTER TABLE memories ADD COLUMN quality_score REAL");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memories_quality_score ON memories(quality_score)");
   }
 
   // Rebuild FTS5 to include keywords if needed

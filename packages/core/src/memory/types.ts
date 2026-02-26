@@ -32,6 +32,7 @@ export interface Memory {
   chunk_index: number | null;
   keywords?: string;
   metadata?: Record<string, unknown>;
+  quality_score: number | null;
   expires_at: string | null;
   namespace: string | null;
   created_at: string;
@@ -173,6 +174,7 @@ export interface MemoryRow {
   chunk_index: number | null;
   keywords: string | null;
   metadata: string | null;
+  quality_score: number | null;
   expires_at: string | null;
   namespace: string | null;
   created_at: string;

@@ -296,9 +296,11 @@ export class MemorySearch {
       .get() as { max: number | null };
     const maxAccessCount = maxAccess?.max ?? 0;
 
-    // Batch-fetch link counts for quality score computation
+    // Batch-fetch link counts for quality score computation — only needed
+    // when some rows lack a persisted quality_score
     const linkCountMap = new Map<string, number>();
-    if (rows.length > 0 && weights.quality > 0) {
+    const needsQualityCompute = rows.some((r) => (r as any).quality_score == null);
+    if (rows.length > 0 && weights.quality > 0 && needsQualityCompute) {
       const ids = rows.map((r) => r.id);
       const placeholders = ids.map(() => "?").join(", ");
       const linkRows = this.db
@@ -338,15 +340,21 @@ export class MemorySearch {
       }
 
       const ftsScore = ftsMatches.get(String(row._rowid)) ?? 0;
-      const recency = recencyScore(row.created_at, weights.recencyDecay, row.importance);
+      const recency = recencyScore(row.created_at, weights.recencyDecay, row.importance, (row as any).quality_score ?? undefined);
       const freq = frequencyScore(row.access_count, maxAccessCount);
       const usefulCount = (row as any).useful_count ?? 0;
       const usefulness = usefulnessScore(usefulCount);
       const valence = valenceScore((row as any).valence ?? 0);
       const memTags = candidateTagMap.get(row.id) ?? [];
       const goalRelevance = goalRelevanceScore(memTags, goalKeywords);
-      const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
-      const quality = qualityScore(row.importance, usefulCount, row.access_count, linkCountMap.get(row.id) ?? 0, ageDays);
+      const persistedQuality = (row as any).quality_score as number | null;
+      let quality: number;
+      if (persistedQuality != null) {
+        quality = persistedQuality;
+      } else {
+        const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
+        quality = qualityScore(row.importance, usefulCount, row.access_count, linkCountMap.get(row.id) ?? 0, ageDays);
+      }
 
       candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness, valence, quality, goalRelevance });
     }

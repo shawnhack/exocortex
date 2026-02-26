@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent } from "@exocortex/core";
+import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, autoConsolidate, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent, recomputeQualityScores } from "@exocortex/core";
 import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 
@@ -1270,6 +1270,8 @@ server.tool(
     reembed_all: z.boolean().optional().describe("Re-embed ALL memories (model migration). Use with limit to test first."),
     reembed_all_limit: z.number().optional().describe("Max memories to re-embed when using reembed_all (default 100)"),
     recompute_profiles: z.boolean().optional().describe("Recompute entity profiles for entities with ≥3 active memories"),
+    recompute_quality: z.boolean().optional().describe("Recompute quality_score for all active memories"),
+    auto_consolidate: z.boolean().optional().describe("Run auto-consolidation to merge similar memory clusters"),
   },
   async (args) => {
     try {
@@ -1455,6 +1457,27 @@ server.tool(
           parts.push(`\nEntity profiles: ${profileResult.computed} computed, ${profileResult.skipped} skipped${profileResult.errors > 0 ? `, ${profileResult.errors} errors` : ""}`);
         } catch (err) {
           parts.push(`\nEntity profiles: error — ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // Recompute quality scores
+      if (args.recompute_quality !== false) {
+        try {
+          const qualityResult = recomputeQualityScores(db);
+          parts.push(`\nQuality scores: ${qualityResult.updated} updated out of ${qualityResult.total} active memories`);
+        } catch (err) {
+          parts.push(`\nQuality scores: error — ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // Auto-consolidation (opt-in)
+      if (args.auto_consolidate) {
+        try {
+          const provider = await getEmbeddingProvider();
+          const consolidateResult = await autoConsolidate(db, provider);
+          parts.push(`\nAuto-consolidation: ${consolidateResult.clustersFound} clusters found, ${consolidateResult.clustersConsolidated} consolidated, ${consolidateResult.memoriesMerged} memories merged`);
+        } catch (err) {
+          parts.push(`\nAuto-consolidation: error — ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 

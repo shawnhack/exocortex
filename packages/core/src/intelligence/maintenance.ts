@@ -17,6 +17,7 @@ import {
   getMetadataTags,
   inferIsMetadata,
 } from "../memory/metadata-classification.js";
+import { qualityScore } from "../memory/scoring.js";
 import { incrementCounter } from "../observability/counters.js";
 
 // --- A1: Re-embedding Pass ---
@@ -675,4 +676,93 @@ export function pruneOldData(db: DatabaseSync, retentionDays = 90): PruneResult 
     search_misses: r2.changes,
     co_retrievals: r3.changes,
   };
+}
+
+// --- A7: Recompute Quality Scores ---
+
+export interface RecomputeQualityResult {
+  total: number;
+  updated: number;
+}
+
+/**
+ * Batch recompute quality_score for all active memories using the composite
+ * qualityScore() formula from scoring.ts. Sets the persisted column so that
+ * search and hooks can filter cheaply without recomputing per-candidate.
+ */
+export function recomputeQualityScores(
+  db: DatabaseSync,
+  opts?: { limit?: number }
+): RecomputeQualityResult {
+  const limit = opts?.limit ?? 100000;
+  const now = Date.now();
+
+  const rows = db
+    .prepare(
+      `SELECT id, importance, access_count, useful_count, created_at
+       FROM memories
+       WHERE is_active = 1
+       LIMIT ?`
+    )
+    .all(limit) as unknown as Array<{
+      id: string;
+      importance: number;
+      access_count: number;
+      useful_count: number;
+      created_at: string;
+    }>;
+
+  if (rows.length === 0) {
+    return { total: 0, updated: 0 };
+  }
+
+  // Batch-fetch link counts
+  const linkCountMap = new Map<string, number>();
+  const ids = rows.map((r) => r.id);
+  const batchSize = 500;
+  for (let i = 0; i < ids.length; i += batchSize) {
+    const batch = ids.slice(i, i + batchSize);
+    const placeholders = batch.map(() => "?").join(", ");
+    const linkRows = db
+      .prepare(
+        `SELECT id, COUNT(*) as lc FROM (
+          SELECT source_id as id FROM memory_links WHERE source_id IN (${placeholders})
+          UNION ALL
+          SELECT target_id as id FROM memory_links WHERE target_id IN (${placeholders})
+        ) GROUP BY id`
+      )
+      .all(...batch, ...batch) as Array<{ id: string; lc: number }>;
+    for (const lr of linkRows) {
+      linkCountMap.set(lr.id, lr.lc);
+    }
+  }
+
+  const update = db.prepare(
+    "UPDATE memories SET quality_score = ? WHERE id = ?"
+  );
+
+  let updated = 0;
+  db.exec("BEGIN");
+  try {
+    for (const row of rows) {
+      const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
+      const score = Math.round(
+        qualityScore(
+          row.importance,
+          row.useful_count ?? 0,
+          row.access_count,
+          linkCountMap.get(row.id) ?? 0,
+          ageDays
+        ) * 1000
+      ) / 1000;
+      update.run(score, row.id);
+      updated++;
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+
+  return { total: rows.length, updated };
 }

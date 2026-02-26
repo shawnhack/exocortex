@@ -10,6 +10,7 @@
  * - Recent decisions
  *
  * Outputs compact context as additionalContext for Claude.
+ * Uses a token budget (~1500 tokens) to keep context lean.
  */
 
 import { DatabaseSync } from "node:sqlite";
@@ -19,6 +20,15 @@ import path from "node:path";
 import fs from "node:fs";
 
 const DB_PATH = path.join(os.homedir(), ".exocortex", "exocortex.db");
+const TOKEN_BUDGET = 1500;
+const TRUNCATE_LEN = 120;
+
+// Quality filter clause — NULL check ensures pre-migration memories aren't excluded
+const QUALITY_FILTER = "AND (m.quality_score IS NULL OR m.quality_score >= 0.25)";
+
+function estimateTokens(text) {
+  return Math.ceil(text.length / 4);
+}
 
 function buildContextKeywords(cwd) {
   const keywords = new Map();
@@ -106,35 +116,15 @@ async function main() {
     return;
   }
 
-  const sections = [];
+  // candidateSections: { name, priority, content }
+  // Priority order: goals → decisions → threads → recent → techniques → entities → contradictions → facts → skills → self-model
+  const candidateSections = [];
   const surfacedIds = new Set();
 
   try {
-    // 1. Recent project-related memories (last 7 days)
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
+    const contextKeywords = buildContextKeywords(cwd);
 
-    const recentMemories = db
-      .prepare(
-        `SELECT DISTINCT m.id, m.content, m.importance, m.created_at
-         FROM memories m
-         INNER JOIN memory_tags mt ON m.id = mt.memory_id
-         WHERE mt.tag = ? AND m.is_active = 1 AND m.created_at >= ?
-         ORDER BY m.created_at DESC
-         LIMIT 5`
-      )
-      .all(projectName, sevenDaysAgo);
-
-    if (recentMemories.length > 0) {
-      for (const m of recentMemories) surfacedIds.add(m.id);
-      const lines = recentMemories.map(
-        (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
-      );
-      sections.push(`**Recent (${projectName}):**\n${lines.join("\n")}`);
-    }
-
-    // 2. Active goals
+    // 1. Active goals (priority 0 — always included)
     const goals = db
       .prepare(
         `SELECT id, title, priority, deadline, metadata
@@ -149,24 +139,23 @@ async function main() {
 
     if (goals.length > 0) {
       const lines = goals.map((g) => {
-        const parts = [`- ${g.title}`];
-        if (g.priority !== "medium") parts[0] += ` [${g.priority}]`;
-        if (g.deadline) parts[0] += ` (due: ${g.deadline})`;
-        // Show milestone progress if available
+        let line = `- ${g.title}`;
+        if (g.priority !== "medium") line += ` [${g.priority}]`;
+        if (g.deadline) line += ` (due: ${g.deadline})`;
         try {
           const meta = JSON.parse(g.metadata || "{}");
           const milestones = meta.milestones;
           if (Array.isArray(milestones) && milestones.length > 0) {
             const done = milestones.filter((m) => m.status === "completed").length;
-            parts[0] += ` — ${done}/${milestones.length} milestones`;
+            line += ` — ${done}/${milestones.length} milestones`;
           }
         } catch {}
-        return parts[0];
+        return line;
       });
-      sections.push(`**Active goals:**\n${lines.join("\n")}`);
+      candidateSections.push({ name: "goals", priority: 0, content: `**Active goals:**\n${lines.join("\n")}` });
     }
 
-    // 3. Recent decisions (last 30 days)
+    // 2. Recent decisions (priority 1)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
       .toISOString()
       .split("T")[0];
@@ -177,43 +166,105 @@ async function main() {
          FROM memories m
          INNER JOIN memory_tags mt ON m.id = mt.memory_id
          WHERE mt.tag = 'decision' AND m.is_active = 1 AND m.created_at >= ?
+           ${QUALITY_FILTER}
          ORDER BY m.created_at DESC
-         LIMIT 10`
+         LIMIT 8`
       )
       .all(thirtyDaysAgo);
 
     if (decisionCandidates.length > 0) {
-      // buildContextKeywords may not exist yet at this point — build early keywords from project name
-      const earlyKeywords = buildContextKeywords(cwd);
       const scored = decisionCandidates.map((m) => ({
         ...m,
-        relevance: scoreRelevance(m.content, earlyKeywords),
+        relevance: scoreRelevance(m.content, contextKeywords),
       }));
       scored.sort((a, b) => {
         if (b.relevance !== a.relevance) return b.relevance - a.relevance;
         return b.created_at > a.created_at ? 1 : -1;
       });
-      const top = scored.filter((m) => m.relevance > 0).slice(0, 3);
+      const top = scored.filter((m) => m.relevance > 0).slice(0, 2);
       if (top.length > 0) {
         for (const m of top) surfacedIds.add(m.id);
         const lines = top.map(
-          (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
+          (m) => `- ${truncate(m.content, TRUNCATE_LEN)} (${m.created_at.split("T")[0]})`
         );
-        sections.push(`**Recent decisions:**\n${lines.join("\n")}`);
+        candidateSections.push({ name: "decisions", priority: 1, content: `**Recent decisions:**\n${lines.join("\n")}` });
       }
     }
 
-    // 4. Technique memories — reusable procedures learned by AI agents
-    //    Over-fetch and rerank by project relevance
-    const contextKeywords = buildContextKeywords(cwd);
+    // 3. Open threads (priority 2)
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+
+    const threadCandidates = db
+      .prepare(
+        `SELECT DISTINCT m.id, m.content, m.created_at
+         FROM memories m
+         INNER JOIN memory_tags mt ON m.id = mt.memory_id
+         WHERE mt.tag IN ('plan', 'todo', 'next-steps', 'in-progress')
+           AND m.is_active = 1
+           AND m.superseded_by IS NULL
+           AND m.created_at >= ?
+           ${QUALITY_FILTER}
+         ORDER BY m.created_at DESC
+         LIMIT 6`
+      )
+      .all(fourteenDaysAgo);
+
+    if (threadCandidates.length > 0) {
+      const scored = threadCandidates.map((m) => ({
+        ...m,
+        relevance: scoreRelevance(m.content, contextKeywords),
+      }));
+      scored.sort((a, b) => {
+        if (b.relevance !== a.relevance) return b.relevance - a.relevance;
+        return b.created_at > a.created_at ? 1 : -1;
+      });
+      const top = scored.filter((m) => m.relevance > 0).slice(0, 2);
+      if (top.length > 0) {
+        for (const m of top) surfacedIds.add(m.id);
+        const lines = top.map(
+          (m) => `- ${truncate(m.content, TRUNCATE_LEN)} (${m.created_at.split("T")[0]})`
+        );
+        candidateSections.push({ name: "threads", priority: 2, content: `**Open threads:**\n${lines.join("\n")}` });
+      }
+    }
+
+    // 4. Recent project memories (priority 3)
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+
+    const recentMemories = db
+      .prepare(
+        `SELECT DISTINCT m.id, m.content, m.importance, m.created_at
+         FROM memories m
+         INNER JOIN memory_tags mt ON m.id = mt.memory_id
+         WHERE mt.tag = ? AND m.is_active = 1 AND m.created_at >= ?
+           ${QUALITY_FILTER}
+         ORDER BY m.created_at DESC
+         LIMIT 3`
+      )
+      .all(projectName, sevenDaysAgo);
+
+    if (recentMemories.length > 0) {
+      for (const m of recentMemories) surfacedIds.add(m.id);
+      const lines = recentMemories.map(
+        (m) => `- ${truncate(m.content, TRUNCATE_LEN)} (${m.created_at.split("T")[0]})`
+      );
+      candidateSections.push({ name: "recent", priority: 3, content: `**Recent (${projectName}):**\n${lines.join("\n")}` });
+    }
+
+    // 5. Technique memories (priority 4)
     const techniqueCandidates = db
       .prepare(
         `SELECT DISTINCT m.id, m.content, m.importance, m.created_at
          FROM memories m
          INNER JOIN memory_tags mt ON m.id = mt.memory_id
          WHERE mt.tag = 'technique' AND m.is_active = 1
+           ${QUALITY_FILTER}
          ORDER BY m.importance DESC, m.created_at DESC
-         LIMIT 15`
+         LIMIT 10`
       )
       .all();
 
@@ -228,52 +279,15 @@ async function main() {
         if (bRelevant !== aRelevant) return bRelevant - aRelevant;
         return b.importance - a.importance;
       });
-      const top = scored.filter((m) => m.relevance > 0).slice(0, 5);
-      if (top.length > 0) {
-        for (const m of top) surfacedIds.add(m.id);
-        const lines = top.map((m) => `- ${truncate(m.content, 150)}`);
-        sections.push(`**Learned techniques:**\n${lines.join("\n")}`);
-      }
-    }
-
-    // 5. Open threads — recent plan/todo/in-progress memories not yet resolved
-    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
-
-    const threadCandidates = db
-      .prepare(
-        `SELECT DISTINCT m.id, m.content, m.created_at
-         FROM memories m
-         INNER JOIN memory_tags mt ON m.id = mt.memory_id
-         WHERE mt.tag IN ('plan', 'todo', 'next-steps', 'in-progress')
-           AND m.is_active = 1
-           AND m.superseded_by IS NULL
-           AND m.created_at >= ?
-         ORDER BY m.created_at DESC
-         LIMIT 8`
-      )
-      .all(fourteenDaysAgo);
-
-    if (threadCandidates.length > 0) {
-      const scored = threadCandidates.map((m) => ({
-        ...m,
-        relevance: scoreRelevance(m.content, contextKeywords),
-      }));
-      scored.sort((a, b) => {
-        if (b.relevance !== a.relevance) return b.relevance - a.relevance;
-        return b.created_at > a.created_at ? 1 : -1;
-      });
       const top = scored.filter((m) => m.relevance > 0).slice(0, 3);
       if (top.length > 0) {
         for (const m of top) surfacedIds.add(m.id);
-        const lines = top.map(
-          (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
-        );
-        sections.push(`**Open threads:**\n${lines.join("\n")}`);
+        const lines = top.map((m) => `- ${truncate(m.content, TRUNCATE_LEN)}`);
+        candidateSections.push({ name: "techniques", priority: 4, content: `**Learned techniques:**\n${lines.join("\n")}` });
       }
     }
-    // 6. Key entity profiles — precomputed summaries of important entities
+
+    // 6. Key entity profiles (priority 5)
     try {
       const entityRows = db
         .prepare(
@@ -284,12 +298,11 @@ async function main() {
            GROUP BY e.id
            HAVING COUNT(*) >= 3
            ORDER BY link_count DESC
-           LIMIT 8`
+           LIMIT 6`
         )
         .all();
 
       if (entityRows.length > 0) {
-        // Score by project relevance
         const scored = entityRows.map((row) => {
           let meta = {};
           try { meta = JSON.parse(row.metadata || "{}"); } catch {}
@@ -300,15 +313,66 @@ async function main() {
         }).filter(Boolean);
 
         scored.sort((a, b) => b.relevance - a.relevance);
-        const top = scored.filter((e) => e.relevance > 0).slice(0, 5);
+        const top = scored.filter((e) => e.relevance > 0).slice(0, 3);
         if (top.length > 0) {
           const lines = top.map((e) => `- **${e.name}**: ${e.profile}`);
-          sections.push(`**Key entities:**\n${lines.join("\n")}`);
+          candidateSections.push({ name: "entities", priority: 5, content: `**Key entities:**\n${lines.join("\n")}` });
         }
       }
     } catch {}
 
-    // 7. Self-model functional directives
+    // 7. Pending contradictions count (priority 6)
+    try {
+      const contradictionCount = db
+        .prepare("SELECT COUNT(*) as cnt FROM contradictions WHERE status = 'pending'")
+        .get();
+      if (contradictionCount && contradictionCount.cnt > 0) {
+        candidateSections.push({
+          name: "contradictions",
+          priority: 6,
+          content: `**Pending contradictions:** ${contradictionCount.cnt} (use \`memory_contradictions\` to review)`,
+        });
+      }
+    } catch {}
+
+    // 8. Known facts (priority 7)
+    try {
+      const topKeywords = [...buildContextKeywords(cwd).entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([k]) => k);
+      const seenFacts = new Set();
+      const factResults = [];
+      for (const kw of topKeywords) {
+        if (factResults.length >= 3) break;
+        const pattern = `%${kw}%`;
+        const rows = db
+          .prepare(
+            `SELECT f.subject, f.predicate, f.object, f.confidence
+             FROM facts f
+             JOIN memories m ON f.memory_id = m.id AND m.is_active = 1
+             WHERE f.subject LIKE ? OR f.object LIKE ?
+             ORDER BY f.confidence DESC
+             LIMIT 8`
+          )
+          .all(pattern, pattern);
+        for (const row of rows) {
+          const key = `${row.subject}|${row.predicate}|${row.object}`;
+          if (!seenFacts.has(key) && factResults.length < 3) {
+            seenFacts.add(key);
+            factResults.push(row);
+          }
+        }
+      }
+      if (factResults.length > 0) {
+        const lines = factResults.map(
+          (f) => `- ${f.subject} ${f.predicate} ${f.object} (${Math.round(f.confidence * 100)}%)`
+        );
+        candidateSections.push({ name: "facts", priority: 7, content: `**Known facts:**\n${lines.join("\n")}` });
+      }
+    } catch {}
+
+    // 9. Self-model functional directives (priority 9)
     const selfModel = db
       .prepare(
         `SELECT m.content
@@ -326,58 +390,13 @@ async function main() {
         /## Functional Directives\n([\s\S]*?)(?=\n## |\s*$)/
       );
       if (match) {
-        sections.push(
-          `**Functional directives (from self-model):**\n${match[1].trim()}`
-        );
+        candidateSections.push({
+          name: "self-model",
+          priority: 9,
+          content: `**Functional directives (from self-model):**\n${match[1].trim()}`,
+        });
       }
     }
-
-    // 8. Pending contradictions count
-    try {
-      const contradictionCount = db
-        .prepare("SELECT COUNT(*) as cnt FROM contradictions WHERE status = 'pending'")
-        .get();
-      if (contradictionCount && contradictionCount.cnt > 0) {
-        sections.push(`**Pending contradictions:** ${contradictionCount.cnt} (use \`memory_contradictions\` to review)`);
-      }
-    } catch {}
-
-    // 9. Known facts — structured SPO triples from Phase 2
-    try {
-      const topKeywords = [...buildContextKeywords(cwd).entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([k]) => k);
-      const seenFacts = new Set();
-      const factResults = [];
-      for (const kw of topKeywords) {
-        if (factResults.length >= 5) break;
-        const pattern = `%${kw}%`;
-        const rows = db
-          .prepare(
-            `SELECT f.subject, f.predicate, f.object, f.confidence
-             FROM facts f
-             JOIN memories m ON f.memory_id = m.id AND m.is_active = 1
-             WHERE f.subject LIKE ? OR f.object LIKE ?
-             ORDER BY f.confidence DESC
-             LIMIT 10`
-          )
-          .all(pattern, pattern);
-        for (const row of rows) {
-          const key = `${row.subject}|${row.predicate}|${row.object}`;
-          if (!seenFacts.has(key) && factResults.length < 5) {
-            seenFacts.add(key);
-            factResults.push(row);
-          }
-        }
-      }
-      if (factResults.length > 0) {
-        const lines = factResults.map(
-          (f) => `- ${f.subject} ${f.predicate} ${f.object} (${Math.round(f.confidence * 100)}%)`
-        );
-        sections.push(`**Known facts:**\n${lines.join("\n")}`);
-      }
-    } catch {}
   } catch {
     // Query failures are non-critical — just skip
   }
@@ -417,7 +436,7 @@ async function main() {
     db.close();
   } catch {}
 
-  // 10. Auto-detect skills from project tech stack
+  // 10. Auto-detect skills from project tech stack (priority 8)
   try {
     const skillIndexPath = path.join(os.homedir(), ".claude", "skills", "skill-index.json");
     if (fs.existsSync(skillIndexPath)) {
@@ -466,17 +485,35 @@ async function main() {
           }
         }
         if (lines.length > 0) {
-          sections.push(
-            `**Active skills (${skillNames.length}):**\n${lines.join("\n")}`
-          );
+          candidateSections.push({
+            name: "skills",
+            priority: 8,
+            content: `**Active skills (${skillNames.length}):**\n${lines.join("\n")}`,
+          });
         }
       }
     }
   } catch {}
 
-  if (sections.length === 0) return;
+  if (candidateSections.length === 0) return;
 
-  const context = sections.join("\n\n");
+  // Fill greedily by priority order until token budget is reached
+  candidateSections.sort((a, b) => a.priority - b.priority);
+  const selectedSections = [];
+  let usedTokens = 0;
+
+  for (const section of candidateSections) {
+    const sectionTokens = estimateTokens(section.content);
+    if (selectedSections.length > 0 && usedTokens + sectionTokens > TOKEN_BUDGET) {
+      continue; // Skip sections that would exceed budget, but keep trying smaller ones
+    }
+    selectedSections.push(section.content);
+    usedTokens += sectionTokens;
+  }
+
+  if (selectedSections.length === 0) return;
+
+  const context = selectedSections.join("\n\n");
 
   console.log(
     JSON.stringify({
@@ -488,7 +525,7 @@ async function main() {
   );
 }
 
-function truncate(text, maxLen) {
+function truncate(text, maxLen = TRUNCATE_LEN) {
   const oneLine = text.replace(/\n/g, " ").trim();
   if (oneLine.length <= maxLen) return oneLine;
   return oneLine.substring(0, maxLen - 3) + "...";
