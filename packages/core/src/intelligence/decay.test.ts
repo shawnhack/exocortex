@@ -79,15 +79,35 @@ describe("decay / archival", () => {
       expect(candidates).toHaveLength(0);
     });
 
+    it("should find neglected memories (never accessed + >14 days + importance < 0.5)", () => {
+      insertMemory(db, { id: "neglected-1", importance: 0.4, access_count: 0, created_at: daysAgo(20) });
+      insertMemory(db, { id: "accessed-1", importance: 0.4, access_count: 1, created_at: daysAgo(20) });
+      insertMemory(db, { id: "important-1", importance: 0.7, access_count: 0, created_at: daysAgo(20) });
+      insertMemory(db, { id: "recent-1", importance: 0.4, access_count: 0, created_at: daysAgo(5) });
+
+      const candidates = getArchiveCandidates(db);
+      const ids = candidates.map((c) => c.id);
+
+      expect(ids).toContain("neglected-1");
+      expect(ids).not.toContain("accessed-1");
+      expect(ids).not.toContain("important-1");
+      expect(ids).not.toContain("recent-1");
+
+      const neglected = candidates.find((c) => c.id === "neglected-1");
+      expect(neglected?.reason).toBe("neglected");
+    });
+
     it("should respect custom options", () => {
-      insertMemory(db, { id: "custom-1", importance: 0.4, access_count: 0, created_at: daysAgo(50) });
+      // importance 0.6 and access_count 1 avoids default neglected/stale criteria
+      insertMemory(db, { id: "custom-1", importance: 0.6, access_count: 1, created_at: daysAgo(50) });
 
       const defaultCandidates = getArchiveCandidates(db);
       expect(defaultCandidates.map((c) => c.id)).not.toContain("custom-1");
 
       const customCandidates = getArchiveCandidates(db, {
         staleDays: 30,
-        maxImportance: 0.5,
+        maxImportance: 0.7,
+        maxAccessCount: 2,
       });
       expect(customCandidates.map((c) => c.id)).toContain("custom-1");
     });

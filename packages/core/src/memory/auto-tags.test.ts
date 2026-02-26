@@ -16,9 +16,10 @@ describe("autoGenerateTags", () => {
     expect(tags).toContain("decision");
   });
 
-  it("extracts bug topic", () => {
-    const tags = autoGenerateTags("Fixed a crash in the login handler caused by null pointer");
-    expect(tags).toContain("bug");
+  it("does not extract removed over-saturated topics (bug, architecture, config)", () => {
+    expect(autoGenerateTags("Fixed a crash in the login handler")).not.toContain("bug");
+    expect(autoGenerateTags("The architecture uses a layered pattern")).not.toContain("architecture");
+    expect(autoGenerateTags("Updated the configuration settings")).not.toContain("config");
   });
 
   it("extracts kebab-case project names", () => {
@@ -34,11 +35,19 @@ describe("autoGenerateTags", () => {
     expect(tags).not.toContain("up-to-date");
   });
 
-  it("returns at most 5 tags", () => {
+  it("filters expanded blocklist entries", () => {
+    const tags = autoGenerateTags("A read-only key-value store with hot-reload and type-safe access");
+    expect(tags).not.toContain("read-only");
+    expect(tags).not.toContain("key-value");
+    expect(tags).not.toContain("hot-reload");
+    expect(tags).not.toContain("type-safe");
+  });
+
+  it("returns at most 3 tags", () => {
     const tags = autoGenerateTags(
       "Using react, typescript, vite, tailwind, graphql, docker, kubernetes and rust for our deploy pipeline"
     );
-    expect(tags.length).toBeLessThanOrEqual(5);
+    expect(tags.length).toBeLessThanOrEqual(3);
   });
 
   it("returns empty array for content with no matches", () => {
@@ -46,9 +55,9 @@ describe("autoGenerateTags", () => {
     expect(tags).toEqual([]);
   });
 
-  it("extracts architecture topic", () => {
-    const tags = autoGenerateTags("The architecture of the system uses a layered pattern");
-    expect(tags).toContain("architecture");
+  it("extracts lesson topic", () => {
+    const tags = autoGenerateTags("Learned that caching improves latency significantly");
+    expect(tags).toContain("lesson");
   });
 
   it("extracts performance topic", () => {

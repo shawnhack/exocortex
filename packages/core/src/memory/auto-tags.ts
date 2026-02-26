@@ -15,10 +15,7 @@ const TECH_KEYWORDS = new Set([
 
 const TOPIC_PATTERNS: Array<{ pattern: RegExp; tag: string }> = [
   { pattern: /\b(?:decided|decision|chose|choosing|trade-?off)\b/i, tag: "decision" },
-  { pattern: /\b(?:bug|fix(?:ed)?|broke|broken|crash|error|issue)\b/i, tag: "bug" },
-  { pattern: /\b(?:architect(?:ure)?|design(?:ed)?|pattern|structure)\b/i, tag: "architecture" },
   { pattern: /\b(?:lesson|learned|insight|takeaway|realization)\b/i, tag: "lesson" },
-  { pattern: /\b(?:config(?:uration)?|setting|env(?:ironment)?|\.env)\b/i, tag: "config" },
   { pattern: /\b(?:perf(?:ormance)?|optimi[sz](?:e|ation)|slow|fast|latency|benchmark)\b/i, tag: "performance" },
   { pattern: /\b(?:deploy(?:ment)?|ci\/cd|pipeline|release|ship(?:ping)?)\b/i, tag: "deployment" },
   { pattern: /\b(?:test(?:ing|s)?|spec|coverage|assertion|mock)\b/i, tag: "testing" },
@@ -31,12 +28,17 @@ const PROJECT_BLOCKLIST = new Set([
   "post-build", "non-null", "non-empty", "up-to-date", "end-to-end",
   "out-of-date", "day-to-day", "step-by-step", "case-by-case",
   "long-term", "short-term", "high-level", "low-level",
+  "run-time", "compile-time", "read-only", "write-only", "read-write",
+  "key-value", "open-source", "third-party", "cross-platform",
+  "single-page", "multi-line", "auto-generated", "well-known",
+  "hard-coded", "type-safe", "first-class", "self-hosted",
+  "hot-reload", "de-duplicate", "re-embed",
 ]);
 
 const PROJECT_PATTERN = /\b([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b/g;
 
 /**
- * Auto-generate up to 5 tags from memory content.
+ * Auto-generate up to 3 tags from memory content.
  * Uses tech keywords, topic patterns, and kebab-case project names.
  */
 export function autoGenerateTags(content: string): string[] {
@@ -46,24 +48,24 @@ export function autoGenerateTags(content: string): string[] {
   // 1. Tech keywords
   const words = content.toLowerCase().split(/[\s,.:;!?()[\]{}"'`/\\]+/);
   for (const word of words) {
-    if (TECH_KEYWORDS.has(word) && tags.size < 5) {
+    if (TECH_KEYWORDS.has(word) && tags.size < 3) {
       tags.add(word);
     }
   }
 
   // 2. Topic patterns
   for (const { pattern, tag } of TOPIC_PATTERNS) {
-    if (tags.size >= 5) break;
+    if (tags.size >= 3) break;
     if (pattern.test(content)) {
       tags.add(tag);
     }
   }
 
   // 3. Project names (kebab-case)
-  if (tags.size < 5) {
+  if (tags.size < 3) {
     let match: RegExpExecArray | null;
     while ((match = PROJECT_PATTERN.exec(content)) !== null) {
-      if (tags.size >= 5) break;
+      if (tags.size >= 3) break;
       const name = match[1].toLowerCase();
       if (!PROJECT_BLOCKLIST.has(name) && name.length >= 3 && name.length <= 30) {
         tags.add(name);
