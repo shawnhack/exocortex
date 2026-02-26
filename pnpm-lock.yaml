@@ -124,10 +124,10 @@ importers:
         version: link:../core
       '@hono/node-server':
         specifier: ^1.19.9
-        version: 1.19.9(hono@4.11.7)
+        version: 1.19.9(hono@4.12.3)
       hono:
-        specifier: ^4.11.7
-        version: 4.11.7
+        specifier: ^4.11.10
+        version: 4.12.3
       node-cron:
         specifier: ^4.2.1
         version: 4.2.1
@@ -1410,6 +1410,10 @@ packages:
     resolution: {integrity: sha512-l7qMiNee7t82bH3SeyUCt9UF15EVmaBvsppY2zQtrbIhl/yzBTny+YUxsVjSjQ6gaqaeVtZmGocom8TzBlA4Yw==}
     engines: {node: '>=16.9.0'}
 
+  hono@4.12.3:
+    resolution: {integrity: sha512-SFsVSjp8sj5UumXOOFlkZOG6XS9SJDKw0TbwFeV+AJ8xlST8kxK5Z/5EYa111UY8732lK2S/xB653ceuaoGwpg==}
+    engines: {node: '>=16.9.0'}
+
   http-errors@2.0.1:
     resolution: {integrity: sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==}
     engines: {node: '>= 0.8'}
@@ -2266,6 +2270,10 @@ snapshots:
     dependencies:
       hono: 4.11.7
 
+  '@hono/node-server@1.19.9(hono@4.12.3)':
+    dependencies:
+      hono: 4.12.3
+
   '@huggingface/jinja@0.5.5': {}
 
   '@huggingface/transformers@3.8.1':
@@ -3088,6 +3096,8 @@ snapshots:
       function-bind: 1.1.2
 
   hono@4.11.7: {}
+
+  hono@4.12.3: {}
 
   http-errors@2.0.1:
     dependencies:
