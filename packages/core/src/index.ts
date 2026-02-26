@@ -22,7 +22,7 @@ export type {
   ContentType,
   MemorySource,
 } from "./memory/types.js";
-export { MemoryStore, stripPrivateContent } from "./memory/store.js";
+export { MemoryStore, stripPrivateContent, validateStorageGate } from "./memory/store.js";
 export { MemorySearch, getSearchMisses } from "./memory/search.js";
 export type { SearchMissAggregate } from "./memory/search.js";
 export { autoGenerateTags } from "./memory/auto-tags.js";
@@ -53,8 +53,10 @@ export type {
   IngestFileResult,
   IngestResult,
 } from "./memory/ingest.js";
-export { digestTranscript, extractFacts } from "./memory/digest.js";
-export type { DigestResult, DigestAction, ExtractedFact, FactType } from "./memory/digest.js";
+export { digestTranscript, extractFacts as extractDigestFacts } from "./memory/digest.js";
+export type { DigestResult, DigestAction, ExtractedFact as DigestExtractedFact, FactType } from "./memory/digest.js";
+export { extractFacts, storeFacts, searchFacts } from "./memory/facts.js";
+export type { ExtractedFact, StoredFact, SearchFactsOptions } from "./memory/facts.js";
 
 // Embedding
 export type { EmbeddingProvider } from "./embedding/types.js";
@@ -72,12 +74,15 @@ export { extractEntities, extractRelationships } from "./entities/extractor.js";
 export type { ExtractedEntity } from "./entities/extractor.js";
 export { computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities } from "./entities/graph.js";
 export type { GraphStats, EntityCentrality, Community } from "./entities/graph.js";
+export { generateEntityProfile, recomputeEntityProfiles, getCachedProfiles } from "./entities/profile.js";
+export type { RecomputeProfilesResult } from "./entities/profile.js";
 
 // Intelligence
 export {
   findClusters,
   consolidateCluster,
   generateBasicSummary,
+  validateSummary,
   getConsolidations,
   autoConsolidate,
 } from "./intelligence/consolidation.js";
@@ -195,6 +200,9 @@ export {
   stringSimilarity,
   suggestTagMerges,
   applyTagMerge,
+  parseCanonicalMap,
+  getCanonicalMap,
+  canonicalizeTags,
 } from "./memory/tag-normalization.js";
 export type { TagMergeSuggestion } from "./memory/tag-normalization.js";
 
@@ -206,6 +214,7 @@ export {
   getProducerQuality,
   getQualityTrend,
   getQualityDistribution,
+  getQueryOutcomes,
 } from "./memory/analytics.js";
 export type {
   AnalyticsSummary,
@@ -214,6 +223,7 @@ export type {
   ProducerQuality,
   QualityTrendEntry,
   QualityDistribution,
+  QueryOutcome,
 } from "./memory/analytics.js";
 
 // Observability

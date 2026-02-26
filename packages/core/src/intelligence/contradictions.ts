@@ -21,7 +21,7 @@ export interface ContradictionCandidate {
   reason: string;
 }
 
-// Negation words that may indicate contradictory statements
+// Negation patterns for sentence-level contradiction detection
 const NEGATION_PATTERNS = [
   /\bnot\b/i,
   /\bnever\b/i,
@@ -35,18 +35,31 @@ const NEGATION_PATTERNS = [
   /\bwasn'?t\b/i,
   /\bweren'?t\b/i,
   /\bstopped\b/i,
-  /\bquit\b/i,
-  /\bleft\b/i,
   /\babandoned\b/i,
-  /\bremoved\b/i,
-  /\bdeprecated\b/i,
-  /\breplaced\b/i,
   /\bswitched from\b/i,
   /\bmigrated away\b/i,
 ];
 
 // Value change patterns — "X is A" vs "X is B"
-const VALUE_PATTERN = /\b(?:is|are|was|were|use|using|prefer|chose|switched to|moved to|now)\s+(.{3,40})\b/gi;
+const VALUE_PATTERN = /\b(?:is|are|was|were|use|using|prefer|chose|switched to|moved to|now)\s+(.{5,40})\b/gi;
+
+// Max sentences to check per memory (focus on opening claims)
+const CLAIM_SENTENCES_LIMIT = 10;
+
+// Minimum word overlap between sentences to consider them about the same subject
+const SUBJECT_OVERLAP_THRESHOLD = 0.3;
+
+// Stopwords excluded from word overlap calculation
+const OVERLAP_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+  "of", "with", "by", "from", "is", "it", "that", "this", "was", "are",
+  "be", "has", "had", "have", "not", "no", "can", "will", "do", "did",
+  "should", "would", "could", "may", "might", "we", "you", "he", "she",
+  "they", "its", "our", "my", "your", "all", "each", "some", "than",
+  "too", "very", "just", "also", "been", "being", "into", "out", "so",
+  "then", "there", "these", "those", "when", "where", "which", "while",
+  "who", "how", "what", "new", "use", "used", "using", "one", "two",
+]);
 
 /**
  * Detect potential contradictions between semantically similar memories.
@@ -57,7 +70,7 @@ export function detectContradictions(
   db: DatabaseSync,
   options: { similarityThreshold?: number; maxMemories?: number } = {}
 ): ContradictionCandidate[] {
-  const threshold = options.similarityThreshold ?? 0.7;
+  const threshold = options.similarityThreshold ?? 0.82;
   const maxMemories = options.maxMemories ?? 300;
 
   // Get active memories with embeddings
@@ -104,7 +117,7 @@ export function detectContradictions(
       const sim = cosineSimilarity(a.embedding, b.embedding);
       if (sim < threshold) continue;
 
-      // High similarity — check for contradictory signals
+      // High similarity — sentence-level contradiction analysis
       const reason = findContradictionReason(a.content, b.content);
       if (reason) {
         candidates.push({
@@ -121,28 +134,111 @@ export function detectContradictions(
 }
 
 function findContradictionReason(contentA: string, contentB: string): string | null {
-  // Check if one has negation of the other's key claim
-  const aNeg = NEGATION_PATTERNS.some((p) => p.test(contentA));
-  const bNeg = NEGATION_PATTERNS.some((p) => p.test(contentB));
-
-  if (aNeg !== bNeg) {
-    return "One statement contains negation while the other affirms (possible contradiction)";
+  // Skip consolidated summaries — meta-memories that reference many topics
+  if (
+    contentA.startsWith("[Consolidated") ||
+    contentB.startsWith("[Consolidated")
+  ) {
+    return null;
   }
 
-  // Check for value changes — both mention the same subject with different values
-  const aValues = extractValues(contentA);
-  const bValues = extractValues(contentB);
+  const sentencesA = extractSentences(contentA).slice(0, CLAIM_SENTENCES_LIMIT);
+  const sentencesB = extractSentences(contentB).slice(0, CLAIM_SENTENCES_LIMIT);
 
-  for (const [, aVal] of aValues) {
-    for (const [, bVal] of bValues) {
-      // Same pattern but different values
-      if (aVal.toLowerCase() !== bVal.toLowerCase() && aVal.length > 3 && bVal.length > 3) {
-        return `Possible value change: "${aVal.trim()}" vs "${bVal.trim()}"`;
+  if (sentencesA.length === 0 || sentencesB.length === 0) return null;
+
+  // Sentence-level negation contradiction: one sentence affirms, the other
+  // negates, and both are about the same subject (high word overlap)
+  for (const sA of sentencesA) {
+    const aNeg = NEGATION_PATTERNS.some((p) => p.test(sA));
+    for (const sB of sentencesB) {
+      const bNeg = NEGATION_PATTERNS.some((p) => p.test(sB));
+      if (aNeg === bNeg) continue;
+
+      if (wordOverlap(sA, sB) < SUBJECT_OVERLAP_THRESHOLD) continue;
+
+      const affSentence = aNeg ? sB : sA;
+      const negSentence = aNeg ? sA : sB;
+      return `negation conflict: "${truncSentence(affSentence)}" vs "${truncSentence(negSentence)}"`;
+    }
+  }
+
+  // Value changes on the same subject — require sentence overlap
+  for (const sA of sentencesA) {
+    const aVals = extractValues(sA);
+    if (aVals.length === 0) continue;
+
+    for (const sB of sentencesB) {
+      if (wordOverlap(sA, sB) < SUBJECT_OVERLAP_THRESHOLD) continue;
+
+      const bVals = extractValues(sB);
+      for (const [, aV] of aVals) {
+        for (const [, bV] of bVals) {
+          if (
+            aV.toLowerCase() !== bV.toLowerCase() &&
+            aV.length >= 5 &&
+            bV.length >= 5
+          ) {
+            return `value change: "${aV.trim()}" vs "${bV.trim()}"`;
+          }
+        }
       }
     }
   }
 
   return null;
+}
+
+/**
+ * Split text into sentence-like chunks for pairwise comparison.
+ * Handles markdown bullets, headers, and regular prose.
+ */
+function extractSentences(text: string): string[] {
+  return text
+    .split(/\n+/)
+    .flatMap((line) => {
+      // Further split long lines on sentence boundaries
+      if (line.length > 200) {
+        return line.split(/(?<=[.!?])\s+/);
+      }
+      return [line];
+    })
+    .map((s) => s.replace(/^[\s\-*>#]+/, "").trim())
+    .filter((s) => s.length >= 10 && s.length <= 500);
+}
+
+/**
+ * Compute word overlap between two sentences (Jaccard-like).
+ * Returns ratio of shared content words to the smaller set size.
+ */
+function wordOverlap(a: string, b: string): number {
+  const wordsA = new Set(
+    a
+      .toLowerCase()
+      .split(/\W+/)
+      .filter((w) => w.length >= 3 && !OVERLAP_STOPWORDS.has(w))
+  );
+  const wordsB = new Set(
+    b
+      .toLowerCase()
+      .split(/\W+/)
+      .filter((w) => w.length >= 3 && !OVERLAP_STOPWORDS.has(w))
+  );
+
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+
+  let shared = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) shared++;
+  }
+
+  return shared / Math.min(wordsA.size, wordsB.size);
+}
+
+function truncSentence(s: string): string {
+  const clean = s.replace(/\n/g, " ").trim();
+  if (clean.length <= 80) return clean;
+  return clean.substring(0, 77) + "...";
 }
 
 function extractValues(text: string): Array<[string, string]> {

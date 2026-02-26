@@ -133,6 +133,15 @@ export interface KnowledgeGap {
   severity: "critical" | "warning" | "info";
 }
 
+export interface QueryOutcome {
+  query: string;
+  search_count: number;
+  result_count_avg: number;
+  feedback_count: number;
+  feedback_ratio: number;
+  last_queried_at: string;
+}
+
 export interface ConsolidationCluster {
   centroidId: string;
   memberIds: string[];
@@ -671,6 +680,12 @@ export const api = {
   getKnowledgeGaps(minCount = 3, days = 14) {
     return request<KnowledgeGap[]>(
       `/api/analytics/knowledge-gaps?min_count=${minCount}&days=${days}`
+    );
+  },
+
+  getQueryOutcomes(limit = 20, minSearches = 2, sortBy: "searches" | "feedback_ratio" | "zero_feedback" = "searches") {
+    return request<QueryOutcome[]>(
+      `/api/analytics/query-outcomes?limit=${limit}&min_searches=${minSearches}&sort_by=${sortBy}`
     );
   },
 };

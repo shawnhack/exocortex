@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction } from "@exocortex/core";
+import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent } from "@exocortex/core";
 import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 
@@ -167,6 +167,78 @@ function expandViaLinks(resultIds: string[], maxExpansion: number = 5): LinkedEx
   return expanded;
 }
 
+// --- Fact surfacing: append relevant facts to search/context results ---
+
+function buildFactsSection(query: string): string {
+  try {
+    // Extract potential subjects from query words (3+ chars)
+    const words = query.split(/\s+/).filter((w) => w.length >= 3);
+    if (words.length === 0) return "";
+
+    const allFacts: Array<{ subject: string; predicate: string; object: string }> = [];
+    const seen = new Set<string>();
+
+    for (const word of words) {
+      const facts = searchFacts(db, { subject: word, limit: 5 });
+      for (const f of facts) {
+        const key = `${f.subject}|${f.predicate}|${f.object}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          allFacts.push(f);
+        }
+      }
+    }
+
+    if (allFacts.length === 0) return "";
+
+    const lines = allFacts.slice(0, 5).map(
+      (f) => `- ${f.subject} [${f.predicate}] ${f.object}`
+    );
+    return `\n\n--- Facts ---\n${lines.join("\n")}`;
+  } catch {
+    return "";
+  }
+}
+
+// --- Entity profile section: append precomputed entity profiles to context/search ---
+
+function buildEntityProfileSection(memoryIds: string[]): string {
+  if (memoryIds.length === 0) return "";
+  try {
+    // Find entities linked to these memories, grouped by entity, top 5 by link count
+    const placeholders = memoryIds.map(() => "?").join(", ");
+    const rows = db.prepare(`
+      SELECT me.entity_id, e.name, COUNT(*) as link_count
+      FROM memory_entities me
+      JOIN entities e ON me.entity_id = e.id
+      WHERE me.memory_id IN (${placeholders})
+      GROUP BY me.entity_id
+      ORDER BY link_count DESC
+      LIMIT 5
+    `).all(...memoryIds) as Array<{ entity_id: string; name: string; link_count: number }>;
+
+    if (rows.length === 0) return "";
+
+    const entityIds = rows.map((r) => r.entity_id);
+    const profiles = getCachedProfiles(db, entityIds);
+
+    if (profiles.size === 0) return "";
+
+    const lines: string[] = [];
+    for (const row of rows) {
+      const profile = profiles.get(row.entity_id);
+      if (profile) {
+        lines.push(`- **${row.name}**: ${profile}`);
+      }
+    }
+
+    if (lines.length === 0) return "";
+    return `\n\n--- Entity Profiles ---\n${lines.join("\n")}`;
+  } catch {
+    return "";
+  }
+}
+
 // memory_store
 server.tool(
   "memory_store",
@@ -191,6 +263,15 @@ server.tool(
   },
   async (args) => {
     try {
+      // Storage gate: reject low-value short writes
+      const stripped = stripPrivateContent(args.content);
+      validateStorageGate(stripped, {
+        content_type: args.content_type,
+        is_metadata: args.is_metadata,
+        benchmark: args.benchmark,
+        tags: args.tags,
+      });
+
       const store = new MemoryStore(db);
 
       const result = await store.create({
@@ -455,8 +536,11 @@ server.tool(
         linkSection = `\n\n--- Linked (1-hop) ---\n\n${linkLines.join("\n\n")}`;
       }
 
+      const entityProfileSection = buildEntityProfileSection(resultIds);
+      const factsSection = buildFactsSection(args.query);
+
       return {
-        content: [{ type: "text", text: `Found ${results.length} memories (${scoringMode}):\n\n${lines.join("\n\n")}${linkSection}` }],
+        content: [{ type: "text", text: `Found ${results.length} memories (${scoringMode}):\n\n${lines.join("\n\n")}${linkSection}${entityProfileSection}${factsSection}` }],
       };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
@@ -576,8 +660,11 @@ server.tool(
         linkSection = `\n\n--- Linked ---\n${linkLines.join("\n")}`;
       }
 
+      const entityProfileSection = buildEntityProfileSection(resultIds);
+      const factsSection = buildFactsSection(args.topic);
+
       return {
-        content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories):\n\n${lines.join("\n")}${linkSection}` }],
+        content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories):\n\n${lines.join("\n")}${linkSection}${entityProfileSection}${factsSection}` }],
       };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
@@ -652,7 +739,77 @@ server.tool(
           count++;
         } catch { /* skip invalid IDs */ }
       }
+
+      // Link feedback to query outcomes: find recent access_log entries for these IDs
+      try {
+        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000)
+          .toISOString()
+          .replace("T", " ")
+          .replace("Z", "");
+        const placeholders = args.ids.map(() => "?").join(", ");
+        const accessRows = db
+          .prepare(
+            `SELECT DISTINCT query FROM access_log
+             WHERE memory_id IN (${placeholders})
+               AND query IS NOT NULL
+               AND accessed_at >= ?
+             ORDER BY accessed_at DESC LIMIT 5`
+          )
+          .all(...args.ids, fiveMinAgo) as Array<{ query: string }>;
+
+        const { createHash } = await import("node:crypto");
+        for (const row of accessRows) {
+          const hash = createHash("sha256")
+            .update(row.query.toLowerCase().trim())
+            .digest("hex")
+            .slice(0, 16);
+          db.prepare(
+            "UPDATE query_outcomes SET feedback_count = feedback_count + 1 WHERE query_hash = ?"
+          ).run(hash);
+        }
+      } catch {
+        // Non-critical
+      }
+
       return { content: [{ type: "text", text: `Recorded usefulness signal for ${count} memories.` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
+  }
+);
+
+// memory_facts — query structured facts (SPO triples)
+server.tool(
+  "memory_facts",
+  "Query structured facts extracted from memories. Facts are subject-predicate-object triples (e.g. 'Exocortex port 4010'). Use for precise lookups of ports, versions, paths, dependencies.",
+  {
+    subject: z.string().optional().describe("Filter by subject (LIKE match)"),
+    predicate: z.string().optional().describe("Filter by predicate (exact: port, uses, replaced, path, default, version, is)"),
+    object: z.string().optional().describe("Filter by object (LIKE match)"),
+    memory_id: z.string().optional().describe("Filter by source memory ID"),
+    limit: z.number().min(1).max(100).optional().describe("Max results (default 20)"),
+  },
+  async (args) => {
+    try {
+      const facts = searchFacts(db, {
+        subject: args.subject,
+        predicate: args.predicate,
+        object: args.object,
+        memory_id: args.memory_id,
+        limit: args.limit,
+      });
+
+      if (facts.length === 0) {
+        return { content: [{ type: "text", text: "No facts found matching the query." }] };
+      }
+
+      const lines = facts.map((f) =>
+        `(${f.subject}) --[${f.predicate}]--> (${f.object})  [confidence: ${f.confidence}, memory: ${f.memory_id}]`
+      );
+
+      return {
+        content: [{ type: "text", text: `Found ${facts.length} facts:\n\n${lines.join("\n")}` }],
+      };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
     }
@@ -1112,6 +1269,7 @@ server.tool(
     tune_weights: z.boolean().optional().describe("Auto-adjust scoring weights based on usefulness feedback data"),
     reembed_all: z.boolean().optional().describe("Re-embed ALL memories (model migration). Use with limit to test first."),
     reembed_all_limit: z.number().optional().describe("Max memories to re-embed when using reembed_all (default 100)"),
+    recompute_profiles: z.boolean().optional().describe("Recompute entity profiles for entities with ≥3 active memories"),
   },
   async (args) => {
     try {
@@ -1287,6 +1445,16 @@ server.tool(
           parts.push(`\nRe-embed all: ${reembedAllResult.processed} processed, ${reembedAllResult.failed} failed, ${reembedAllResult.total} total`);
         } catch (err) {
           parts.push(`\nRe-embed all: error — ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // Recompute entity profiles
+      if (args.recompute_profiles) {
+        try {
+          const profileResult = recomputeEntityProfiles(db);
+          parts.push(`\nEntity profiles: ${profileResult.computed} computed, ${profileResult.skipped} skipped${profileResult.errors > 0 ? `, ${profileResult.errors} errors` : ""}`);
+        } catch (err) {
+          parts.push(`\nEntity profiles: error — ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 

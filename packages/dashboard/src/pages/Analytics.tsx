@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import type { QueryOutcome } from "../api/client";
 import { useToast } from "../components/Toast";
 
 export function Analytics() {
@@ -63,6 +64,12 @@ export function Analytics() {
   const { data: regressionLatest } = useQuery({
     queryKey: ["regression-latest"],
     queryFn: () => api.getRegressionLatest(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: queryOutcomes } = useQuery({
+    queryKey: ["analytics-query-outcomes"],
+    queryFn: () => api.getQueryOutcomes(),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -367,6 +374,67 @@ export function Analytics() {
                         color: g.severity === "critical" ? "#f87171" : g.severity === "warning" ? "#f59e0b" : "#8080a0",
                       }}>
                         {g.severity}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
+
+      {/* Query Effectiveness */}
+      {queryOutcomes && queryOutcomes.length > 0 && (
+        <Section title="Query Effectiveness">
+          <div
+            style={{
+              border: "1px solid #16163a",
+              borderRadius: 8,
+              overflow: "hidden",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 13,
+              }}
+            >
+              <thead>
+                <tr>
+                  {["Query", "Searches", "Avg Results", "Feedback", "Success %"].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: "left",
+                        padding: "10px 14px",
+                        color: "#8080a0",
+                        fontWeight: 500,
+                        fontSize: 12,
+                        borderBottom: "1px solid #16163a",
+                        background: "rgba(8, 8, 26, 0.4)",
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {queryOutcomes.map((q: QueryOutcome, i: number) => (
+                  <tr key={i}>
+                    <td style={{ padding: "8px 14px", color: "#e8e8f4", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.query}</td>
+                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.search_count}</td>
+                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.result_count_avg}</td>
+                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.feedback_count}</td>
+                    <td style={{ padding: "8px 14px", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>
+                      <span style={{
+                        color: q.feedback_ratio > 50 ? "#34d399" : q.feedback_ratio >= 10 ? "#f59e0b" : "#f87171",
+                        fontFamily: "var(--font-mono)",
+                        fontWeight: 500,
+                      }}>
+                        {q.feedback_ratio}%
                       </span>
                     </td>
                   </tr>

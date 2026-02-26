@@ -212,3 +212,63 @@ export function applyTagMerge(
   }
 }
 
+// --- Canonical Tag Taxonomy ---
+
+/**
+ * Parse a canonical map JSON string from settings.
+ * Returns empty object if null/invalid.
+ */
+export function parseCanonicalMap(raw?: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "string") {
+        out[k.toLowerCase()] = v.toLowerCase();
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Read the canonical tag map from the database settings.
+ */
+export function getCanonicalMap(db: DatabaseSync): Record<string, string> {
+  return parseCanonicalMap(getSetting(db, "tags.canonical_map"));
+}
+
+/**
+ * Map tags through a canonical taxonomy map.
+ * Unmapped tags pass through unchanged. Deduplicates after mapping.
+ * Returns the mapped tags and a list of unmapped ones.
+ */
+export function canonicalizeTags(
+  tags: string[],
+  canonicalMap: Record<string, string>
+): { tags: string[]; unmapped: string[] } {
+  if (tags.length === 0) return { tags: [], unmapped: [] };
+  if (Object.keys(canonicalMap).length === 0) return { tags: [...tags], unmapped: [...tags] };
+
+  const out: string[] = [];
+  const unmapped: string[] = [];
+  const seen = new Set<string>();
+
+  for (const tag of tags) {
+    const mapped = canonicalMap[tag] ?? tag;
+    if (canonicalMap[tag] === undefined) {
+      unmapped.push(tag);
+    }
+    if (!seen.has(mapped)) {
+      seen.add(mapped);
+      out.push(mapped);
+    }
+  }
+
+  return { tags: out, unmapped };
+}
+

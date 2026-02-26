@@ -8,10 +8,11 @@ import { extractEntities, extractRelationships } from "../entities/extractor.js"
 import { EntityStore } from "../entities/store.js";
 import { autoGenerateTags } from "./auto-tags.js";
 import { generateKeywords } from "./keywords.js";
-import { getTagAliasMap, normalizeTags } from "./tag-normalization.js";
+import { getTagAliasMap, normalizeTags, getCanonicalMap, canonicalizeTags } from "./tag-normalization.js";
 import { computeContentHashForDb } from "./content-hash.js";
 import { getMetadataTags, inferIsMetadata } from "./metadata-classification.js";
 import { incrementCounter } from "../observability/counters.js";
+import { MemoryLinkStore } from "./links.js";
 import type {
   Memory,
   MemoryRow,
@@ -57,6 +58,37 @@ export function stripPrivateContent(text: string): string {
   const stripped = text.replace(/<private>[\s\S]*?<\/private>/gi, "");
   // Collapse runs of 3+ newlines to 2, trim
   return stripped.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * Validate that memory content meets minimum quality thresholds.
+ * Call this at the API/MCP boundary before passing to MemoryStore.create().
+ * Throws if content is too short (< 120 chars) unless exempted.
+ */
+export function validateStorageGate(
+  content: string,
+  opts?: {
+    content_type?: string;
+    parent_id?: string;
+    is_metadata?: boolean;
+    benchmark?: boolean;
+    tags?: string[];
+  }
+): void {
+  const MIN_CONTENT_LENGTH = 120;
+  const isExempt =
+    opts?.content_type === "conversation" ||
+    !!opts?.parent_id ||
+    opts?.is_metadata === true ||
+    opts?.benchmark === true ||
+    (opts?.tags ?? []).some((t) =>
+      ["goal-progress", "goal-progress-implicit", "prompt-amendment", "outcome"].includes(t)
+    );
+  if (content.length < MIN_CONTENT_LENGTH && !isExempt) {
+    throw new Error(
+      `Memory content too short (${content.length} chars, min ${MIN_CONTENT_LENGTH}). Short memories rarely provide retrieval value.`
+    );
+  }
 }
 
 type MemoryAttribution = {
@@ -171,8 +203,10 @@ export class MemoryStore {
     if (content.length === 0) {
       throw new Error("Memory content is empty after stripping private blocks");
     }
+
     const isBenchmark = input.benchmark === true;
-    const normalizedTags = normalizeTags(input.tags, aliasMap);
+    const canonicalMap = getCanonicalMap(this.db);
+    const normalizedTags = canonicalizeTags(normalizeTags(input.tags, aliasMap), canonicalMap).tags;
     if (isBenchmark && !normalizedTags.includes("benchmark-artifact")) {
       normalizedTags.push("benchmark-artifact");
     }
@@ -449,7 +483,7 @@ export class MemoryStore {
       try {
         const autoTaggingEnabled = getSetting(this.db, "auto_tagging.enabled") !== "false";
         if (autoTaggingEnabled) {
-          const autoTags = normalizeTags(autoGenerateTags(input.content), aliasMap);
+          const autoTags = canonicalizeTags(normalizeTags(autoGenerateTags(input.content), aliasMap), canonicalMap).tags;
           if (autoTags.length > 0) {
             const existingTags = new Set(input.tags ?? []);
             const newTags = autoTags.filter((t) => !existingTags.has(t));
@@ -489,6 +523,17 @@ export class MemoryStore {
         }
       } catch {
         // Keyword generation is non-critical
+      }
+
+      // Extract and store structured facts (SPO triples)
+      try {
+        const { extractFacts: extractFactsFn, storeFacts: storeFactsFn } = await import("./facts.js");
+        const facts = extractFactsFn(input.content);
+        if (facts.length > 0) {
+          storeFactsFn(this.db, id, facts);
+        }
+      } catch {
+        // Fact extraction is non-critical
       }
     }
 
@@ -938,7 +983,8 @@ export class MemoryStore {
         const autoTaggingEnabled = getSetting(this.db, "auto_tagging.enabled") !== "false";
         if (autoTaggingEnabled) {
           const aliasMap = getTagAliasMap(this.db);
-          const autoTags = normalizeTags(autoGenerateTags(input.content), aliasMap);
+          const chunkCanonicalMap = getCanonicalMap(this.db);
+          const autoTags = canonicalizeTags(normalizeTags(autoGenerateTags(input.content), aliasMap), chunkCanonicalMap).tags;
           if (autoTags.length > 0) {
             const existingTags = new Set(input.tags ?? []);
             const newTags = autoTags.filter((t) => !existingTags.has(t));
@@ -1046,9 +1092,10 @@ export class MemoryStore {
     const existing = await this.getById(id);
     if (!existing) return null;
     const aliasMap = getTagAliasMap(this.db);
+    const canonicalMap = getCanonicalMap(this.db);
     const metadataTags = getMetadataTags(this.db, aliasMap);
     const normalizedTagUpdate =
-      input.tags !== undefined ? normalizeTags(input.tags, aliasMap) : undefined;
+      input.tags !== undefined ? canonicalizeTags(normalizeTags(input.tags, aliasMap), canonicalMap).tags : undefined;
     let mergedMetadata: Record<string, unknown> = existing.metadata
       ? { ...existing.metadata }
       : {};
@@ -1467,6 +1514,10 @@ export class MemoryStore {
   async recordAccess(memoryId: string, query?: string): Promise<void> {
     const now = new Date().toISOString().replace("T", " ").replace("Z", "");
 
+    // Read reinforcement settings
+    const accessBoost = parseFloat(getSetting(this.db, "reinforcement.access_boost") ?? "0.01");
+    const linkBoost = parseFloat(getSetting(this.db, "reinforcement.link_boost") ?? "0.005");
+
     this.db.exec("BEGIN");
     try {
       this.db
@@ -1474,6 +1525,29 @@ export class MemoryStore {
           "UPDATE memories SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?"
         )
         .run(now, memoryId);
+
+      // Read-triggered reinforcement: bump importance for accessed memory
+      if (accessBoost > 0) {
+        this.db
+          .prepare(
+            "UPDATE memories SET importance = MIN(importance + ?, 0.95) WHERE id = ? AND importance < 0.9"
+          )
+          .run(accessBoost, memoryId);
+      }
+
+      // Reinforce 1-hop linked memories at a lower rate
+      if (linkBoost > 0) {
+        const linkStore = new MemoryLinkStore(this.db);
+        const linkedIds = linkStore.getLinkedIds([memoryId]);
+        if (linkedIds.length > 0) {
+          const placeholders = linkedIds.map(() => "?").join(", ");
+          this.db
+            .prepare(
+              `UPDATE memories SET importance = MIN(importance + ?, 0.85) WHERE id IN (${placeholders}) AND importance < 0.8`
+            )
+            .run(linkBoost, ...linkedIds);
+        }
+      }
 
       this.db
         .prepare(
@@ -1584,7 +1658,8 @@ export class MemoryStore {
   bulkAddTags(ids: string[], tags: string[]): void {
     if (ids.length === 0 || tags.length === 0) return;
     const aliasMap = getTagAliasMap(this.db);
-    const normalizedTags = normalizeTags(tags, aliasMap);
+    const canonicalMap = getCanonicalMap(this.db);
+    const normalizedTags = canonicalizeTags(normalizeTags(tags, aliasMap), canonicalMap).tags;
     const insertTag = this.db.prepare(
       "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
     );

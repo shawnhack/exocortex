@@ -189,7 +189,7 @@ export function expireSentinelReports(
   db: DatabaseSync,
   opts?: { ttlDays?: number; dryRun?: boolean }
 ): ExpireSentinelReportsResult {
-  const ttlDays = opts?.ttlDays ?? 30;
+  const ttlDays = opts?.ttlDays ?? 14;
   const dryRun = opts?.dryRun ?? false;
 
   const cutoff = new Date(Date.now() - ttlDays * 24 * 60 * 60 * 1000)
@@ -197,7 +197,7 @@ export function expireSentinelReports(
     .slice(0, 19)
     .replace("T", " ");
 
-  const sentinelTags = ["cortex", "health-check", "sentinel", "metrics"];
+  const sentinelTags = ["cortex", "health-check", "sentinel", "metrics", "run-summary", "gardening", "state-reconciliation", "retrieval-tuning", "friction-bridging", "reweave", "watchlist", "auto-digested", "session-digest"];
   const placeholders = sentinelTags.map(() => "?").join(",");
 
   // Find matching memories

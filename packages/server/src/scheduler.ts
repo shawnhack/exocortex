@@ -241,7 +241,7 @@ export function startScheduler(): void {
 
       // Mark old sentinel reports for expiry
       const ttlStr = getSetting(db, "sentinel.report_ttl_days");
-      const ttlDays = ttlStr ? parseInt(ttlStr, 10) : 30;
+      const ttlDays = ttlStr ? parseInt(ttlStr, 10) : 14;
       const sentinelResult = expireSentinelReports(db, { ttlDays });
       if (sentinelResult.updated > 0) {
         console.log(`[scheduler] Marked ${sentinelResult.updated} sentinel reports for expiry`);

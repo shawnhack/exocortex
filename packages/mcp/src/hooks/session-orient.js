@@ -21,20 +21,27 @@ import fs from "node:fs";
 const DB_PATH = path.join(os.homedir(), ".exocortex", "exocortex.db");
 
 function buildContextKeywords(cwd) {
-  const keywords = new Set();
+  const keywords = new Map();
   const projectName = path.basename(cwd).toLowerCase();
-  keywords.add(projectName);
+  keywords.set(projectName, 5);
 
   // Extract deps from package.json
   try {
     const pkgPath = path.join(cwd, "package.json");
     if (fs.existsSync(pkgPath)) {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-      if (pkg.name) keywords.add(pkg.name.toLowerCase());
+      if (pkg.name) {
+        const pkgName = pkg.name.toLowerCase();
+        if (!keywords.has(pkgName) || keywords.get(pkgName) < 4) {
+          keywords.set(pkgName, 4);
+        }
+      }
       const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
       for (const dep of Object.keys(allDeps)) {
         const name = dep.replace(/^@[^/]+\//, "").toLowerCase();
-        if (name.length >= 3) keywords.add(name);
+        if (name.length >= 3 && !keywords.has(name)) {
+          keywords.set(name, 1);
+        }
       }
     }
   } catch {}
@@ -50,7 +57,9 @@ function buildContextKeywords(cwd) {
     const STOP = new Set(["the", "and", "for", "with", "from", "that", "this", "add", "fix", "update", "remove"]);
     for (const line of log.split("\n")) {
       for (const word of line.toLowerCase().split(/[\s\-_:,/]+/)) {
-        if (word.length >= 3 && !STOP.has(word)) keywords.add(word);
+        if (word.length >= 3 && !STOP.has(word) && !keywords.has(word)) {
+          keywords.set(word, 2);
+        }
       }
     }
   } catch {}
@@ -61,8 +70,8 @@ function buildContextKeywords(cwd) {
 function scoreRelevance(content, keywords) {
   const lower = content.toLowerCase();
   let score = 0;
-  for (const kw of keywords) {
-    if (lower.includes(kw)) score++;
+  for (const [kw, weight] of keywords) {
+    if (lower.includes(kw)) score += weight;
   }
   return score;
 }
@@ -91,13 +100,14 @@ async function main() {
 
   let db;
   try {
-    db = new DatabaseSync(DB_PATH, { readOnly: true });
+    db = new DatabaseSync(DB_PATH);
     db.exec("PRAGMA busy_timeout = 1000");
   } catch {
     return;
   }
 
   const sections = [];
+  const surfacedIds = new Set();
 
   try {
     // 1. Recent project-related memories (last 7 days)
@@ -117,6 +127,7 @@ async function main() {
       .all(projectName, sevenDaysAgo);
 
     if (recentMemories.length > 0) {
+      for (const m of recentMemories) surfacedIds.add(m.id);
       const lines = recentMemories.map(
         (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
       );
@@ -184,6 +195,7 @@ async function main() {
       });
       const top = scored.filter((m) => m.relevance > 0).slice(0, 3);
       if (top.length > 0) {
+        for (const m of top) surfacedIds.add(m.id);
         const lines = top.map(
           (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
         );
@@ -218,6 +230,7 @@ async function main() {
       });
       const top = scored.filter((m) => m.relevance > 0).slice(0, 5);
       if (top.length > 0) {
+        for (const m of top) surfacedIds.add(m.id);
         const lines = top.map((m) => `- ${truncate(m.content, 150)}`);
         sections.push(`**Learned techniques:**\n${lines.join("\n")}`);
       }
@@ -253,13 +266,49 @@ async function main() {
       });
       const top = scored.filter((m) => m.relevance > 0).slice(0, 3);
       if (top.length > 0) {
+        for (const m of top) surfacedIds.add(m.id);
         const lines = top.map(
           (m) => `- ${truncate(m.content, 150)} (${m.created_at.split("T")[0]})`
         );
         sections.push(`**Open threads:**\n${lines.join("\n")}`);
       }
     }
-    // 6. Self-model functional directives
+    // 6. Key entity profiles — precomputed summaries of important entities
+    try {
+      const entityRows = db
+        .prepare(
+          `SELECT e.id, e.name, e.metadata, COUNT(*) as link_count
+           FROM entities e
+           JOIN memory_entities me ON e.id = me.entity_id
+           JOIN memories m ON me.memory_id = m.id AND m.is_active = 1
+           GROUP BY e.id
+           HAVING COUNT(*) >= 3
+           ORDER BY link_count DESC
+           LIMIT 8`
+        )
+        .all();
+
+      if (entityRows.length > 0) {
+        // Score by project relevance
+        const scored = entityRows.map((row) => {
+          let meta = {};
+          try { meta = JSON.parse(row.metadata || "{}"); } catch {}
+          const profile = meta.profile;
+          if (!profile) return null;
+          const relevance = scoreRelevance(`${row.name} ${profile}`, contextKeywords);
+          return { name: row.name, profile, relevance };
+        }).filter(Boolean);
+
+        scored.sort((a, b) => b.relevance - a.relevance);
+        const top = scored.filter((e) => e.relevance > 0).slice(0, 5);
+        if (top.length > 0) {
+          const lines = top.map((e) => `- **${e.name}**: ${e.profile}`);
+          sections.push(`**Key entities:**\n${lines.join("\n")}`);
+        }
+      }
+    } catch {}
+
+    // 7. Self-model functional directives
     const selfModel = db
       .prepare(
         `SELECT m.content
@@ -283,7 +332,7 @@ async function main() {
       }
     }
 
-    // 7. Pending contradictions count
+    // 8. Pending contradictions count
     try {
       const contradictionCount = db
         .prepare("SELECT COUNT(*) as cnt FROM contradictions WHERE status = 'pending'")
@@ -292,15 +341,83 @@ async function main() {
         sections.push(`**Pending contradictions:** ${contradictionCount.cnt} (use \`memory_contradictions\` to review)`);
       }
     } catch {}
+
+    // 9. Known facts — structured SPO triples from Phase 2
+    try {
+      const topKeywords = [...buildContextKeywords(cwd).entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([k]) => k);
+      const seenFacts = new Set();
+      const factResults = [];
+      for (const kw of topKeywords) {
+        if (factResults.length >= 5) break;
+        const pattern = `%${kw}%`;
+        const rows = db
+          .prepare(
+            `SELECT f.subject, f.predicate, f.object, f.confidence
+             FROM facts f
+             JOIN memories m ON f.memory_id = m.id AND m.is_active = 1
+             WHERE f.subject LIKE ? OR f.object LIKE ?
+             ORDER BY f.confidence DESC
+             LIMIT 10`
+          )
+          .all(pattern, pattern);
+        for (const row of rows) {
+          const key = `${row.subject}|${row.predicate}|${row.object}`;
+          if (!seenFacts.has(key) && factResults.length < 5) {
+            seenFacts.add(key);
+            factResults.push(row);
+          }
+        }
+      }
+      if (factResults.length > 0) {
+        const lines = factResults.map(
+          (f) => `- ${f.subject} ${f.predicate} ${f.object} (${Math.round(f.confidence * 100)}%)`
+        );
+        sections.push(`**Known facts:**\n${lines.join("\n")}`);
+      }
+    } catch {}
   } catch {
     // Query failures are non-critical — just skip
-  } finally {
-    try {
-      db.close();
-    } catch {}
   }
 
-  // 7. Auto-detect skills from project tech stack
+  // Record access for surfaced memories (non-critical — failures don't affect output)
+  try {
+    if (surfacedIds.size > 0) {
+      const ids = [...surfacedIds];
+      const placeholders = ids.map(() => "?").join(",");
+      db.exec("BEGIN");
+      try {
+        db.prepare(
+          `UPDATE memories
+           SET access_count = access_count + 1,
+               last_accessed_at = datetime('now')
+           WHERE id IN (${placeholders})`
+        ).run(...ids);
+        db.prepare(
+          `UPDATE memories
+           SET importance = MIN(importance + 0.01, 0.95)
+           WHERE id IN (${placeholders}) AND importance < 0.9`
+        ).run(...ids);
+        const insertAccess = db.prepare(
+          "INSERT INTO access_log (memory_id, query, accessed_at) VALUES (?, 'session-orient', datetime('now'))"
+        );
+        for (const id of ids) {
+          insertAccess.run(id);
+        }
+        db.exec("COMMIT");
+      } catch {
+        try { db.exec("ROLLBACK"); } catch {}
+      }
+    }
+  } catch {}
+
+  try {
+    db.close();
+  } catch {}
+
+  // 10. Auto-detect skills from project tech stack
   try {
     const skillIndexPath = path.join(os.homedir(), ".claude", "skills", "skill-index.json");
     if (fs.existsSync(skillIndexPath)) {

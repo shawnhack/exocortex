@@ -229,6 +229,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "consolidation.auto_enabled": "true",
   "sentinel.report_ttl_days": "30",
   "scoring.keyword_boost": "2.0",
+  "reinforcement.access_boost": "0.01",
+  "reinforcement.link_boost": "0.005",
+  "search.score_gap_ratio": "0.15",
+  "search.quality_floor": "0.08",
 };
 
 function toNormalizedString(value: unknown): string | null {
@@ -533,6 +537,36 @@ export function initializeSchema(db: DatabaseSync): void {
   if (!goalColNames.has("embedding")) {
     db.exec("ALTER TABLE goals ADD COLUMN embedding BLOB");
   }
+
+  // Structured facts (SPO triples)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subject TEXT NOT NULL COLLATE NOCASE,
+      predicate TEXT NOT NULL,
+      object TEXT NOT NULL COLLATE NOCASE,
+      memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+      confidence REAL NOT NULL DEFAULT 0.7,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_facts_subject ON facts(subject);
+    CREATE INDEX IF NOT EXISTS idx_facts_predicate ON facts(predicate);
+    CREATE INDEX IF NOT EXISTS idx_facts_memory ON facts(memory_id);
+  `);
+
+  // Query outcome analytics
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS query_outcomes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      query_hash TEXT NOT NULL UNIQUE,
+      query TEXT NOT NULL,
+      search_count INTEGER NOT NULL DEFAULT 1,
+      result_count_avg REAL NOT NULL DEFAULT 0,
+      feedback_count INTEGER NOT NULL DEFAULT 0,
+      last_queried_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 
   // Co-retrieval tracking for link building
   db.exec(`

@@ -97,7 +97,7 @@ describe("mcp contract", () => {
     const storeResult = await client!.callTool({
       name: "memory_store",
       arguments: {
-        content: `Contract memory ${token}`,
+        content: `Contract memory for MCP roundtrip validation test — verifying stable store, browse, and goal lifecycle with unique token ${token}`,
         tags: ["contract", "mcp"],
         content_type: "note",
       },

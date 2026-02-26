@@ -363,7 +363,7 @@ export class MemorySearch {
 
     // RRF or legacy scoring
     const rrfConfig = getRRFConfig(this.db);
-    const scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number; valence: number; quality: number; goalRelevance: number }> = [];
+    let scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number; valence: number; quality: number; goalRelevance: number }> = [];
     let penalizedMetadataCount = 0;
 
     if (rrfConfig.enabled) {
@@ -499,8 +499,19 @@ export class MemorySearch {
       incrementCounter(this.db, "search.metadata_penalized_memories", penalizedMetadataCount);
     }
 
-    // Sort by score descending, apply offset + limit
+    // Sort by score descending
     scored.sort((a, b) => b.score - a.score);
+
+    // Confidence gap filter: remove results far below the top score
+    const gapRatio = parseFloat(getSetting(this.db, "search.score_gap_ratio") ?? "0.15");
+    const qualityFloor = parseFloat(getSetting(this.db, "search.quality_floor") ?? "0.08");
+    const topScore = scored[0]?.score ?? 0;
+    if (topScore > 0) {
+      const minAllowed = topScore * gapRatio;
+      scored = scored.filter(s => s.score >= minAllowed && s.quality >= qualityFloor);
+    }
+
+    // Apply offset + limit
     const page = scored.slice(offset, offset + limit);
 
     // Build tag map for final results — reuse candidateTagMap if available, otherwise fetch
@@ -533,6 +544,9 @@ export class MemorySearch {
     if (page.length >= 2) {
       this.trackCoRetrieval(query.query, page.map((p) => p.row.id));
     }
+
+    // Track query outcome analytics
+    this.trackQueryOutcome(query.query, page.length);
 
     return page.map((p) => {
       const {
@@ -867,6 +881,40 @@ export class MemorySearch {
         .run(hash, JSON.stringify(top10), top10.length);
     } catch {
       // Non-critical — don't fail searches over tracking
+    }
+  }
+
+  private trackQueryOutcome(query: string, resultCount: number): void {
+    try {
+      const hash = createHash("sha256")
+        .update(query.toLowerCase().trim())
+        .digest("hex")
+        .slice(0, 16);
+      const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+
+      // Upsert: increment search_count, update rolling average result_count
+      const existing = this.db
+        .prepare("SELECT id, search_count, result_count_avg FROM query_outcomes WHERE query_hash = ?")
+        .get(hash) as { id: number; search_count: number; result_count_avg: number } | undefined;
+
+      if (existing) {
+        const newCount = existing.search_count + 1;
+        const newAvg =
+          (existing.result_count_avg * existing.search_count + resultCount) / newCount;
+        this.db
+          .prepare(
+            "UPDATE query_outcomes SET search_count = ?, result_count_avg = ?, last_queried_at = ? WHERE query_hash = ?"
+          )
+          .run(newCount, newAvg, now, hash);
+      } else {
+        this.db
+          .prepare(
+            "INSERT INTO query_outcomes (query_hash, query, search_count, result_count_avg, last_queried_at) VALUES (?, ?, 1, ?, ?)"
+          )
+          .run(hash, query, resultCount, now);
+      }
+    } catch {
+      // Non-critical
     }
   }
 

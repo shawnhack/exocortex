@@ -243,3 +243,69 @@ export function getQualityDistribution(db: DatabaseSync): QualityDistribution {
     total: scores.length,
   };
 }
+
+// --- Query Outcome Analytics ---
+
+export interface QueryOutcome {
+  query: string;
+  search_count: number;
+  result_count_avg: number;
+  feedback_count: number;
+  feedback_ratio: number;
+  last_queried_at: string;
+}
+
+export function getQueryOutcomes(
+  db: DatabaseSync,
+  opts: {
+    limit?: number;
+    minSearches?: number;
+    sortBy?: "searches" | "feedback_ratio" | "zero_feedback";
+  } = {}
+): QueryOutcome[] {
+  const limit = opts.limit ?? 20;
+  const minSearches = opts.minSearches ?? 1;
+  const sortBy = opts.sortBy ?? "searches";
+
+  let orderClause: string;
+  let extraWhere = "";
+  switch (sortBy) {
+    case "feedback_ratio":
+      orderClause = "ORDER BY (CAST(feedback_count AS REAL) / search_count) DESC";
+      break;
+    case "zero_feedback":
+      extraWhere = " AND feedback_count = 0";
+      orderClause = "ORDER BY search_count DESC";
+      break;
+    default:
+      orderClause = "ORDER BY search_count DESC";
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT query, search_count, result_count_avg, feedback_count, last_queried_at
+       FROM query_outcomes
+       WHERE search_count >= ?${extraWhere}
+       ${orderClause}
+       LIMIT ?`
+    )
+    .all(minSearches, limit) as unknown as Array<{
+    query: string;
+    search_count: number;
+    result_count_avg: number;
+    feedback_count: number;
+    last_queried_at: string;
+  }>;
+
+  return rows.map((r) => ({
+    query: r.query,
+    search_count: r.search_count,
+    result_count_avg: Math.round(r.result_count_avg * 10) / 10,
+    feedback_count: r.feedback_count,
+    feedback_ratio:
+      r.search_count > 0
+        ? Math.round((r.feedback_count / r.search_count) * 1000) / 10
+        : 0,
+    last_queried_at: r.last_queried_at,
+  }));
+}

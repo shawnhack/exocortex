@@ -12,6 +12,7 @@ import {
   suggestTagMerges,
   getTagAliasMap,
   getSearchMisses,
+  getQueryOutcomes,
 } from "@exocortex/core";
 
 const analytics = new Hono();
@@ -138,6 +139,18 @@ analytics.get("/api/analytics/knowledge-gaps", (c) => {
       severity: m.count >= 10 ? "critical" : m.count >= 5 ? "warning" : "info",
     }));
   return c.json(gaps);
+});
+
+// Query outcome analytics
+analytics.get("/api/analytics/query-outcomes", (c) => {
+  const db = getDb();
+  const limit = parseIntQuery(c.req.query("limit"), 20, 1, 100);
+  const minSearches = parseIntQuery(c.req.query("min_searches"), 2, 1, 10000);
+  const sortBy = (c.req.query("sort_by") ?? "searches") as
+    | "searches"
+    | "feedback_ratio"
+    | "zero_feedback";
+  return c.json(getQueryOutcomes(db, { limit, minSearches, sortBy }));
 });
 
 export default analytics;

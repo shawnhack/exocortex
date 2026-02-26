@@ -220,6 +220,32 @@ export async function consolidateCluster(
   return summaryId;
 }
 
+/**
+ * Extract specific, retrievable details from text content.
+ * Pulls file paths, versions, code tokens, dates, and numbers-with-units.
+ */
+function extractSpecifics(text: string): string[] {
+  const specifics = new Set<string>();
+
+  // File paths (Unix and Windows style)
+  const pathMatches = text.match(/(?:[A-Z]:)?(?:\/[\w.-]+){2,}(?:\.\w+)?/gi);
+  if (pathMatches) for (const p of pathMatches) specifics.add(p);
+
+  // Version numbers (v1.2.3, 1.0.0, etc.)
+  const versionMatches = text.match(/v?\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?/g);
+  if (versionMatches) for (const v of versionMatches) specifics.add(v);
+
+  // Code-like identifiers (camelCase, snake_case functions/variables)
+  const codeMatches = text.match(/\b[a-z][a-zA-Z0-9]*(?:[A-Z][a-zA-Z0-9]*)+\b/g);
+  if (codeMatches) for (const c of codeMatches) specifics.add(c);
+
+  // Backtick-quoted code spans
+  const backtickMatches = text.match(/`[^`]+`/g);
+  if (backtickMatches) for (const b of backtickMatches) specifics.add(b);
+
+  return Array.from(specifics);
+}
+
 // Patterns for identifying key facts
 const KEY_FACT_PATTERNS = [
   /\b\d{4}[-/]\d{2}[-/]\d{2}\b/,           // dates
@@ -265,11 +291,15 @@ export function generateBasicSummary(
   const earliest = rows[0].created_at;
   const latest = rows[rows.length - 1].created_at;
 
-  // Extract key facts and general context from all memories
+  // Extract key facts, specifics, and context from all memories
   const keyFacts = new Set<string>();
   const contextPoints = new Set<string>();
+  const allSpecifics = new Set<string>();
 
   for (const row of rows) {
+    // Collect specifics
+    for (const s of extractSpecifics(row.content)) allSpecifics.add(s);
+
     // Split into sentences
     const sentences = row.content
       .split(/[.!?]\n|[.!?]\s/)
@@ -286,30 +316,105 @@ export function generateBasicSummary(
     }
   }
 
-  // Build summary
+  // Build summary with word budget (~500 words)
+  const WORD_BUDGET = 500;
+  let wordCount = 0;
+
   const topicHeader = tagSet.size > 0
     ? ` — Topics: ${Array.from(tagSet).slice(0, 5).join(", ")}`
     : "";
 
+  // 1. Topic sentence
   let summary = `[Consolidated summary of ${rows.length} memories from ${earliest} to ${latest}${topicHeader}]`;
+  wordCount += summary.split(/\s+/).length;
 
+  // 2. Key facts section
   if (keyFacts.size > 0) {
     summary += "\n\nKey facts:\n";
-    summary += Array.from(keyFacts)
-      .slice(0, 8)
-      .map((f) => `- ${f}`)
-      .join("\n");
+    for (const fact of keyFacts) {
+      const factWords = fact.split(/\s+/).length;
+      if (wordCount + factWords > WORD_BUDGET) break;
+      summary += `- ${fact}\n`;
+      wordCount += factWords;
+    }
   }
 
-  if (contextPoints.size > 0) {
-    summary += "\n\nContext:\n";
-    summary += Array.from(contextPoints)
-      .slice(0, 5)
-      .map((c) => `- ${c}`)
-      .join("\n");
+  // 3. Specifics section (file paths, versions, code)
+  if (allSpecifics.size > 0 && wordCount < WORD_BUDGET) {
+    const specificsArr = Array.from(allSpecifics).slice(0, 10);
+    summary += "\nSpecifics:\n";
+    summary += `- ${specificsArr.join(", ")}\n`;
+    wordCount += specificsArr.length;
   }
 
-  return summary;
+  // 4. Context section (fill remaining budget)
+  if (contextPoints.size > 0 && wordCount < WORD_BUDGET) {
+    summary += "\nContext:\n";
+    for (const ctx of contextPoints) {
+      const ctxWords = ctx.split(/\s+/).length;
+      if (wordCount + ctxWords > WORD_BUDGET) break;
+      summary += `- ${ctx}\n`;
+      wordCount += ctxWords;
+    }
+  }
+
+  return summary.trimEnd();
+}
+
+/**
+ * Extract proper nouns from text (capitalized words not at sentence start).
+ */
+function extractProperNouns(text: string): Set<string> {
+  const nouns = new Set<string>();
+  const sentences = text.split(/[.!?]\s+/);
+  for (const sentence of sentences) {
+    // Skip the first word of each sentence
+    const words = sentence.split(/\s+/).slice(1);
+    for (const word of words) {
+      if (/^[A-Z][a-z]+/.test(word) && word.length >= 3) {
+        nouns.add(word);
+      }
+    }
+  }
+  return nouns;
+}
+
+/**
+ * Validate that a consolidation summary preserves enough detail from sources.
+ * Used to gate auto-consolidation — rejects summaries that lose too much.
+ */
+export function validateSummary(
+  summaryContent: string,
+  sourceContents: string[]
+): { valid: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+
+  // Check minimum length
+  if (summaryContent.length < 100) {
+    reasons.push(`Summary too short (${summaryContent.length} chars, min 100)`);
+  }
+
+  // Check proper noun preservation (>= 50%)
+  const sourceNouns = new Set<string>();
+  for (const src of sourceContents) {
+    for (const noun of extractProperNouns(src)) sourceNouns.add(noun);
+  }
+
+  if (sourceNouns.size > 0) {
+    const summaryLower = summaryContent.toLowerCase();
+    let preserved = 0;
+    for (const noun of sourceNouns) {
+      if (summaryLower.includes(noun.toLowerCase())) preserved++;
+    }
+    const ratio = preserved / sourceNouns.size;
+    if (ratio < 0.5) {
+      reasons.push(
+        `Only ${Math.round(ratio * 100)}% of proper nouns preserved (${preserved}/${sourceNouns.size}, min 50%)`
+      );
+    }
+  }
+
+  return { valid: reasons.length === 0, reasons };
 }
 
 // --- Auto-consolidation (no LLM needed) ---
@@ -348,6 +453,20 @@ export async function autoConsolidate(
   for (const cluster of toProcess) {
     const summary = generateBasicSummary(db, cluster.memberIds);
     if (!summary) continue;
+
+    // Validate summary quality before consolidating
+    const sourceContents = db
+      .prepare(
+        `SELECT content FROM memories WHERE id IN (${cluster.memberIds.map(() => "?").join(",")})`
+      )
+      .all(...cluster.memberIds) as Array<{ content: string }>;
+    const validation = validateSummary(summary, sourceContents.map((r) => r.content));
+    if (!validation.valid) {
+      console.warn(
+        `[consolidation] Skipping cluster (${cluster.memberIds.length} members): ${validation.reasons.join("; ")}`
+      );
+      continue;
+    }
 
     const summaryId = await consolidateCluster(db, cluster, summary, embeddingProvider);
     summaryIds.push(summaryId);
