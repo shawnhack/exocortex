@@ -14,6 +14,7 @@ import goalsRoutes from "./routes/goals.js";
 import linksRoutes from "./routes/links.js";
 import healthRoutes from "./routes/health.js";
 import analyticsRoutes from "./routes/analytics.js";
+import retrievalRoutes from "./routes/retrieval.js";
 import mcpRoutes from "./routes/mcp.js";
 import { startScheduler } from "./scheduler.js";
 import path from "node:path";
@@ -75,6 +76,7 @@ export function createApp(): Hono {
   app.route("/", goalsRoutes);
   app.route("/", linksRoutes);
   app.route("/", analyticsRoutes);
+  app.route("/", retrievalRoutes);
 
   // Serve dashboard static files if built
   const dashboardDist = path.resolve(

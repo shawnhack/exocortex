@@ -85,11 +85,13 @@ export {
   validateSummary,
   getConsolidations,
   autoConsolidate,
+  applyCommunityAwareFiltering,
 } from "./intelligence/consolidation.js";
 export type {
   ConsolidationCluster,
   ConsolidationResult,
   AutoConsolidateResult,
+  CommunityAwareResult,
 } from "./intelligence/consolidation.js";
 export {
   detectContradictions,
@@ -220,6 +222,7 @@ export {
   getQualityDistribution,
   getQualityHistogram,
   getQueryOutcomes,
+  getRetrievalStats,
 } from "./memory/analytics.js";
 export type {
   AnalyticsSummary,
@@ -230,6 +233,7 @@ export type {
   QualityDistribution,
   QualityHistogramBucket,
   QueryOutcome,
+  RetrievalStats,
 } from "./memory/analytics.js";
 
 // Observability

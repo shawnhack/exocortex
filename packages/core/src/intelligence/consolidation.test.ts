@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { getDbForTesting, initializeSchema } from "@exocortex/core";
 import type { DatabaseSync } from "@exocortex/core";
-import { findClusters, consolidateCluster, generateBasicSummary } from "./consolidation.js";
+import { findClusters, consolidateCluster, generateBasicSummary, applyCommunityAwareFiltering } from "./consolidation.js";
+import type { ConsolidationCluster } from "./consolidation.js";
 
 function insertMemoryWithEmbedding(
   db: DatabaseSync,
@@ -224,6 +225,265 @@ describe("consolidation", () => {
 
       const summary = db.prepare("SELECT embedding FROM memories WHERE id = ?").get(summaryId) as any;
       expect(summary.embedding).not.toBeNull();
+    });
+  });
+
+  describe("applyCommunityAwareFiltering", () => {
+    // Helper: create an entity and return its ID
+    function createEntity(db: DatabaseSync, id: string, name: string): string {
+      const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+      db.prepare(
+        "INSERT INTO entities (id, name, type, aliases, metadata, created_at, updated_at) VALUES (?, ?, 'concept', '[]', '{}', ?, ?)"
+      ).run(id, name, now, now);
+      return id;
+    }
+
+    // Helper: link a memory to an entity
+    function linkMemoryToEntity(db: DatabaseSync, memoryId: string, entityId: string): void {
+      db.prepare(
+        "INSERT OR REPLACE INTO memory_entities (memory_id, entity_id, relevance) VALUES (?, ?, 1.0)"
+      ).run(memoryId, entityId);
+    }
+
+    // Helper: create a relationship between entities
+    function addRelationship(db: DatabaseSync, sourceId: string, targetId: string, rel: string = "related"): void {
+      const id = `rel-${Math.random().toString(36).slice(2)}`;
+      const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+      db.prepare(
+        "INSERT INTO entity_relationships (id, source_entity_id, target_entity_id, relationship, confidence, created_at) VALUES (?, ?, ?, ?, 0.8, ?)"
+      ).run(id, sourceId, targetId, rel, now);
+    }
+
+    it("returns clusters unchanged when no communities exist", () => {
+      const id1 = insertMemoryWithEmbedding(db, { id: "m1", content: "memory one" });
+      const id2 = insertMemoryWithEmbedding(db, { id: "m2", content: "memory two" });
+
+      const clusters: ConsolidationCluster[] = [{
+        centroidId: id1,
+        memberIds: [id1, id2],
+        avgSimilarity: 0.9,
+        topic: "test topic",
+      }];
+
+      const result = applyCommunityAwareFiltering(db, clusters, 2);
+      expect(result.clusters).toHaveLength(1);
+      expect(result.bridgeMemoryIds).toHaveLength(0);
+      expect(result.clustersSplit).toBe(0);
+    });
+
+    it("keeps cluster intact when all memories share the same community", () => {
+      // Create two entities in the same community (connected)
+      const e1 = createEntity(db, "ent-1", "Alpha");
+      const e2 = createEntity(db, "ent-2", "Beta");
+      addRelationship(db, e1, e2);
+
+      // Create memories linked to entities in the same community
+      const m1 = insertMemoryWithEmbedding(db, { id: "m1", content: "memory one" });
+      const m2 = insertMemoryWithEmbedding(db, { id: "m2", content: "memory two" });
+      const m3 = insertMemoryWithEmbedding(db, { id: "m3", content: "memory three" });
+      linkMemoryToEntity(db, m1, e1);
+      linkMemoryToEntity(db, m2, e1);
+      linkMemoryToEntity(db, m3, e2);
+
+      const clusters: ConsolidationCluster[] = [{
+        centroidId: m1,
+        memberIds: [m1, m2, m3],
+        avgSimilarity: 0.9,
+        topic: "same community topic",
+      }];
+
+      const result = applyCommunityAwareFiltering(db, clusters, 2);
+      expect(result.clusters).toHaveLength(1);
+      expect(result.clusters[0].memberIds).toContain(m1);
+      expect(result.clusters[0].memberIds).toContain(m2);
+      expect(result.clusters[0].memberIds).toContain(m3);
+      expect(result.clustersSplit).toBe(0);
+    });
+
+    it("splits cluster when memories span different communities", () => {
+      // Community A: e1 <-> e2
+      const e1 = createEntity(db, "ent-1", "Alpha");
+      const e2 = createEntity(db, "ent-2", "Beta");
+      addRelationship(db, e1, e2);
+
+      // Community B: e3 <-> e4 (disconnected from A)
+      const e3 = createEntity(db, "ent-3", "Gamma");
+      const e4 = createEntity(db, "ent-4", "Delta");
+      addRelationship(db, e3, e4);
+
+      // Memories in community A
+      const m1 = insertMemoryWithEmbedding(db, { id: "m1", content: "memory about Alpha" });
+      const m2 = insertMemoryWithEmbedding(db, { id: "m2", content: "memory about Beta" });
+      linkMemoryToEntity(db, m1, e1);
+      linkMemoryToEntity(db, m2, e2);
+
+      // Memories in community B
+      const m3 = insertMemoryWithEmbedding(db, { id: "m3", content: "memory about Gamma" });
+      const m4 = insertMemoryWithEmbedding(db, { id: "m4", content: "memory about Delta" });
+      linkMemoryToEntity(db, m3, e3);
+      linkMemoryToEntity(db, m4, e4);
+
+      const clusters: ConsolidationCluster[] = [{
+        centroidId: m1,
+        memberIds: [m1, m2, m3, m4],
+        avgSimilarity: 0.85,
+        topic: "cross-community cluster",
+      }];
+
+      const result = applyCommunityAwareFiltering(db, clusters, 2);
+      // Should have 2 sub-clusters (one per community)
+      expect(result.clusters).toHaveLength(2);
+      expect(result.clustersSplit).toBe(1);
+
+      // Verify each sub-cluster contains only members from one community
+      const allMemberIds = result.clusters.flatMap(c => c.memberIds);
+      expect(allMemberIds).toContain(m1);
+      expect(allMemberIds).toContain(m2);
+      expect(allMemberIds).toContain(m3);
+      expect(allMemberIds).toContain(m4);
+
+      // Each cluster should have exactly 2 members
+      for (const cluster of result.clusters) {
+        expect(cluster.memberIds).toHaveLength(2);
+      }
+    });
+
+    it("identifies and boosts bridge memories", () => {
+      // Community A: e1 <-> e2
+      const e1 = createEntity(db, "ent-1", "Alpha");
+      const e2 = createEntity(db, "ent-2", "Beta");
+      addRelationship(db, e1, e2);
+
+      // Community B: e3 <-> e4 (disconnected from A)
+      const e3 = createEntity(db, "ent-3", "Gamma");
+      const e4 = createEntity(db, "ent-4", "Delta");
+      addRelationship(db, e3, e4);
+
+      // Bridge memory: linked to entities in both communities
+      const bridge = insertMemoryWithEmbedding(db, { id: "bridge", content: "bridge memory", importance: 0.3 });
+      linkMemoryToEntity(db, bridge, e1);
+      linkMemoryToEntity(db, bridge, e3);
+
+      // Normal memories in community A
+      const m1 = insertMemoryWithEmbedding(db, { id: "m1", content: "memory one" });
+      const m2 = insertMemoryWithEmbedding(db, { id: "m2", content: "memory two" });
+      linkMemoryToEntity(db, m1, e1);
+      linkMemoryToEntity(db, m2, e2);
+
+      const clusters: ConsolidationCluster[] = [{
+        centroidId: m1,
+        memberIds: [m1, m2, bridge],
+        avgSimilarity: 0.85,
+        topic: "cluster with bridge",
+      }];
+
+      const result = applyCommunityAwareFiltering(db, clusters, 2);
+
+      // Bridge memory should be identified
+      expect(result.bridgeMemoryIds).toContain("bridge");
+
+      // Bridge memory should have its importance boosted
+      const mem = db.prepare("SELECT importance FROM memories WHERE id = ?").get("bridge") as any;
+      expect(mem.importance).toBeGreaterThanOrEqual(0.8);
+
+      // Bridge memory should NOT be in any cluster (it's preserved separately)
+      for (const cluster of result.clusters) {
+        expect(cluster.memberIds).not.toContain("bridge");
+      }
+    });
+
+    it("drops sub-clusters smaller than minClusterSize after splitting", () => {
+      // Community A: e1 <-> e2
+      const e1 = createEntity(db, "ent-1", "Alpha");
+      const e2 = createEntity(db, "ent-2", "Beta");
+      addRelationship(db, e1, e2);
+
+      // Community B: e3 <-> e4
+      const e3 = createEntity(db, "ent-3", "Gamma");
+      const e4 = createEntity(db, "ent-4", "Delta");
+      addRelationship(db, e3, e4);
+
+      // 2 memories in community A, 1 memory in community B
+      const m1 = insertMemoryWithEmbedding(db, { id: "m1", content: "memory one" });
+      const m2 = insertMemoryWithEmbedding(db, { id: "m2", content: "memory two" });
+      const m3 = insertMemoryWithEmbedding(db, { id: "m3", content: "memory three" });
+      linkMemoryToEntity(db, m1, e1);
+      linkMemoryToEntity(db, m2, e2);
+      linkMemoryToEntity(db, m3, e3);
+
+      const clusters: ConsolidationCluster[] = [{
+        centroidId: m1,
+        memberIds: [m1, m2, m3],
+        avgSimilarity: 0.85,
+        topic: "split cluster",
+      }];
+
+      // With minClusterSize=2, community B sub-cluster (only m3) gets dropped
+      const result = applyCommunityAwareFiltering(db, clusters, 2);
+      expect(result.clustersSplit).toBe(1);
+      expect(result.clusters).toHaveLength(1);
+      expect(result.clusters[0].memberIds).toContain(m1);
+      expect(result.clusters[0].memberIds).toContain(m2);
+      expect(result.clusters[0].memberIds).not.toContain(m3);
+    });
+
+    it("handles memories with no entity links gracefully", () => {
+      // Create a community so detection has something to find
+      const e1 = createEntity(db, "ent-1", "Alpha");
+      const e2 = createEntity(db, "ent-2", "Beta");
+      addRelationship(db, e1, e2);
+
+      // Memories with no entity links
+      const m1 = insertMemoryWithEmbedding(db, { id: "m1", content: "unlinked memory one" });
+      const m2 = insertMemoryWithEmbedding(db, { id: "m2", content: "unlinked memory two" });
+
+      const clusters: ConsolidationCluster[] = [{
+        centroidId: m1,
+        memberIds: [m1, m2],
+        avgSimilarity: 0.9,
+        topic: "unlinked memories",
+      }];
+
+      const result = applyCommunityAwareFiltering(db, clusters, 2);
+      // Should keep the cluster intact — unlinked memories go to community -1
+      expect(result.clusters).toHaveLength(1);
+      expect(result.clusters[0].memberIds).toContain(m1);
+      expect(result.clusters[0].memberIds).toContain(m2);
+      expect(result.clustersSplit).toBe(0);
+    });
+
+    it("integrates with findClusters via communityAware option", () => {
+      // Community A: e1 <-> e2
+      const e1 = createEntity(db, "ent-1", "Alpha");
+      const e2 = createEntity(db, "ent-2", "Beta");
+      addRelationship(db, e1, e2);
+
+      // Community B: e3 <-> e4
+      const e3 = createEntity(db, "ent-3", "Gamma");
+      const e4 = createEntity(db, "ent-4", "Delta");
+      addRelationship(db, e3, e4);
+
+      const base = randomEmbedding(42);
+      const m1 = insertMemoryWithEmbedding(db, { id: "ca-1", content: "similar memory from community A", embedding: similarEmbedding(base, 0.01) });
+      const m2 = insertMemoryWithEmbedding(db, { id: "ca-2", content: "similar memory from community A", embedding: similarEmbedding(base, 0.01) });
+      const m3 = insertMemoryWithEmbedding(db, { id: "cb-1", content: "similar memory from community B", embedding: similarEmbedding(base, 0.01) });
+      const m4 = insertMemoryWithEmbedding(db, { id: "cb-2", content: "similar memory from community B", embedding: similarEmbedding(base, 0.01) });
+      linkMemoryToEntity(db, m1, e1);
+      linkMemoryToEntity(db, m2, e2);
+      linkMemoryToEntity(db, m3, e3);
+      linkMemoryToEntity(db, m4, e4);
+
+      // Without community-aware: should find one big cluster
+      const rawClusters = findClusters(db, { minSimilarity: 0.9, minClusterSize: 2 });
+      const rawTotalMembers = rawClusters.reduce((sum, c) => sum + c.memberIds.length, 0);
+      expect(rawTotalMembers).toBe(4);
+
+      // With community-aware: should split into two clusters
+      const caClusters = findClusters(db, { minSimilarity: 0.9, minClusterSize: 2, communityAware: true });
+      expect(caClusters.length).toBe(2);
+      for (const cluster of caClusters) {
+        expect(cluster.memberIds).toHaveLength(2);
+      }
     });
   });
 });

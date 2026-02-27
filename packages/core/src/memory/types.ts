@@ -64,6 +64,13 @@ export interface CreateMemoryInput {
    * Use for evaluation snapshots, regression reports, and query benchmark metadata.
    */
   benchmark?: boolean;
+  /**
+   * Opt-in semantic deduplication at store time. When true, checks if an existing memory
+   * covers the same content (similarity > 0.85 AND word overlap > 60%). If a near-duplicate
+   * is found, returns the existing memory ID with dedup_action="near_duplicate" instead of
+   * creating a new memory. The caller can then decide whether to update or skip.
+   */
+  deduplicate?: boolean;
 }
 
 export interface UpdateMemoryInput {
@@ -144,7 +151,7 @@ export interface CreateMemoryResult {
   memory: Memory;
   superseded_id?: string;
   dedup_similarity?: number;
-  dedup_action?: "superseded" | "skipped" | "merged";
+  dedup_action?: "superseded" | "skipped" | "merged" | "near_duplicate";
 }
 
 /** Raw row shape from SQLite (embedding as Buffer, is_active as integer) */

@@ -275,6 +275,118 @@ export function getQualityDistribution(db: DatabaseSync): QualityDistribution {
   };
 }
 
+// --- Retrieval Stats ---
+
+export interface RetrievalStats {
+  hit_rate: number;
+  top_underserved_queries: Array<{ query: string; count: number }>;
+  most_accessed: Array<{ id: string; title: string; access_count: number }>;
+  least_accessed_count: number;
+  feedback_summary: {
+    total_with_feedback: number;
+    avg_useful_count: number;
+  };
+}
+
+export function getRetrievalStats(db: DatabaseSync): RetrievalStats {
+  // 1. hit_rate: % of access_log queries (searches) that led to a memory_get within 5 min
+  //    A search logs an access_log entry for each returned memory.
+  //    We approximate "search sessions" as distinct (query, 5-min window) groups.
+  //    A "hit" is a search where the user later did memory_get (accessed again
+  //    within 5 min with a NULL query -- but access_log always has a query from search).
+  //    Better proxy: count distinct queries in access_log. Searches that return results
+  //    are "hits" (the access was recorded). Searches with 0 results never appear in access_log.
+  //    So hit_rate = searches with access_log entries / total search count from query_outcomes.
+  const totalSearches = (
+    db
+      .prepare("SELECT SUM(search_count) as total FROM query_outcomes")
+      .get() as { total: number | null }
+  ).total ?? 0;
+
+  const searchesWithResults = (
+    db
+      .prepare(
+        "SELECT SUM(search_count) as total FROM query_outcomes WHERE result_count_avg > 0"
+      )
+      .get() as { total: number | null }
+  ).total ?? 0;
+
+  const hitRate =
+    totalSearches > 0
+      ? Math.round((searchesWithResults / totalSearches) * 1000) / 10
+      : 0;
+
+  // 2. top_underserved_queries: queries that produced 0 useful results (from search_misses)
+  const underserved = db
+    .prepare(
+      `SELECT query, COUNT(*) as count
+       FROM search_misses
+       GROUP BY query
+       ORDER BY count DESC
+       LIMIT 10`
+    )
+    .all() as unknown as Array<{ query: string; count: number }>;
+
+  // 3. most_accessed: top 10 memories by access_count
+  const mostAccessed = (
+    db
+      .prepare(
+        `SELECT id, content, access_count
+         FROM memories
+         WHERE is_active = 1
+         ORDER BY access_count DESC
+         LIMIT 10`
+      )
+      .all() as unknown as Array<{
+      id: string;
+      content: string;
+      access_count: number;
+    }>
+  ).map((r) => ({
+    id: r.id,
+    title: r.content.length > 80 ? r.content.slice(0, 80) + "..." : r.content,
+    access_count: r.access_count,
+  }));
+
+  // 4. least_accessed: count of memories with access_count = 0 older than 14 days
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000)
+    .toISOString()
+    .replace("T", " ")
+    .replace("Z", "");
+  const leastAccessedCount = (
+    db
+      .prepare(
+        `SELECT COUNT(*) as count FROM memories
+         WHERE is_active = 1 AND access_count = 0 AND created_at <= ?`
+      )
+      .get(fourteenDaysAgo) as { count: number }
+  ).count;
+
+  // 5. feedback_summary: memories with useful_count > 0
+  const feedback = db
+    .prepare(
+      `SELECT COUNT(*) as total, AVG(useful_count) as avg_useful
+       FROM memories
+       WHERE is_active = 1 AND useful_count > 0`
+    )
+    .get() as { total: number; avg_useful: number | null };
+
+  return {
+    hit_rate: hitRate,
+    top_underserved_queries: underserved.map((r) => ({
+      query: r.query,
+      count: r.count,
+    })),
+    most_accessed: mostAccessed,
+    least_accessed_count: leastAccessedCount,
+    feedback_summary: {
+      total_with_feedback: feedback.total,
+      avg_useful_count:
+        Math.round((feedback.avg_useful ?? 0) * 100) / 100,
+    },
+  };
+}
+
 // --- Query Outcome Analytics ---
 
 export interface QueryOutcome {

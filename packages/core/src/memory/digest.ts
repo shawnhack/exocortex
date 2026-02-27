@@ -104,6 +104,22 @@ function extractAction(block: ToolUseBlock): DigestAction | null {
   }
 }
 
+/** Text blocks that are just tool narration — skip for fact extraction */
+const NOISE_PATTERNS = [
+  /^(let me|i'll|i will|now i|going to)\b.{0,80}$/i,           // tool intent announcements
+  /^(here (are|is)|the (result|output|file|content))\b/i,       // result introductions
+  /^(reading|searching|looking|checking|running|editing)\b/i,    // action narration
+  /^(done|ok|sure|yes|alright)[.!]?\s*$/i,                      // acknowledgments
+];
+const MIN_TEXT_LENGTH = 30;
+
+export function isNoiseText(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < MIN_TEXT_LENGTH) return true;
+  const firstLine = trimmed.split('\n')[0];
+  return NOISE_PATTERNS.some(re => re.test(firstLine));
+}
+
 /** Deduplicate consecutive identical action summaries */
 function dedup(actions: DigestAction[]): DigestAction[] {
   const result: DigestAction[] = [];
@@ -261,7 +277,9 @@ export async function digestTranscript(
         const action = extractAction(block as ToolUseBlock);
         if (action) actions.push(action);
       } else if (block.type === "text" && block.text) {
-        assistantTexts.push(block.text);
+        if (!isNoiseText(block.text)) {
+          assistantTexts.push(block.text);
+        }
       }
     }
   }

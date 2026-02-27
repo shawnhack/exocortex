@@ -108,6 +108,36 @@ export function adjustImportance(
     });
   }
 
+  // Frequency-based micro-boost: memories accessed 3+ times get +0.02 (capped at 0.9)
+  // This rewards consistently useful memories with a small importance nudge.
+  // Only targets memories below the main boost's importance ceiling (0.8) and below
+  // the main boost's access threshold — memories above that are already handled above.
+  const frequencyThreshold = 3;
+  const frequencyBoosted = db
+    .prepare(
+      `SELECT id, importance FROM memories
+       WHERE is_active = 1
+         AND access_count >= ?
+         AND access_count < ?
+         AND importance < 0.8
+         AND ROUND(importance, 2) != 1.0`
+    )
+    .all(frequencyThreshold, boostThreshold) as Array<{ id: string; importance: number }>;
+
+  const alreadyAdjustedIds = new Set(details.map((d) => d.id));
+  for (const row of frequencyBoosted) {
+    if (alreadyAdjustedIds.has(row.id)) continue;
+    const newImportance = Math.min(0.9, Math.round((row.importance + 0.02) * 100) / 100);
+    if (newImportance !== row.importance) {
+      details.push({
+        id: row.id,
+        action: "boost",
+        old_importance: row.importance,
+        new_importance: newImportance,
+      });
+    }
+  }
+
   // Graph-aware boost: memories linked to high-centrality entities get +0.05
   try {
     const centrality = computeCentrality(db);

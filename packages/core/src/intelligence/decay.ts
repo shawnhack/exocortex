@@ -13,6 +13,10 @@ export interface ArchiveOptions {
   neglectedDays?: number;
   /** Maximum importance for neglected archival (default: 0.5) */
   neglectedMaxImportance?: number;
+  /** Minimum days with zero access for forgotten archival (default: 30) */
+  forgottenDays?: number;
+  /** Maximum importance for forgotten archival (default: 0.6) */
+  forgottenMaxImportance?: number;
   /** If true, return candidates without archiving (default: false) */
   dryRun?: boolean;
 }
@@ -24,7 +28,7 @@ export interface ArchiveCandidate {
   access_count: number;
   created_at: string;
   last_accessed_at: string | null;
-  reason: "stale" | "abandoned" | "neglected";
+  reason: "stale" | "abandoned" | "neglected" | "forgotten";
 }
 
 export interface ArchiveResult {
@@ -36,13 +40,15 @@ export interface ArchiveResult {
 /**
  * Find memories that are candidates for archival.
  *
- * Three criteria:
+ * Four criteria:
  * 1. Stale: low importance + old + rarely accessed
  *    (importance < maxImportance AND age > staleDays AND access_count < maxAccessCount)
  * 2. Abandoned: created over abandonedDays ago with zero accesses
  *    (age > abandonedDays AND access_count = 0)
  * 3. Neglected: never accessed + moderately old + below importance threshold
  *    (access_count = 0 AND age > neglectedDays AND importance < neglectedMaxImportance)
+ * 4. Forgotten: never accessed after 30 days + importance < 0.6 (aggressive forgetting curve)
+ *    (access_count = 0 AND age > forgottenDays AND importance < forgottenMaxImportance)
  */
 export function getArchiveCandidates(
   db: DatabaseSync,
@@ -54,6 +60,8 @@ export function getArchiveCandidates(
   const abandonedDays = opts.abandonedDays ?? 365;
   const neglectedDays = opts.neglectedDays ?? 14;
   const neglectedMaxImportance = opts.neglectedMaxImportance ?? 0.5;
+  const forgottenDays = opts.forgottenDays ?? 30;
+  const forgottenMaxImportance = opts.forgottenMaxImportance ?? 0.6;
 
   const now = new Date();
 
@@ -68,6 +76,10 @@ export function getArchiveCandidates(
   const neglectedDate = new Date(now);
   neglectedDate.setDate(neglectedDate.getDate() - neglectedDays);
   const neglectedDateStr = neglectedDate.toISOString().slice(0, 19).replace("T", " ");
+
+  const forgottenDate = new Date(now);
+  forgottenDate.setDate(forgottenDate.getDate() - forgottenDays);
+  const forgottenDateStr = forgottenDate.toISOString().slice(0, 19).replace("T", " ");
 
   // Stale memories: low importance + old + rarely accessed
   const staleRows = db
@@ -128,6 +140,27 @@ export function getArchiveCandidates(
     last_accessed_at: string | null;
   }>;
 
+  // Forgotten memories: never accessed after forgottenDays + importance < forgottenMaxImportance
+  // More aggressive than neglected — catches memories that were stored but never retrieved
+  const forgottenRows = db
+    .prepare(
+      `SELECT id, content, importance, access_count, created_at, last_accessed_at
+       FROM memories
+       WHERE is_active = 1
+         AND access_count = 0
+         AND importance < ?
+         AND created_at < ?
+       ORDER BY created_at ASC`
+    )
+    .all(forgottenMaxImportance, forgottenDateStr) as unknown as Array<{
+    id: string;
+    content: string;
+    importance: number;
+    access_count: number;
+    created_at: string;
+    last_accessed_at: string | null;
+  }>;
+
   // Deduplicate (categories may overlap)
   const seen = new Set<string>();
   const candidates: ArchiveCandidate[] = [];
@@ -150,6 +183,13 @@ export function getArchiveCandidates(
     if (!seen.has(row.id)) {
       seen.add(row.id);
       candidates.push({ ...row, reason: "neglected" });
+    }
+  }
+
+  for (const row of forgottenRows) {
+    if (!seen.has(row.id)) {
+      seen.add(row.id);
+      candidates.push({ ...row, reason: "forgotten" });
     }
   }
 

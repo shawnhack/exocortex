@@ -3,6 +3,8 @@ import { ulid } from "ulid";
 import { cosineSimilarity } from "../memory/scoring.js";
 import type { EmbeddingProvider } from "../embedding/types.js";
 import type { MemoryRow } from "../memory/types.js";
+import { detectCommunities } from "../entities/graph.js";
+import type { Community } from "../entities/graph.js";
 
 export interface ConsolidationCluster {
   centroidId: string;
@@ -16,6 +18,15 @@ export interface ConsolidationResult {
   summariesCreated: number;
 }
 
+export interface CommunityAwareResult {
+  /** Clusters after applying community-boundary splitting */
+  clusters: ConsolidationCluster[];
+  /** Memory IDs identified as bridges (connecting communities) and boosted */
+  bridgeMemoryIds: string[];
+  /** Number of clusters that were split due to community boundaries */
+  clustersSplit: number;
+}
+
 interface MemoryWithEmbedding {
   id: string;
   content: string;
@@ -27,6 +38,10 @@ interface MemoryWithEmbedding {
 /**
  * Find clusters of semantically similar memories that could be consolidated.
  * Uses greedy agglomerative clustering with cosine similarity threshold.
+ *
+ * When `communityAware` is true, clusters are post-processed to respect
+ * entity graph community boundaries: clusters spanning multiple communities
+ * are split, and bridge memories (high betweenness) get importance boosts.
  */
 export function findClusters(
   db: DatabaseSync,
@@ -35,6 +50,7 @@ export function findClusters(
     minClusterSize?: number;
     maxMemories?: number;
     timeBucket?: 'week' | 'month';
+    communityAware?: boolean;
   } = {}
 ): ConsolidationCluster[] {
   const minSimilarity = options.minSimilarity ?? 0.80;
@@ -112,7 +128,195 @@ export function findClusters(
     }
   }
 
+  // Apply community-aware filtering if requested
+  if (options.communityAware && clusters.length > 0) {
+    const result = applyCommunityAwareFiltering(db, clusters, minClusterSize);
+    return result.clusters;
+  }
+
   return clusters;
+}
+
+/**
+ * Build a map from memory ID to set of community IDs the memory belongs to.
+ * A memory belongs to a community if it is linked (via memory_entities) to an
+ * entity that is a member of that community.
+ */
+function buildMemoryCommunityMap(
+  db: DatabaseSync,
+  memoryIds: string[],
+  communities: Community[]
+): Map<string, Set<number>> {
+  if (memoryIds.length === 0 || communities.length === 0) {
+    return new Map();
+  }
+
+  // Build entity → community map
+  const entityToCommunity = new Map<string, number>();
+  for (const community of communities) {
+    for (const member of community.members) {
+      entityToCommunity.set(member.entityId, community.id);
+    }
+  }
+
+  // Query memory → entity links for the given memories
+  const placeholders = memoryIds.map(() => "?").join(",");
+  const links = db
+    .prepare(
+      `SELECT memory_id, entity_id FROM memory_entities
+       WHERE memory_id IN (${placeholders})`
+    )
+    .all(...memoryIds) as Array<{ memory_id: string; entity_id: string }>;
+
+  // Build memory → communities map
+  const memoryCommunities = new Map<string, Set<number>>();
+  for (const link of links) {
+    const communityId = entityToCommunity.get(link.entity_id);
+    if (communityId === undefined) continue;
+
+    let comSet = memoryCommunities.get(link.memory_id);
+    if (!comSet) {
+      comSet = new Set();
+      memoryCommunities.set(link.memory_id, comSet);
+    }
+    comSet.add(communityId);
+  }
+
+  return memoryCommunities;
+}
+
+/**
+ * Apply community-aware filtering to consolidation clusters.
+ *
+ * 1. Detects entity graph communities via label propagation
+ * 2. Splits clusters that span multiple communities at community boundaries
+ * 3. Identifies bridge memories (belonging to 2+ communities) and boosts
+ *    their importance to 0.8+ so they survive decay/consolidation
+ *
+ * Bridge memories are disproportionately valuable because they connect
+ * different knowledge domains (e.g., linking "trading" to "architecture").
+ */
+export function applyCommunityAwareFiltering(
+  db: DatabaseSync,
+  clusters: ConsolidationCluster[],
+  minClusterSize: number = 2
+): CommunityAwareResult {
+  const communities = detectCommunities(db);
+
+  // If no communities detected, return clusters unchanged
+  if (communities.length === 0) {
+    return { clusters, bridgeMemoryIds: [], clustersSplit: 0 };
+  }
+
+  // Collect all memory IDs across all clusters
+  const allMemoryIds = new Set<string>();
+  for (const cluster of clusters) {
+    for (const id of cluster.memberIds) {
+      allMemoryIds.add(id);
+    }
+  }
+
+  // Build memory → community mapping
+  const memoryCommunities = buildMemoryCommunityMap(
+    db,
+    Array.from(allMemoryIds),
+    communities
+  );
+
+  // Identify bridge memories (belong to 2+ communities) and boost importance
+  const bridgeMemoryIds: string[] = [];
+  const bridgeSet = new Set<string>();
+
+  for (const [memoryId, communityIds] of memoryCommunities) {
+    if (communityIds.size >= 2) {
+      bridgeMemoryIds.push(memoryId);
+      bridgeSet.add(memoryId);
+    }
+  }
+
+  // Boost importance of bridge memories to at least 0.8
+  if (bridgeMemoryIds.length > 0) {
+    const boostStmt = db.prepare(
+      "UPDATE memories SET importance = MAX(importance, 0.8) WHERE id = ? AND importance < 0.8"
+    );
+    for (const id of bridgeMemoryIds) {
+      boostStmt.run(id);
+    }
+  }
+
+  // Split clusters at community boundaries
+  const resultClusters: ConsolidationCluster[] = [];
+  let clustersSplit = 0;
+
+  for (const cluster of clusters) {
+    // Remove bridge memories from the cluster — they should be preserved, not merged
+    const nonBridgeMembers = cluster.memberIds.filter((id) => !bridgeSet.has(id));
+
+    // Group remaining members by their primary community
+    // (primary = most frequent community among the memory's entities)
+    const byCommunity = new Map<number | -1, string[]>();
+
+    for (const memoryId of nonBridgeMembers) {
+      const memComms = memoryCommunities.get(memoryId);
+      // Memories with no entity links get community -1 (unassigned)
+      const primaryCommunity = memComms && memComms.size > 0
+        ? memComms.values().next().value!
+        : -1;
+
+      let group = byCommunity.get(primaryCommunity);
+      if (!group) {
+        group = [];
+        byCommunity.set(primaryCommunity, group);
+      }
+      group.push(memoryId);
+    }
+
+    // If all members are in the same community (or unassigned), keep cluster as-is
+    // but with bridge memories removed
+    if (byCommunity.size <= 1) {
+      const memberIds = nonBridgeMembers;
+      if (memberIds.length >= minClusterSize) {
+        resultClusters.push({
+          centroidId: memberIds.includes(cluster.centroidId) ? cluster.centroidId : memberIds[0],
+          memberIds,
+          avgSimilarity: cluster.avgSimilarity,
+          topic: cluster.topic,
+        });
+      }
+      continue;
+    }
+
+    // Split: create sub-clusters per community
+    clustersSplit++;
+    for (const [, memberIds] of byCommunity) {
+      if (memberIds.length < minClusterSize) continue;
+
+      // Pick the original centroid if it's in this sub-cluster, otherwise first member
+      const centroidId = memberIds.includes(cluster.centroidId)
+        ? cluster.centroidId
+        : memberIds[0];
+
+      // Retrieve content for topic extraction
+      const firstContent = db
+        .prepare("SELECT content FROM memories WHERE id = ?")
+        .get(centroidId) as { content: string } | undefined;
+      const topicContent = firstContent?.content ?? cluster.topic;
+      const topic = topicContent.slice(0, 80).replace(/\s+/g, " ").trim();
+
+      resultClusters.push({
+        centroidId,
+        memberIds,
+        avgSimilarity: cluster.avgSimilarity,
+        topic: topic.length < topicContent.length ? topic + "..." : topic,
+      });
+    }
+  }
+
+  return {
+    clusters: resultClusters,
+    bridgeMemoryIds,
+    clustersSplit,
+  };
 }
 
 /**

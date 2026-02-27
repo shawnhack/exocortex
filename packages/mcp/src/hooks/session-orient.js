@@ -184,10 +184,12 @@ async function main() {
       const top = scored.filter((m) => m.relevance > 0).slice(0, 2);
       if (top.length > 0) {
         for (const m of top) surfacedIds.add(m.id);
-        const lines = top.map(
-          (m) => `- ${truncate(m.content, TRUNCATE_LEN)} (${m.created_at.split("T")[0]})`
-        );
-        candidateSections.push({ name: "decisions", priority: 1, content: `**Recent decisions:**\n${lines.join("\n")}` });
+        const rawEntries = top.map((m) => ({ content: m.content, date: m.created_at.split("T")[0] }));
+        candidateSections.push({
+          name: "decisions", priority: 1,
+          header: "**Recent decisions:**", rawEntries,
+          content: renderEntrySection("**Recent decisions:**", rawEntries, TRUNCATE_LEN),
+        });
       }
     }
 
@@ -223,10 +225,12 @@ async function main() {
       const top = scored.filter((m) => m.relevance > 0).slice(0, 2);
       if (top.length > 0) {
         for (const m of top) surfacedIds.add(m.id);
-        const lines = top.map(
-          (m) => `- ${truncate(m.content, TRUNCATE_LEN)} (${m.created_at.split("T")[0]})`
-        );
-        candidateSections.push({ name: "threads", priority: 2, content: `**Open threads:**\n${lines.join("\n")}` });
+        const rawEntries = top.map((m) => ({ content: m.content, date: m.created_at.split("T")[0] }));
+        candidateSections.push({
+          name: "threads", priority: 2,
+          header: "**Open threads:**", rawEntries,
+          content: renderEntrySection("**Open threads:**", rawEntries, TRUNCATE_LEN),
+        });
       }
     }
 
@@ -249,10 +253,13 @@ async function main() {
 
     if (recentMemories.length > 0) {
       for (const m of recentMemories) surfacedIds.add(m.id);
-      const lines = recentMemories.map(
-        (m) => `- ${truncate(m.content, TRUNCATE_LEN)} (${m.created_at.split("T")[0]})`
-      );
-      candidateSections.push({ name: "recent", priority: 3, content: `**Recent (${projectName}):**\n${lines.join("\n")}` });
+      const rawEntries = recentMemories.map((m) => ({ content: m.content, date: m.created_at.split("T")[0] }));
+      const recentHeader = `**Recent (${projectName}):**`;
+      candidateSections.push({
+        name: "recent", priority: 3,
+        header: recentHeader, rawEntries,
+        content: renderEntrySection(recentHeader, rawEntries, TRUNCATE_LEN),
+      });
     }
 
     // 5. Technique memories (priority 4)
@@ -282,8 +289,12 @@ async function main() {
       const top = scored.filter((m) => m.relevance > 0).slice(0, 3);
       if (top.length > 0) {
         for (const m of top) surfacedIds.add(m.id);
-        const lines = top.map((m) => `- ${truncate(m.content, TRUNCATE_LEN)}`);
-        candidateSections.push({ name: "techniques", priority: 4, content: `**Learned techniques:**\n${lines.join("\n")}` });
+        const rawEntries = top.map((m) => ({ content: m.content }));
+        candidateSections.push({
+          name: "techniques", priority: 4,
+          header: "**Learned techniques:**", rawEntries,
+          content: renderEntrySection("**Learned techniques:**", rawEntries, TRUNCATE_LEN),
+        });
       }
     }
 
@@ -500,18 +511,53 @@ async function main() {
   // Fill greedily by priority order until token budget is reached
   candidateSections.sort((a, b) => a.priority - b.priority);
   const selectedSections = [];
+  const selectedIndices = [];
   let usedTokens = 0;
 
-  for (const section of candidateSections) {
+  for (let i = 0; i < candidateSections.length; i++) {
+    const section = candidateSections[i];
     const sectionTokens = estimateTokens(section.content);
     if (selectedSections.length > 0 && usedTokens + sectionTokens > TOKEN_BUDGET) {
       continue; // Skip sections that would exceed budget, but keep trying smaller ones
     }
     selectedSections.push(section.content);
+    selectedIndices.push(i);
     usedTokens += sectionTokens;
   }
 
   if (selectedSections.length === 0) return;
+
+  // Second pass: expand sections with remaining budget
+  const remainingTokens = TOKEN_BUDGET - usedTokens;
+  if (remainingTokens > 100) {
+    // Count how many selected sections have expandable raw entries
+    const expandable = selectedIndices.filter((i) => candidateSections[i].rawEntries);
+    if (expandable.length > 0) {
+      const expandedLen = Math.min(
+        300,
+        TRUNCATE_LEN + Math.floor((remainingTokens * 4) / expandable.length)
+      );
+      if (expandedLen > TRUNCATE_LEN) {
+        // Re-render expandable sections and recheck budget
+        let newUsed = 0;
+        for (let j = 0; j < selectedSections.length; j++) {
+          const section = candidateSections[selectedIndices[j]];
+          if (section.rawEntries) {
+            const expanded = renderEntrySection(section.header, section.rawEntries, expandedLen);
+            const expandedTokens = estimateTokens(expanded);
+            if (newUsed + expandedTokens <= TOKEN_BUDGET) {
+              selectedSections[j] = expanded;
+              newUsed += expandedTokens;
+            } else {
+              newUsed += estimateTokens(selectedSections[j]);
+            }
+          } else {
+            newUsed += estimateTokens(selectedSections[j]);
+          }
+        }
+      }
+    }
+  }
 
   const context = selectedSections.join("\n\n");
 
@@ -529,6 +575,15 @@ function truncate(text, maxLen = TRUNCATE_LEN) {
   const oneLine = text.replace(/\n/g, " ").trim();
   if (oneLine.length <= maxLen) return oneLine;
   return oneLine.substring(0, maxLen - 3) + "...";
+}
+
+/** Render a section from raw entries with a given truncation length */
+function renderEntrySection(header, rawEntries, truncLen) {
+  const lines = rawEntries.map((e) => {
+    const text = truncate(e.content, truncLen);
+    return e.date ? `- ${text} (${e.date})` : `- ${text}`;
+  });
+  return `${header}\n${lines.join("\n")}`;
 }
 
 main();

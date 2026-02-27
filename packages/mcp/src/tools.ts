@@ -2,10 +2,79 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, autoConsolidate, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, autoDismissContradictions, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent, recomputeQualityScores } from "@exocortex/core";
+import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, autoConsolidate, applyCommunityAwareFiltering, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, autoDismissContradictions, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent, recomputeQualityScores } from "@exocortex/core";
 import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "./utils.js";
+
+// --- LLM re-ranking helper ---
+
+interface RerankCandidate {
+  id: string;
+  preview: string;
+}
+
+async function rerankWithLLM(
+  query: string,
+  candidates: RerankCandidate[]
+): Promise<string[] | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+
+  const candidateList = candidates
+    .map((c, i) => `${i + 1}. [${c.id}] ${c.preview}`)
+    .join("\n");
+
+  const prompt = `Given the search query and candidate results below, return ONLY the IDs in order of relevance to the query (most relevant first). Return one ID per line, no other text.
+
+Query: ${query}
+
+Candidates:
+${candidateList}
+
+Respond with ONLY the IDs (the values in square brackets), one per line, most relevant first:`;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1024,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!res.ok) return null;
+
+    const body = (await res.json()) as {
+      content?: Array<{ type: string; text?: string }>;
+    };
+    const text = body.content?.[0]?.text;
+    if (!text) return null;
+
+    // Parse IDs from response (one per line, may have brackets or extra whitespace)
+    const ids = text
+      .split("\n")
+      .map((line) => line.trim().replace(/^\[/, "").replace(/\]$/, "").trim())
+      .filter((id) => id.length > 0);
+
+    // Validate that all returned IDs are from our candidate set
+    const candidateIds = new Set(candidates.map((c) => c.id));
+    const validIds = ids.filter((id) => candidateIds.has(id));
+
+    // Only use reranking if we got back most of the candidates
+    if (validIds.length < candidates.length / 2) return null;
+
+    return validIds;
+  } catch {
+    return null;
+  }
+}
 
 export interface RegisterToolsOptions {
   attribution?: {
@@ -185,6 +254,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       benchmark: z.boolean().optional().describe("Store as benchmark artifact (low default importance, reduced indexing/chunking)"),
       expires_at: z.string().optional().describe("ISO timestamp when this memory should auto-expire (e.g. '2026-03-01T00:00:00Z')"),
       namespace: z.string().optional().describe("Project namespace for scoped retrieval (e.g. 'exocortex', 'moodarc')"),
+      deduplicate: z.boolean().optional().describe("Opt-in semantic dedup: if true, checks for existing near-duplicate memories (>85% similar + >60% word overlap) and returns the existing memory instead of creating a new one"),
     },
     async (args) => {
       try {
@@ -197,6 +267,16 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
         });
 
         const store = new MemoryStore(db);
+
+        // Auto-set expires_at for transient memories (unless caller provides one)
+        let expiresAt = args.expires_at;
+        if (!expiresAt && args.tags && args.tags.length > 0) {
+          const TRANSIENT_TAGS = new Set(["run-summary", "digest", "sentinel", "operations", "session-digest", "auto-digested"]);
+          const hasTransientTag = args.tags.some((t) => TRANSIENT_TAGS.has(t));
+          if (hasTransientTag) {
+            expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+          }
+        }
 
         const result = await store.create({
           content: args.content,
@@ -214,8 +294,9 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           metadata: args.metadata,
           is_metadata: args.is_metadata,
           benchmark: args.benchmark,
-          expires_at: args.expires_at,
+          expires_at: expiresAt,
           namespace: args.namespace,
+          deduplicate: args.deduplicate,
         });
 
         const meta: string[] = [`id: ${result.memory.id}`];
@@ -227,6 +308,8 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
             meta.push(`dedup reused ${result.superseded_id} — ${pct}% similar`);
           } else if (result.dedup_action === "merged") {
             meta.push(`merged into ${result.superseded_id} — ${pct}% similar`);
+          } else if (result.dedup_action === "near_duplicate") {
+            meta.push(`near-duplicate of ${result.superseded_id} — ${pct}% similar (not stored)`);
           } else {
             meta.push(`superseded ${result.superseded_id} — ${pct}% similar`);
           }
@@ -368,6 +451,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
       max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
       namespace: z.string().optional().describe("Filter by project namespace"),
+      rerank: z.boolean().optional().describe("Opt-in LLM re-ranking. After hybrid search returns results, sends them to a lightweight LLM (Claude Haiku) to re-rank by semantic relevance to the query. Requires ANTHROPIC_API_KEY env var. Adds latency (~1-2s) but improves precision for ambiguous queries."),
     },
     async (args) => {
       try {
@@ -376,7 +460,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
 
         const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 10);
 
-        const results = await search.search({
+        let results = await search.search({
           query: args.query,
           expanded_query: args.expanded_query,
           limit: fetchLimit,
@@ -393,9 +477,36 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           return { content: [{ type: "text", text: "No memories found matching the query." }] };
         }
 
+        // Opt-in LLM re-ranking
+        let reranked = false;
+        if (args.rerank && results.length > 1) {
+          const candidates = results.map((r) => ({
+            id: r.memory.id,
+            preview: r.memory.content.substring(0, 200),
+          }));
+          const rankedIds = await rerankWithLLM(args.query, candidates);
+          if (rankedIds) {
+            const resultMap = new Map(results.map((r) => [r.memory.id, r]));
+            const reorderedResults: typeof results = [];
+            for (const id of rankedIds) {
+              const r = resultMap.get(id);
+              if (r) reorderedResults.push(r);
+            }
+            // Append any results not returned by the LLM at the end
+            for (const r of results) {
+              if (!rankedIds.includes(r.memory.id)) {
+                reorderedResults.push(r);
+              }
+            }
+            results = reorderedResults;
+            reranked = true;
+          }
+        }
+
         recordSearchResults(results.map((r) => r.memory.id));
 
         const scoringMode = getRRFConfig(db).enabled ? "rrf" : "legacy";
+        const modeLabel = reranked ? `${scoringMode}+rerank` : scoringMode;
 
         if (args.compact) {
           const formatCompact = (r: typeof results[number]) => {
@@ -408,13 +519,13 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           if (args.max_tokens) {
             const { formatted, totalTokens } = packByTokenBudget(results, args.max_tokens, formatCompact);
             return {
-              content: [{ type: "text", text: `Found ${formatted.length} memories (~${totalTokens} tokens, compact, ${scoringMode}):\n\n${formatted.join("\n")}` }],
+              content: [{ type: "text", text: `Found ${formatted.length} memories (~${totalTokens} tokens, compact, ${modeLabel}):\n\n${formatted.join("\n")}` }],
             };
           }
 
           const lines = results.map(formatCompact);
           return {
-            content: [{ type: "text", text: `Found ${results.length} memories (compact, ${scoringMode}):\n\n${lines.join("\n")}` }],
+            content: [{ type: "text", text: `Found ${results.length} memories (compact, ${modeLabel}):\n\n${lines.join("\n")}` }],
           };
         }
 
@@ -435,7 +546,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
             await store.recordAccess(r.memory.id, args.query);
           }
           return {
-            content: [{ type: "text", text: `Found ${formatted.length} memories (~${totalTokens} tokens, ${scoringMode}):\n\n${formatted.join("\n\n")}` }],
+            content: [{ type: "text", text: `Found ${formatted.length} memories (~${totalTokens} tokens, ${modeLabel}):\n\n${formatted.join("\n\n")}` }],
           };
         }
 
@@ -461,7 +572,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
         const factsSection = buildFactsSection(args.query);
 
         return {
-          content: [{ type: "text", text: `Found ${results.length} memories (${scoringMode}):\n\n${lines.join("\n\n")}${linkSection}${entityProfileSection}${factsSection}` }],
+          content: [{ type: "text", text: `Found ${results.length} memories (${modeLabel}):\n\n${lines.join("\n\n")}${linkSection}${entityProfileSection}${factsSection}` }],
         };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
@@ -1118,6 +1229,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       min_similarity: z.number().min(0).max(1).optional().describe("Minimum cosine similarity for clustering (default 0.75)"),
       min_cluster_size: z.number().min(2).optional().describe("Minimum cluster size (default 3)"),
       time_bucket: z.enum(["week", "month"]).optional().describe("Constrain clustering to same time window (week or month)"),
+      community_aware: z.boolean().optional().describe("Use entity graph communities to split clusters at community boundaries and protect bridge memories (default false)"),
     },
     async (args) => {
       try {
@@ -1125,6 +1237,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           minSimilarity: args.min_similarity,
           minClusterSize: args.min_cluster_size,
           timeBucket: args.time_bucket,
+          communityAware: args.community_aware,
         });
 
         if (clusters.length === 0) {
@@ -1132,13 +1245,26 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
         }
 
         if (args.dry_run !== false) {
+          // If community-aware, also report bridge/split info in the dry-run output
+          let bridgeInfo = "";
+          if (args.community_aware) {
+            // Re-run without community filtering to get raw clusters for comparison
+            const rawClusters = findClusters(db, {
+              minSimilarity: args.min_similarity,
+              minClusterSize: args.min_cluster_size,
+              timeBucket: args.time_bucket,
+            });
+            const caResult = applyCommunityAwareFiltering(db, rawClusters, args.min_cluster_size ?? 2);
+            bridgeInfo = `\n\nCommunity-aware: ${caResult.clustersSplit} cluster(s) split at community boundaries, ${caResult.bridgeMemoryIds.length} bridge memory(ies) protected (importance boosted to 0.8+)`;
+          }
+
           const lines = clusters.map((c, i) => {
             return `${i + 1}. "${c.topic}" — ${c.memberIds.length} memories, avg similarity: ${c.avgSimilarity.toFixed(2)}`;
           });
           return {
             content: [{
               type: "text",
-              text: `Found ${clusters.length} clusters (dry run):\n\n${lines.join("\n")}\n\nRun with dry_run: false to consolidate.`,
+              text: `Found ${clusters.length} clusters (dry run):\n\n${lines.join("\n")}${bridgeInfo}\n\nRun with dry_run: false to consolidate.`,
             }],
           };
         }
@@ -1863,12 +1989,14 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
         }
 
         const store = new MemoryStore(db);
+        const digestExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
         const { memory } = await store.create({
           content: result.summary,
           content_type: "summary",
           source: "mcp",
           importance: 0.5,
           tags: ["session-digest", ...(result.project ? [result.project] : []), ...(args.tags ?? [])],
+          expires_at: digestExpiresAt,
         });
 
         let factsStored = 0;

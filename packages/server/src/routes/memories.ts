@@ -46,6 +46,7 @@ const createSchema = z.object({
   benchmark: z.boolean().optional(),
   expires_at: z.string().optional(),
   namespace: z.string().optional(),
+  deduplicate: z.boolean().optional(),
 });
 
 const updateSchema = z.object({

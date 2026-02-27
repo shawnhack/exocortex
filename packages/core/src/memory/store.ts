@@ -296,6 +296,23 @@ export class MemoryStore {
       }
     }
 
+    // Opt-in semantic dedup: check for near-duplicates before inserting
+    if (input.deduplicate && embeddingFloat && !input.parent_id) {
+      const nearDup = this.findNearDuplicate(input, embeddingFloat);
+      if (nearDup) {
+        const existingMemory = await this.getById(nearDup.existing_id);
+        if (existingMemory) {
+          incrementCounter(this.db, "memory.dedup_near_duplicate");
+          return {
+            memory: existingMemory,
+            superseded_id: nearDup.existing_id,
+            dedup_similarity: nearDup.similarity,
+            dedup_action: "near_duplicate",
+          };
+        }
+      }
+    }
+
     if (shouldChunk) {
       let memory: Memory;
       try {
@@ -809,6 +826,81 @@ export class MemoryStore {
           }
           return { superseded_id: candidate.id, similarity, action: "merge" as const };
         }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Opt-in semantic dedup: find an existing memory that covers the same content.
+   * Returns match info if similarity > 0.85 AND word overlap > 60%.
+   * Unlike findDedupCandidate, this does NOT supersede — it returns the existing
+   * memory so the caller can decide whether to update or skip.
+   */
+  private findNearDuplicate(
+    input: CreateMemoryInput,
+    newEmbedding: Float32Array
+  ): { existing_id: string; similarity: number } | null {
+    if (input.content.length < 50) return null;
+
+    const NEAR_DEDUP_THRESHOLD = 0.85;
+    const WORD_OVERLAP_THRESHOLD = 0.60;
+
+    // Build namespace filter
+    const namespace = input.namespace ?? null;
+
+    // Query recent active memories, optionally filtered by namespace
+    const candidates = namespace
+      ? this.db
+          .prepare(
+            `SELECT id, content, embedding FROM memories
+             WHERE is_active = 1
+               AND embedding IS NOT NULL
+               AND parent_id IS NULL
+               AND namespace = ?
+             ORDER BY created_at DESC LIMIT 200`
+          )
+          .all(namespace) as unknown as Array<{ id: string; content: string; embedding: Uint8Array }>
+      : this.db
+          .prepare(
+            `SELECT id, content, embedding FROM memories
+             WHERE is_active = 1
+               AND embedding IS NOT NULL
+               AND parent_id IS NULL
+             ORDER BY created_at DESC LIMIT 200`
+          )
+          .all() as unknown as Array<{ id: string; content: string; embedding: Uint8Array }>;
+
+    // Top 3 by cosine similarity
+    const scored: Array<{ id: string; content: string; similarity: number }> = [];
+    for (const c of candidates) {
+      const bytes = c.embedding as unknown as Uint8Array;
+      const cEmb = new Float32Array(new Uint8Array(bytes).buffer);
+      const sim = cosineSimilarity(newEmbedding, cEmb);
+      if (sim >= NEAR_DEDUP_THRESHOLD) {
+        scored.push({ id: c.id, content: c.content, similarity: sim });
+      }
+    }
+    scored.sort((a, b) => b.similarity - a.similarity);
+    const top3 = scored.slice(0, 3);
+
+    // Check word overlap for top candidates
+    const newWords = new Set(
+      input.content.toLowerCase().split(/\s+/).filter((w) => w.length >= 3)
+    );
+
+    for (const candidate of top3) {
+      const existingWords = new Set(
+        candidate.content.toLowerCase().split(/\s+/).filter((w) => w.length >= 3)
+      );
+      let overlap = 0;
+      for (const w of newWords) {
+        if (existingWords.has(w)) overlap++;
+      }
+      const overlapRatio = overlap / Math.max(newWords.size, 1);
+      if (overlapRatio > WORD_OVERLAP_THRESHOLD) {
+        return { existing_id: candidate.id, similarity: candidate.similarity };
       }
     }
 

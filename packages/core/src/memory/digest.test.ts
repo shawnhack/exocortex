@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { digestTranscript, extractFacts } from "./digest.js";
+import { digestTranscript, extractFacts, isNoiseText } from "./digest.js";
 
 function tmpFile(lines: string[]): string {
   const p = path.join(os.tmpdir(), `digest-test-${Date.now()}.jsonl`);
@@ -143,6 +143,83 @@ describe("digestTranscript", () => {
     expect(result.facts.length).toBeGreaterThan(0);
     expect(result.facts.some((f) => f.type === "discovery")).toBe(true);
     expect(result.summary).toContain("Key takeaways:");
+  });
+});
+
+describe("isNoiseText", () => {
+  it("filters tool intent announcements", () => {
+    expect(isNoiseText("Let me read the file to check.")).toBe(true);
+    expect(isNoiseText("I'll now search for the function.")).toBe(true);
+    expect(isNoiseText("Going to edit the configuration.")).toBe(true);
+  });
+
+  it("filters result introductions", () => {
+    expect(isNoiseText("Here are the results from the search.")).toBe(true);
+    expect(isNoiseText("The output shows the expected values.")).toBe(true);
+  });
+
+  it("filters action narration", () => {
+    expect(isNoiseText("Reading the file to understand the structure.")).toBe(true);
+    expect(isNoiseText("Searching for references to that function.")).toBe(true);
+    expect(isNoiseText("Running the test suite to verify changes.")).toBe(true);
+  });
+
+  it("filters acknowledgments", () => {
+    expect(isNoiseText("Done.")).toBe(true);
+    expect(isNoiseText("Sure!")).toBe(true);
+    expect(isNoiseText("OK")).toBe(true);
+  });
+
+  it("filters very short text", () => {
+    expect(isNoiseText("OK, done.")).toBe(true);
+    expect(isNoiseText("Yes")).toBe(true);
+  });
+
+  it("keeps substantive text", () => {
+    expect(isNoiseText("The root cause was a race condition in the database connection pool that caused intermittent failures.")).toBe(false);
+    expect(isNoiseText("I decided to use SQLite instead of PostgreSQL for local-first storage because it avoids the need for a separate server process.")).toBe(false);
+  });
+
+  it("keeps multi-line text where first line is substantive", () => {
+    expect(isNoiseText("The architecture uses a three-tier approach:\n- Data layer\n- Service layer\n- Presentation layer")).toBe(false);
+  });
+});
+
+describe("digestTranscript noise filtering", () => {
+  const files: string[] = [];
+  afterEach(() => {
+    for (const f of files) {
+      try { fs.unlinkSync(f); } catch {}
+    }
+    files.length = 0;
+  });
+
+  it("excludes narration text from assistantTexts", async () => {
+    const p = tmpFile([
+      assistantEntry([
+        textBlock("Let me read the file."),
+        toolUse("Edit", { file_path: "/app/src/x.ts", old_string: "a", new_string: "b" }),
+        textBlock("The root cause was a missing null check in the parser that caused undefined access on empty inputs."),
+      ]),
+    ]);
+    files.push(p);
+
+    const result = await digestTranscript(p);
+    expect(result.assistantTexts).toHaveLength(1);
+    expect(result.assistantTexts[0]).toContain("root cause");
+  });
+
+  it("excludes short acknowledgments from assistantTexts", async () => {
+    const p = tmpFile([
+      assistantEntry([textBlock("Done!")]),
+      assistantEntry([textBlock("Sure")]),
+      assistantEntry([textBlock("After investigating, I found that the date parser was using local timezone.")]),
+    ]);
+    files.push(p);
+
+    const result = await digestTranscript(p);
+    expect(result.assistantTexts).toHaveLength(1);
+    expect(result.assistantTexts[0]).toContain("date parser");
   });
 });
 
