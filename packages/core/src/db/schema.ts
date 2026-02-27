@@ -532,6 +532,33 @@ export function initializeSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);
   `);
 
+  // Predictions table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS predictions (
+      id TEXT PRIMARY KEY,
+      claim TEXT NOT NULL,
+      confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+      domain TEXT NOT NULL DEFAULT 'general'
+        CHECK(domain IN ('technical','product','market','personal','political','scientific','general')),
+      status TEXT NOT NULL DEFAULT 'open'
+        CHECK(status IN ('open','resolved','voided')),
+      resolution TEXT CHECK(resolution IN ('true','false','partial')),
+      resolution_notes TEXT,
+      resolution_memory_id TEXT,
+      source TEXT NOT NULL DEFAULT 'user'
+        CHECK(source IN ('user','sentinel','agent','mcp')),
+      goal_id TEXT,
+      deadline TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_predictions_status ON predictions(status);
+    CREATE INDEX IF NOT EXISTS idx_predictions_domain ON predictions(domain);
+    CREATE INDEX IF NOT EXISTS idx_predictions_deadline ON predictions(deadline);
+  `);
+
   // Goals embedding column (migration for existing databases)
   const goalColumns = db
     .prepare("PRAGMA table_info(goals)")

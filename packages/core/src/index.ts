@@ -196,6 +196,23 @@ export type {
 } from "./goals/types.js";
 export { GoalStore } from "./goals/store.js";
 
+// Predictions
+export type {
+  Prediction,
+  PredictionStatus,
+  PredictionDomain,
+  PredictionResolution,
+  PredictionSource,
+  CreatePredictionInput,
+  ResolvePredictionInput,
+  PredictionListFilter,
+  CalibrationStats,
+  CalibrationBucket,
+  DomainStats,
+  CalibrationTrend,
+} from "./predictions/types.js";
+export { PredictionStore } from "./predictions/store.js";
+
 // Tag normalization
 export {
   DEFAULT_TAG_ALIAS_MAP,
