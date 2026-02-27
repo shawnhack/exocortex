@@ -7,75 +7,6 @@ import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "./utils.js";
 
-// --- LLM re-ranking helper ---
-
-interface RerankCandidate {
-  id: string;
-  preview: string;
-}
-
-async function rerankWithLLM(
-  query: string,
-  candidates: RerankCandidate[]
-): Promise<string[] | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-
-  const candidateList = candidates
-    .map((c, i) => `${i + 1}. [${c.id}] ${c.preview}`)
-    .join("\n");
-
-  const prompt = `Given the search query and candidate results below, return ONLY the IDs in order of relevance to the query (most relevant first). Return one ID per line, no other text.
-
-Query: ${query}
-
-Candidates:
-${candidateList}
-
-Respond with ONLY the IDs (the values in square brackets), one per line, most relevant first:`;
-
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-
-    if (!res.ok) return null;
-
-    const body = (await res.json()) as {
-      content?: Array<{ type: string; text?: string }>;
-    };
-    const text = body.content?.[0]?.text;
-    if (!text) return null;
-
-    // Parse IDs from response (one per line, may have brackets or extra whitespace)
-    const ids = text
-      .split("\n")
-      .map((line) => line.trim().replace(/^\[/, "").replace(/\]$/, "").trim())
-      .filter((id) => id.length > 0);
-
-    // Validate that all returned IDs are from our candidate set
-    const candidateIds = new Set(candidates.map((c) => c.id));
-    const validIds = ids.filter((id) => candidateIds.has(id));
-
-    // Only use reranking if we got back most of the candidates
-    if (validIds.length < candidates.length / 2) return null;
-
-    return validIds;
-  } catch {
-    return null;
-  }
-}
-
 export interface RegisterToolsOptions {
   attribution?: {
     provider?: string;
@@ -451,7 +382,6 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
       max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
       namespace: z.string().optional().describe("Filter by project namespace"),
-      rerank: z.boolean().optional().describe("Opt-in LLM re-ranking. After hybrid search returns results, sends them to a lightweight LLM (Claude Haiku) to re-rank by semantic relevance to the query. Requires ANTHROPIC_API_KEY env var. Adds latency (~1-2s) but improves precision for ambiguous queries."),
     },
     async (args) => {
       try {
@@ -460,7 +390,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
 
         const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 10);
 
-        let results = await search.search({
+        const results = await search.search({
           query: args.query,
           expanded_query: args.expanded_query,
           limit: fetchLimit,
@@ -477,36 +407,10 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           return { content: [{ type: "text", text: "No memories found matching the query." }] };
         }
 
-        // Opt-in LLM re-ranking
-        let reranked = false;
-        if (args.rerank && results.length > 1) {
-          const candidates = results.map((r) => ({
-            id: r.memory.id,
-            preview: r.memory.content.substring(0, 200),
-          }));
-          const rankedIds = await rerankWithLLM(args.query, candidates);
-          if (rankedIds) {
-            const resultMap = new Map(results.map((r) => [r.memory.id, r]));
-            const reorderedResults: typeof results = [];
-            for (const id of rankedIds) {
-              const r = resultMap.get(id);
-              if (r) reorderedResults.push(r);
-            }
-            // Append any results not returned by the LLM at the end
-            for (const r of results) {
-              if (!rankedIds.includes(r.memory.id)) {
-                reorderedResults.push(r);
-              }
-            }
-            results = reorderedResults;
-            reranked = true;
-          }
-        }
-
         recordSearchResults(results.map((r) => r.memory.id));
 
         const scoringMode = getRRFConfig(db).enabled ? "rrf" : "legacy";
-        const modeLabel = reranked ? `${scoringMode}+rerank` : scoringMode;
+        const modeLabel = scoringMode;
 
         if (args.compact) {
           const formatCompact = (r: typeof results[number]) => {
