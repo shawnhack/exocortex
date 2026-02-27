@@ -117,7 +117,7 @@ async function main() {
   }
 
   // candidateSections: { name, priority, content }
-  // Priority order: goals → decisions → threads → recent → techniques → entities → contradictions → facts → skills → self-model
+  // Priority order: goals → stalled-goals → decisions → threads → recent → techniques → entities → contradictions → facts → skills → self-model
   const candidateSections = [];
   const surfacedIds = new Set();
 
@@ -155,7 +155,51 @@ async function main() {
       candidateSections.push({ name: "goals", priority: 0, content: `**Active goals:**\n${lines.join("\n")}` });
     }
 
-    // 2. Recent decisions (priority 1)
+    // 1b. Stalled goals (priority 1 — between goals and decisions)
+    try {
+      const stallDays = 7;
+      const stallCutoff = new Date(Date.now() - stallDays * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .replace("T", " ")
+        .replace("Z", "");
+
+      const activeGoals = db
+        .prepare(
+          `SELECT id, title, updated_at FROM goals WHERE status = 'active'`
+        )
+        .all();
+
+      const stalledGoals = activeGoals.filter((g) => {
+        // Check if goal was updated recently
+        if (g.updated_at >= stallCutoff) return false;
+        // Check for any recent progress memory
+        const recentProgress = db
+          .prepare(
+            `SELECT COUNT(*) as count FROM memories m
+             INNER JOIN memory_tags mt ON m.id = mt.memory_id AND mt.tag = 'goal-progress'
+             WHERE m.is_active = 1
+               AND m.metadata LIKE ?
+               AND m.created_at >= ?`
+          )
+          .get(`%"goal_id":"${g.id}"%`, stallCutoff);
+        return recentProgress.count === 0;
+      });
+
+      if (stalledGoals.length > 0) {
+        const lines = stalledGoals.map((g) => {
+          const updatedDate = new Date(g.updated_at + "Z");
+          const daysSinceUpdate = Math.floor((Date.now() - updatedDate.getTime()) / (1000 * 60 * 60 * 24));
+          return `- ${g.title} (stalled ${daysSinceUpdate}d)`;
+        });
+        candidateSections.push({
+          name: "stalled-goals",
+          priority: 1,
+          content: `**Stalled goals:**\n${lines.join("\n")}`,
+        });
+      }
+    } catch {}
+
+    // 2. Recent decisions (priority 2 — shifted for stalled goals)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
       .toISOString()
       .split("T")[0];
@@ -186,7 +230,7 @@ async function main() {
         for (const m of top) surfacedIds.add(m.id);
         const rawEntries = top.map((m) => ({ content: m.content, date: m.created_at.split("T")[0] }));
         candidateSections.push({
-          name: "decisions", priority: 1,
+          name: "decisions", priority: 2,
           header: "**Recent decisions:**", rawEntries,
           content: renderEntrySection("**Recent decisions:**", rawEntries, TRUNCATE_LEN),
         });
@@ -227,7 +271,7 @@ async function main() {
         for (const m of top) surfacedIds.add(m.id);
         const rawEntries = top.map((m) => ({ content: m.content, date: m.created_at.split("T")[0] }));
         candidateSections.push({
-          name: "threads", priority: 2,
+          name: "threads", priority: 3,
           header: "**Open threads:**", rawEntries,
           content: renderEntrySection("**Open threads:**", rawEntries, TRUNCATE_LEN),
         });
@@ -256,7 +300,7 @@ async function main() {
       const rawEntries = recentMemories.map((m) => ({ content: m.content, date: m.created_at.split("T")[0] }));
       const recentHeader = `**Recent (${projectName}):**`;
       candidateSections.push({
-        name: "recent", priority: 3,
+        name: "recent", priority: 4,
         header: recentHeader, rawEntries,
         content: renderEntrySection(recentHeader, rawEntries, TRUNCATE_LEN),
       });
@@ -291,7 +335,7 @@ async function main() {
         for (const m of top) surfacedIds.add(m.id);
         const rawEntries = top.map((m) => ({ content: m.content }));
         candidateSections.push({
-          name: "techniques", priority: 4,
+          name: "techniques", priority: 5,
           header: "**Learned techniques:**", rawEntries,
           content: renderEntrySection("**Learned techniques:**", rawEntries, TRUNCATE_LEN),
         });
@@ -327,7 +371,7 @@ async function main() {
         const top = scored.filter((e) => e.relevance > 0).slice(0, 3);
         if (top.length > 0) {
           const lines = top.map((e) => `- **${e.name}**: ${e.profile}`);
-          candidateSections.push({ name: "entities", priority: 5, content: `**Key entities:**\n${lines.join("\n")}` });
+          candidateSections.push({ name: "entities", priority: 6, content: `**Key entities:**\n${lines.join("\n")}` });
         }
       }
     } catch {}
@@ -340,7 +384,7 @@ async function main() {
       if (contradictionCount && contradictionCount.cnt > 0) {
         candidateSections.push({
           name: "contradictions",
-          priority: 6,
+          priority: 7,
           content: `**Pending contradictions:** ${contradictionCount.cnt} (use \`memory_contradictions\` to review)`,
         });
       }
@@ -379,7 +423,7 @@ async function main() {
         const lines = factResults.map(
           (f) => `- ${f.subject} ${f.predicate} ${f.object} (${Math.round(f.confidence * 100)}%)`
         );
-        candidateSections.push({ name: "facts", priority: 7, content: `**Known facts:**\n${lines.join("\n")}` });
+        candidateSections.push({ name: "facts", priority: 8, content: `**Known facts:**\n${lines.join("\n")}` });
       }
     } catch {}
 
@@ -403,7 +447,7 @@ async function main() {
       if (match) {
         candidateSections.push({
           name: "self-model",
-          priority: 9,
+          priority: 10,
           content: `**Functional directives (from self-model):**\n${match[1].trim()}`,
         });
       }
@@ -498,7 +542,7 @@ async function main() {
         if (lines.length > 0) {
           candidateSections.push({
             name: "skills",
-            priority: 8,
+            priority: 9,
             content: `**Active skills (${skillNames.length}):**\n${lines.join("\n")}`,
           });
         }

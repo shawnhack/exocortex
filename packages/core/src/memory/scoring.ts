@@ -25,7 +25,7 @@ export function getWeights(db: DatabaseSync): ScoringWeights {
     usefulness: parseFloat(getSetting(db, "scoring.usefulness_weight") ?? "0.05"),
     valence: parseFloat(getSetting(db, "scoring.valence_weight") ?? "0.05"),
     quality: parseFloat(getSetting(db, "scoring.quality_weight") ?? "0.10"),
-    goalGated: parseFloat(getSetting(db, "scoring.goal_gated_weight") ?? "0.10"),
+    goalGated: parseFloat(getSetting(db, "scoring.goal_gated_weight") ?? "0.15"),
   };
 }
 
@@ -96,7 +96,8 @@ export function valenceScore(valence: number): number {
  */
 export function goalRelevanceScore(
   memoryTags: string[],
-  goalKeywords: Set<string>
+  goalKeywords: Set<string>,
+  memoryContent?: string
 ): number {
   if (goalKeywords.size === 0) return 0;
 
@@ -109,10 +110,24 @@ export function goalRelevanceScore(
   for (const tag of memoryTags) {
     if (goalKeywords.has(tag)) matchCount++;
   }
-  if (matchCount === 0) return 0;
+  if (matchCount > 0) {
+    // Normalize: 3+ matching tags = full relevance
+    return Math.min(1.0, matchCount / Math.min(goalKeywords.size, 3));
+  }
 
-  // Normalize: 3+ matching tags = full relevance
-  return Math.min(1.0, matchCount / Math.min(goalKeywords.size, 3));
+  // Content-based matching (weaker signal than tags, max 0.5)
+  if (memoryContent) {
+    const contentLower = memoryContent.toLowerCase();
+    let contentMatches = 0;
+    for (const kw of goalKeywords) {
+      if (contentLower.includes(kw)) contentMatches++;
+    }
+    if (contentMatches >= 2) {
+      return Math.min(0.5, contentMatches / Math.min(goalKeywords.size, 5));
+    }
+  }
+
+  return 0;
 }
 
 /**

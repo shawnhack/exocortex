@@ -380,7 +380,8 @@ export class GoalStore {
     const relevant = await this.detectRelevantGoals(content, contentEmbedding);
     if (relevant.length === 0) return [];
 
-    const goal = relevant[0];
+    // Link to top 3 relevant goals
+    const topGoals = relevant.slice(0, 3);
 
     // Add tags
     const insertTag = this.db.prepare(
@@ -389,23 +390,27 @@ export class GoalStore {
     insertTag.run(memoryId, "goal-progress");
     insertTag.run(memoryId, "goal-progress-implicit");
 
-    // Merge goal_id into existing metadata
+    // Merge goal_ids into existing metadata (keep goal_id for backward compat)
     const row = this.db
       .prepare("SELECT metadata FROM memories WHERE id = ?")
       .get(memoryId) as { metadata: string | null } | undefined;
     const existing: Record<string, unknown> = safeJsonParse<Record<string, unknown>>(row?.metadata ?? null, {});
-    existing.goal_id = goal.id;
+    existing.goal_id = topGoals[0].id;
+    existing.goal_ids = topGoals.map((g) => g.id);
     this.db
       .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
       .run(JSON.stringify(existing), memoryId);
 
-    // Touch goal's updated_at
+    // Touch all linked goals' updated_at
     const now = new Date().toISOString().replace("T", " ").replace("Z", "");
-    this.db
-      .prepare("UPDATE goals SET updated_at = ? WHERE id = ?")
-      .run(now, goal.id);
+    const updateGoal = this.db.prepare(
+      "UPDATE goals SET updated_at = ? WHERE id = ?"
+    );
+    for (const goal of topGoals) {
+      updateGoal.run(now, goal.id);
+    }
 
-    return [goal.id];
+    return topGoals.map((g) => g.id);
   }
 
   /**

@@ -219,6 +219,34 @@ describe("scoring", () => {
       // min(keywords.size, 3) = 2, so 2 matches / 2 = 1.0
       expect(goalRelevanceScore(["a", "b", "c"], keywords)).toBe(1.0);
     });
+
+    it("should match content when tags don't match (2+ keyword hits)", () => {
+      const keywords = new Set(["memory", "retrieval", "scoring"]);
+      // No tag matches, but content has 2+ keyword hits
+      const content = "Improved memory retrieval performance by optimizing the index";
+      expect(goalRelevanceScore(["unrelated"], keywords, content)).toBeGreaterThan(0);
+      expect(goalRelevanceScore(["unrelated"], keywords, content)).toBeLessThanOrEqual(0.5);
+    });
+
+    it("should return 0 for content with only 1 keyword hit", () => {
+      const keywords = new Set(["memory", "retrieval", "scoring"]);
+      const content = "This is about memory only";
+      expect(goalRelevanceScore(["unrelated"], keywords, content)).toBe(0);
+    });
+
+    it("should prefer tag matches over content matches", () => {
+      const keywords = new Set(["memory", "retrieval"]);
+      // 2 tag matches / min(2, 3) = 1.0
+      const tagScore = goalRelevanceScore(["memory", "retrieval"], keywords);
+      // 2 content matches / min(2, 5) = 0.4, capped at 0.5
+      const contentScore = goalRelevanceScore(["unrelated"], keywords, "memory retrieval system");
+      expect(tagScore).toBeGreaterThan(contentScore);
+    });
+
+    it("should return 0 for content match when no content provided", () => {
+      const keywords = new Set(["memory", "retrieval"]);
+      expect(goalRelevanceScore(["unrelated"], keywords)).toBe(0);
+    });
   });
 
   describe("computeHybridScore", () => {

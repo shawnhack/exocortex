@@ -597,8 +597,25 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
         const entityProfileSection = buildEntityProfileSection(resultIds);
         const factsSection = buildFactsSection(args.topic);
 
+        // Surface related goals
+        let goalsSection = "";
+        try {
+          const goalStore = new GoalStore(db);
+          const relevantGoals = await goalStore.detectRelevantGoals(args.topic);
+          const topGoals = relevantGoals.slice(0, 3);
+          if (topGoals.length > 0) {
+            const goalLines = topGoals.map((g) => {
+              let line = `- ${g.title}`;
+              if (g.priority !== "medium") line += ` [${g.priority}]`;
+              if (g.deadline) line += ` (due: ${g.deadline})`;
+              return line;
+            });
+            goalsSection = `\n\n--- Related goals ---\n${goalLines.join("\n")}`;
+          }
+        } catch { /* non-critical */ }
+
         return {
-          content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories):\n\n${lines.join("\n")}${linkSection}${entityProfileSection}${factsSection}` }],
+          content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories):\n\n${lines.join("\n")}${linkSection}${entityProfileSection}${factsSection}${goalsSection}` }],
         };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };

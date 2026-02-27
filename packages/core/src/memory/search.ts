@@ -346,7 +346,7 @@ export class MemorySearch {
       const usefulness = usefulnessScore(usefulCount);
       const valence = valenceScore((row as any).valence ?? 0);
       const memTags = candidateTagMap.get(row.id) ?? [];
-      const goalRelevance = goalRelevanceScore(memTags, goalKeywords);
+      const goalRelevance = goalRelevanceScore(memTags, goalKeywords, row.content);
       const persistedQuality = (row as any).quality_score as number | null;
       let quality: number;
       if (persistedQuality != null) {
