@@ -75,12 +75,12 @@ export function frequencyScore(
 
 /**
  * Usefulness score based on confirmed-useful retrievals.
- * Uses absolute scale: saturates at 5 useful signals → score 1.0.
+ * Uses absolute scale: saturates at 8 useful signals → score 1.0.
  * Memories with 0 useful_count score 0 (no penalty, just no boost).
  */
 export function usefulnessScore(usefulCount: number): number {
   if (usefulCount <= 0) return 0;
-  return Math.min(1.0, Math.log(1 + usefulCount) / Math.log(1 + 5));
+  return Math.min(1.0, Math.log(1 + usefulCount) / Math.log(1 + 8));
 }
 
 /**
