@@ -42,6 +42,8 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
+// --- SCORING SYSTEM START ---
+// Everything between these markers is in-scope for sentinel:code-evolve.
 export function recencyScore(
   createdAt: string,
   decayRate: number,
@@ -175,6 +177,7 @@ export function computeHybridScore(
     weights.frequency * frequency
   );
 }
+// --- SCORING SYSTEM END ---
 
 // --- Reciprocal Rank Fusion ---
 
