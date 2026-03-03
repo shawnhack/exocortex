@@ -52,10 +52,11 @@ All data stored in `~/.exocortex/` (DB + cached embedding models). Override mode
 - **Timeline** (`/timeline`) — chronological memory view with keyboard shortcuts
 - **Entities** (`/entities`) — entity list by type with bulk select/delete
 - **Entity Detail** (`/entities/:id`) — entity info, relationship list + radial SVG graph, linked memories
-- **Graph** (`/graph`) — interactive force-directed knowledge graph (canvas-based). Drag nodes, scroll to zoom, click to navigate. Simulation auto-pauses when settled
+- **Graph** (`/graph`) — interactive force-directed knowledge graph (canvas-based). Drag nodes, scroll to zoom, click to navigate
+- **Goals** (`/goals`) — goal tracking with milestone progress
 - **Memory Detail** (`/memory/:id`) — full memory view with inline edit mode (content, tags, importance), supersession diff view, soft-delete to trash
 - **Trash** (`/trash`) — archived/superseded memories with restore and permanent delete
-- **Chat** (`/chat`) — RAG-powered Q&A with multi-turn conversation history, sources linked to memory detail. Requires AI API key (configured in Settings under `ai.api_key`)
+- **Chat** (`/chat`) — RAG-powered Q&A with multi-turn conversation history, sources linked to memory detail
 - **Settings** (`/settings`) — system configuration, export, and bulk import. API keys are masked in responses
 
 ## Architecture Notes
@@ -65,11 +66,12 @@ All data stored in `~/.exocortex/` (DB + cached embedding models). Override mode
 - Full entity graph (all entities + relationships) available via `GET /api/entities/graph` — single SQL query, no N+1
 - Community detection via label propagation algorithm — `detectCommunities()` in `packages/core/src/entities/graph.ts`. O(V+E) per iteration, converges in ~10 iterations. Exposed via `memory_graph` action `"communities"`
 - Search friction tracking — zero-result queries logged to `search_misses` table. `getSearchMisses()` aggregates by query. Surfaced in `memory_maintenance` output as "Search Friction Signals"
-- MCP server exposes tools: memory_store, memory_search, memory_forget, memory_context, memory_entities, memory_get, memory_update, memory_browse, memory_ping, memory_decay_preview, memory_maintenance, memory_ingest, memory_digest_session, memory_consolidate, memory_graph, memory_link, memory_timeline, memory_feedback, goal_create, goal_list, goal_update, goal_log, goal_get, goal_add_milestone, goal_update_milestone, goal_remove_milestone
+- MCP server exposes tools: memory_store, memory_search, memory_forget, memory_context, memory_entities, memory_get, memory_update, memory_browse, memory_ping, memory_decay_preview, memory_maintenance, memory_ingest, memory_digest_session, memory_consolidate, memory_graph, memory_link, memory_timeline, memory_feedback, memory_contradictions, memory_facts, memory_tag_cleanup, memory_project_snapshot, memory_diff, goal_create, goal_list, goal_update, goal_log, goal_get, goal_add_milestone, goal_update_milestone, goal_remove_milestone, prediction_create, prediction_list, prediction_get, prediction_resolve, prediction_stats
 - `memory_digest_session` parses a session transcript JSONL, extracts write/edit/bash actions, and stores a structured session summary as a memory with tag `session-digest`
 - Goals support milestones — stored in `metadata.milestones` JSON array (no dedicated table). Milestone CRUD via `GoalStore.addMilestone/updateMilestone/removeMilestone/getMilestones`. `GoalWithProgress` includes `milestones: Milestone[]`
 - Goal autonomy: metadata keys `mode` ("monitor"|"autonomous"), `approved_tools` (string[]), `max_actions_per_cycle` (number), `strategy` (string). Autonomous goals can be worked by external agent systems via MCP tools
 - Goals REST endpoint: `GET /api/goals?status=active` — used by external systems for pre-flight checks
+- Predictions: `prediction_create` (claim + confidence + deadline + domain), `prediction_resolve` (true/false/partial), `prediction_stats` (Brier score, calibration curve, overconfidence bias, domain breakdown, monthly trend). REST: `GET/POST /api/predictions`, `GET /api/predictions/stats`, `PATCH /api/predictions/:id/resolve`. Used by crypto-alpha sentinel for self-calibrating market predictions
 - Retrieval feedback loop: memories track `useful_count` — incremented when a memory retrieved by search is later accessed via `memory_get` within 5 minutes (implicit signal), or explicitly via `memory_feedback` tool. Usefulness factors into hybrid scoring with configurable weight (`scoring.usefulness_weight`, default 0.05). Scoring function: `min(1.0, log(1 + count) / log(6))` — saturates at 5 signals
 - Store-time relation discovery: when `memory_store` creates a memory, scans 200 recent memories by embedding cosine similarity and auto-links those with similarity >= 0.75 (max 5 links, type "related", strength = similarity score)
 - Temporal evolution query: `memory_timeline` supports `mode: "evolution"` with required `topic` parameter — searches memories matching the topic, sorts chronologically, enriches with supersession chains and cross-reference links to show how knowledge evolved over time

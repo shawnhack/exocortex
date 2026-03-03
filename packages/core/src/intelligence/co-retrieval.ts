@@ -99,7 +99,7 @@ export function buildCoRetrievalLinks(
         // Verify both memories still exist before linking (consolidation may have removed them)
         const bothExist = db
           .prepare(
-            "SELECT COUNT(*) as c FROM memories WHERE id IN (?, ?) AND status = 'active'"
+            "SELECT COUNT(*) as c FROM memories WHERE id IN (?, ?) AND is_active = 1"
           )
           .get(sourceId, targetId) as { c: number };
         if (bothExist.c < 2) continue;
