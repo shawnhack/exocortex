@@ -353,6 +353,7 @@ export async function consolidateCluster(
     "goal-progress-implicit",
     "goal-progress",
     "benchmark-artifact",
+    "decision",
   ]);
   const tagSet = new Set<string>();
   if (cluster.memberIds.length > 0) {

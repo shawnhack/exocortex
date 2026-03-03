@@ -183,6 +183,7 @@ export function getDecisionTimeline(
 ): DecisionTimelineEntry[] {
   const conditions: string[] = [
     "m.is_active = 1",
+    "m.source != 'consolidation'",
     "m.id IN (SELECT memory_id FROM memory_tags WHERE tag = 'decision')",
   ];
   const params: (string | number)[] = [];
