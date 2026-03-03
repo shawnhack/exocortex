@@ -96,6 +96,14 @@ export function buildCoRetrievalLinks(
           linksStrengthened++;
         }
       } else {
+        // Verify both memories still exist before linking (consolidation may have removed them)
+        const bothExist = db
+          .prepare(
+            "SELECT COUNT(*) as c FROM memories WHERE id IN (?, ?) AND status = 'active'"
+          )
+          .get(sourceId, targetId) as { c: number };
+        if (bothExist.c < 2) continue;
+
         linkStore.link(sourceId, targetId, "related", strength);
         linksCreated++;
       }
