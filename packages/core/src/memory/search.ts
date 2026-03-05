@@ -261,13 +261,15 @@ export class MemorySearch {
     }
 
     // Configurable min_score threshold (query param overrides setting)
+    const parsedMinScore = parseFloat(getSetting(this.db, "scoring.min_score") ?? "0.15");
     const minScore = query.min_score ??
-      parseFloat(getSetting(this.db, "scoring.min_score") ?? "0.15");
+      (Number.isFinite(parsedMinScore) ? parsedMinScore : 0.15);
 
     // Tag boost weight
-    const tagBoost = parseFloat(
+    const parsedTagBoost = parseFloat(
       getSetting(this.db, "scoring.tag_boost") ?? "0.10"
     );
+    const tagBoost = Number.isFinite(parsedTagBoost) ? parsedTagBoost : 0.10;
 
     // Batch-fetch tags for ALL candidates (needed for tag boosting)
     const candidateTagMap = new Map<string, string[]>();
@@ -359,6 +361,13 @@ export class MemorySearch {
       candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness, valence, quality, goalRelevance });
     }
 
+    // Supersession demotion: memories with superseded_by set get heavily penalized
+    // so obsolete decisions/approaches don't clutter results
+    const supersededIds = new Set<string>();
+    for (const c of candidates) {
+      if (c.row.superseded_by) supersededIds.add(c.row.id);
+    }
+
     // Graph-proximity scores (if weight > 0)
     // Use a pre-pass: sort candidates by vector+fts to find top seeds for link proximity
     let graphScores = new Map<string, number>();
@@ -398,8 +407,9 @@ export class MemorySearch {
       const rrfScores = reciprocalRankFusion(rankedLists, rrfConfig.k);
 
       // RRF min_score (query param overrides setting, but use RRF-specific default)
+      const parsedRrfMinScore = parseFloat(getSetting(this.db, "scoring.rrf_min_score") ?? "0.001");
       const rrfMinScore = query.min_score ??
-        parseFloat(getSetting(this.db, "scoring.rrf_min_score") ?? "0.001");
+        (Number.isFinite(parsedRrfMinScore) ? parsedRrfMinScore : 0.001);
 
       // Find max RRF score for proportional tag boost
       let maxRrf = 0;
@@ -431,6 +441,11 @@ export class MemorySearch {
         // Post-RRF multiplicative boost from recency + frequency + usefulness + valence + quality
         const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.quality * c.quality + weights.goalGated * c.goalRelevance;
         let score = baseRrf * boostMultiplier;
+
+        // Superseded memories get 80% demotion (before tag boost so tags can't undo it)
+        if (supersededIds.has(c.row.id)) {
+          score *= 0.2;
+        }
 
         // Tag boost scaled to RRF range
         if (tagBoost > 0 && hasQueryTagMatch) {
@@ -481,6 +496,11 @@ export class MemorySearch {
           }
         }
 
+        // Superseded memories get 80% demotion (before tag boost so tags can't undo it)
+        if (supersededIds.has(c.row.id)) {
+          score *= 0.2;
+        }
+
         if (
           !metadataRequested &&
           metadataMode !== "exclude" &&
@@ -511,8 +531,10 @@ export class MemorySearch {
     scored.sort((a, b) => b.score - a.score);
 
     // Confidence gap filter: remove results far below the top score
-    const gapRatio = parseFloat(getSetting(this.db, "search.score_gap_ratio") ?? "0.15");
-    const qualityFloor = parseFloat(getSetting(this.db, "search.quality_floor") ?? "0.08");
+    const parsedGapRatio = parseFloat(getSetting(this.db, "search.score_gap_ratio") ?? "0.15");
+    const gapRatio = Number.isFinite(parsedGapRatio) ? parsedGapRatio : 0.15;
+    const parsedQualityFloor = parseFloat(getSetting(this.db, "search.quality_floor") ?? "0.08");
+    const qualityFloor = Number.isFinite(parsedQualityFloor) ? parsedQualityFloor : 0.08;
     const topScore = scored[0]?.score ?? 0;
     if (topScore > 0) {
       const minAllowed = topScore * gapRatio;
@@ -701,9 +723,14 @@ export class MemorySearch {
       const refs = linkStore.getLinkedRefs(topScoredIds);
       for (const ref of refs) {
         if (candidateSet.has(ref.id)) {
-          // Strength-weighted score (0.3-0.8 range based on link strength)
-          const linkScore = 0.3 + ref.strength * 0.5;
-          scores.set(ref.id, Math.max(scores.get(ref.id) ?? 0, linkScore));
+          if (ref.link_type === "supersedes") {
+            // The linked memory was superseded by a top result — demote it heavily
+            scores.set(ref.id, Math.min(scores.get(ref.id) ?? 0.1, 0.1));
+          } else {
+            // Strength-weighted score (0.3-0.8 range based on link strength)
+            const linkScore = 0.3 + ref.strength * 0.5;
+            scores.set(ref.id, Math.max(scores.get(ref.id) ?? 0, linkScore));
+          }
         }
       }
     }

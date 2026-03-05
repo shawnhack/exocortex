@@ -11,6 +11,7 @@
     "test:ui": "node scripts/test-memory-detail-layout.mjs && node scripts/test-dashboard-interactions.mjs",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
+    "benchmark": "tsx scripts/run-benchmark.mts",
     "release": "bash scripts/release.sh"
   },
   "engines": {

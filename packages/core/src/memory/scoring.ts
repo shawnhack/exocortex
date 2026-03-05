@@ -14,18 +14,24 @@ export interface ScoringWeights {
   goalGated: number;
 }
 
+/** Parse a float setting with NaN guard, falling back to the default. */
+function safeFloat(raw: string | null | undefined, fallback: number): number {
+  const v = parseFloat(raw ?? String(fallback));
+  return Number.isFinite(v) ? v : fallback;
+}
+
 export function getWeights(db: DatabaseSync): ScoringWeights {
   return {
-    vector: parseFloat(getSetting(db, "scoring.vector_weight") ?? "0.45"),
-    fts: parseFloat(getSetting(db, "scoring.fts_weight") ?? "0.25"),
-    recency: parseFloat(getSetting(db, "scoring.recency_weight") ?? "0.20"),
-    frequency: parseFloat(getSetting(db, "scoring.frequency_weight") ?? "0.10"),
-    recencyDecay: parseFloat(getSetting(db, "scoring.recency_decay") ?? "0.05"),
-    graph: parseFloat(getSetting(db, "scoring.graph_weight") ?? "0.10"),
-    usefulness: parseFloat(getSetting(db, "scoring.usefulness_weight") ?? "0.05"),
-    valence: parseFloat(getSetting(db, "scoring.valence_weight") ?? "0.05"),
-    quality: parseFloat(getSetting(db, "scoring.quality_weight") ?? "0.10"),
-    goalGated: parseFloat(getSetting(db, "scoring.goal_gated_weight") ?? "0.15"),
+    vector: safeFloat(getSetting(db, "scoring.vector_weight"), 0.45),
+    fts: safeFloat(getSetting(db, "scoring.fts_weight"), 0.25),
+    recency: safeFloat(getSetting(db, "scoring.recency_weight"), 0.20),
+    frequency: safeFloat(getSetting(db, "scoring.frequency_weight"), 0.10),
+    recencyDecay: safeFloat(getSetting(db, "scoring.recency_decay"), 0.05),
+    graph: safeFloat(getSetting(db, "scoring.graph_weight"), 0.10),
+    usefulness: safeFloat(getSetting(db, "scoring.usefulness_weight"), 0.05),
+    valence: safeFloat(getSetting(db, "scoring.valence_weight"), 0.05),
+    quality: safeFloat(getSetting(db, "scoring.quality_weight"), 0.10),
+    goalGated: safeFloat(getSetting(db, "scoring.goal_gated_weight"), 0.15),
   };
 }
 
@@ -154,13 +160,13 @@ export function qualityScore(
   // Freshness: exponential decay over 90 days
   const freshness = Math.exp(-0.02 * ageDays);
 
-  return (
+  const score =
     0.30 * importance +
     0.25 * usefulness +
     0.15 * access +
     0.15 * links +
-    0.15 * freshness
-  );
+    0.15 * freshness;
+  return Number.isFinite(score) ? score : 0;
 }
 
 export function computeHybridScore(

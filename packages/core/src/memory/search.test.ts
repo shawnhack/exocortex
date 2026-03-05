@@ -166,3 +166,59 @@ describe("MemorySearch.expandQuery", () => {
     });
   });
 });
+
+describe("MemorySearch supersession demotion", () => {
+  let db: DatabaseSync;
+
+  beforeEach(() => {
+    db = getDbForTesting();
+    initializeSchema(db);
+  });
+
+  it("should demote memories that have superseded_by set", async () => {
+    const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+    // Insert memories about the same topic — one superseded by the other
+    // They need different content so FTS BM25 normalization doesn't collapse both to 0
+    // is_indexed = 1 is required for the FTS trigger to fire
+    db.prepare(
+      `INSERT INTO memories (id, content, content_type, source, importance, is_active, is_indexed, superseded_by, created_at, updated_at)
+       VALUES (?, ?, 'text', 'api', 0.8, 1, 1, ?, ?, ?)`
+    ).run("mem-old", "Decision: use n8n for video pipeline orchestration and processing", "mem-new", now, now);
+
+    db.prepare(
+      `INSERT INTO memories (id, content, content_type, source, importance, is_active, is_indexed, superseded_by, created_at, updated_at)
+       VALUES (?, ?, 'text', 'api', 0.8, 1, 1, NULL, ?, ?)`
+    ).run("mem-new", "Decision: use TypeScript for video pipeline orchestration and processing", now, now);
+
+    // Add a third memory that partially matches (only "pipeline") to give BM25 range
+    db.prepare(
+      `INSERT INTO memories (id, content, content_type, source, importance, is_active, is_indexed, created_at, updated_at)
+       VALUES (?, ?, 'text', 'api', 0.3, 1, 1, ?, ?)`
+    ).run("mem-partial", "The data pipeline runs batch jobs every night for ETL processing", now, now);
+
+    // Verify FTS index has entries
+    const ftsCount = db.prepare("SELECT COUNT(*) as c FROM memories_fts").get() as { c: number };
+    expect(ftsCount.c).toBeGreaterThan(0);
+
+    // Use legacy scoring (non-RRF) so FTS-only results produce non-zero scores
+    setSetting(db, "scoring.use_rrf", "false");
+
+    // Disable quality floor and score gap so demoted results still appear
+    setSetting(db, "search.quality_floor", "0");
+    setSetting(db, "search.score_gap_ratio", "0");
+
+    const search = new MemorySearch(db);
+    const results = await search.search({ query: "video pipeline orchestration", min_score: 0 });
+
+    const oldResult = results.find((r) => r.memory.id === "mem-old");
+    const newResult = results.find((r) => r.memory.id === "mem-new");
+
+    expect(newResult).toBeDefined();
+    expect(oldResult).toBeDefined();
+    // Both should have non-zero FTS scores
+    expect(newResult!.fts_score).toBeGreaterThan(0);
+    // Superseded memory should be demoted to ~20% of the non-superseded one's score
+    expect(newResult!.score).toBeGreaterThan(oldResult!.score);
+    expect(oldResult!.score).toBeLessThan(newResult!.score * 0.5);
+  });
+});

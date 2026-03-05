@@ -211,8 +211,9 @@ export class MemoryStore {
       normalizedTags.push("benchmark-artifact");
     }
 
+    const parsedBenchImportance = parseFloat(getSetting(this.db, "benchmark.default_importance") ?? "0.15");
     const defaultImportance = isBenchmark
-      ? parseFloat(getSetting(this.db, "benchmark.default_importance") ?? "0.15")
+      ? (Number.isFinite(parsedBenchImportance) ? parsedBenchImportance : 0.15)
       : 0.5;
 
     const metadata = { ...(input.metadata ?? {}) };
@@ -1617,8 +1618,10 @@ export class MemoryStore {
     const now = new Date().toISOString().replace("T", " ").replace("Z", "");
 
     // Read reinforcement settings
-    const accessBoost = parseFloat(getSetting(this.db, "reinforcement.access_boost") ?? "0.01");
-    const linkBoost = parseFloat(getSetting(this.db, "reinforcement.link_boost") ?? "0.005");
+    const rawAccessBoost = parseFloat(getSetting(this.db, "reinforcement.access_boost") ?? "0.01");
+    const accessBoost = Number.isFinite(rawAccessBoost) ? rawAccessBoost : 0.01;
+    const rawLinkBoost = parseFloat(getSetting(this.db, "reinforcement.link_boost") ?? "0.005");
+    const linkBoost = Number.isFinite(rawLinkBoost) ? rawLinkBoost : 0.005;
 
     this.db.exec("BEGIN");
     try {

@@ -122,6 +122,7 @@ export function getMemoryLineage(
 
   // Walk backward: find predecessors (memories that were superseded by this one)
   const predecessors: LineageEntry[] = [];
+  const visited = new Set<string>([memoryId]);
   let currentId = memoryId;
   for (let depth = 1; depth <= maxDepth; depth++) {
     const prev = db
@@ -130,7 +131,8 @@ export function getMemoryLineage(
       )
       .get(currentId) as { id: string; content: string; importance: number; created_at: string } | undefined;
 
-    if (!prev) break;
+    if (!prev || visited.has(prev.id)) break;
+    visited.add(prev.id);
     predecessors.push({ ...prev, direction: "predecessor", depth });
     currentId = prev.id;
   }
@@ -149,6 +151,7 @@ export function getMemoryLineage(
 
   let nextId = currentFull?.superseded_by ?? null;
   for (let depth = 1; depth <= maxDepth && nextId; depth++) {
+    if (visited.has(nextId)) break;
     const next = db
       .prepare(
         "SELECT id, content, importance, created_at, superseded_by FROM memories WHERE id = ?"
@@ -156,6 +159,7 @@ export function getMemoryLineage(
       .get(nextId) as { id: string; content: string; importance: number; created_at: string; superseded_by: string | null } | undefined;
 
     if (!next) break;
+    visited.add(next.id);
     entries.push({ id: next.id, content: next.content, importance: next.importance, created_at: next.created_at, direction: "successor", depth });
     nextId = next.superseded_by;
   }
@@ -208,11 +212,15 @@ export function getDecisionTimeline(
   }
 
   const limit = opts?.limit ?? 50;
-  params.push(limit);
+
+  // Fetch extra rows so per-source capping still yields enough results
+  const fetchLimit = limit * 3;
+  params.push(fetchLimit);
 
   const rows = db
     .prepare(
-      `SELECT m.id, m.content, m.importance, m.created_at, m.superseded_by
+      `SELECT m.id, m.content, m.importance, m.created_at, m.superseded_by,
+              m.parent_id, m.source_uri
        FROM memories m
        WHERE ${conditions.join(" AND ")}
        ORDER BY m.created_at DESC
@@ -224,10 +232,29 @@ export function getDecisionTimeline(
     importance: number;
     created_at: string;
     superseded_by: string | null;
+    parent_id: string | null;
+    source_uri: string | null;
   }>;
 
+  // Per-source deduplication: cap results per parent_id/source_uri to prevent
+  // a single sharded document from dominating the entire timeline
+  const MAX_PER_SOURCE = 3;
+  const sourceCountMap = new Map<string, number>();
+  const deduped = rows.filter((row) => {
+    // Group by parent_id first (shards from same doc), fall back to source_uri
+    const groupKey = row.parent_id ?? row.source_uri ?? row.id;
+    // Only group if the key is a real shared identifier (not the memory's own ID)
+    if (groupKey === row.id) return true;
+    const count = (sourceCountMap.get(groupKey) ?? 0) + 1;
+    sourceCountMap.set(groupKey, count);
+    return count <= MAX_PER_SOURCE;
+  });
+
+  // Trim to requested limit after dedup
+  const final = deduped.slice(0, limit);
+
   // For each entry, fetch tags and reverse supersession lookup
-  return rows.map((row) => {
+  return final.map((row) => {
     const tags = (
       db
         .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")

@@ -6,6 +6,9 @@ import {
   computeHybridScore,
   reciprocalRankFusion,
   goalRelevanceScore,
+  qualityScore,
+  usefulnessScore,
+  valenceScore,
 } from "./scoring.js";
 
 describe("scoring", () => {
@@ -284,6 +287,83 @@ describe("scoring", () => {
 
       const score = computeHybridScore(0, 0, 0, 0, weights);
       expect(score).toBe(0);
+    });
+  });
+
+  describe("qualityScore", () => {
+    it("should return a value between 0 and 1 for normal inputs", () => {
+      const score = qualityScore(0.5, 3, 10, 2, 30);
+      expect(score).toBeGreaterThan(0);
+      expect(score).toBeLessThanOrEqual(1);
+    });
+
+    it("should weight importance at 30%", () => {
+      const low = qualityScore(0, 0, 0, 0, 0);
+      const high = qualityScore(1, 0, 0, 0, 0);
+      expect(high - low).toBeCloseTo(0.3, 1);
+    });
+
+    it("should return 0 when NaN propagates to final score", () => {
+      // NaN importance propagates through 0.30 * NaN = NaN
+      expect(qualityScore(NaN, 0, 0, 0, 0)).toBe(0);
+    });
+
+    it("should survive NaN in non-propagating inputs", () => {
+      // NaN usefulCount: usefulCount > 0 is false, so usefulness = 0
+      // Score should still be valid (freshness 0.15 + importance 0)
+      const score = qualityScore(0, NaN, 0, 0, 0);
+      expect(Number.isFinite(score)).toBe(true);
+    });
+
+    it("should handle zero values gracefully", () => {
+      const score = qualityScore(0, 0, 0, 0, 0);
+      // Only freshness contributes: 0.15 * exp(0) = 0.15
+      expect(score).toBeCloseTo(0.15, 2);
+    });
+
+    it("should increase with more useful signals", () => {
+      const none = qualityScore(0.5, 0, 5, 2, 10);
+      const some = qualityScore(0.5, 3, 5, 2, 10);
+      const many = qualityScore(0.5, 8, 5, 2, 10);
+      expect(some).toBeGreaterThan(none);
+      expect(many).toBeGreaterThan(some);
+    });
+
+    it("should decrease with age (freshness decay)", () => {
+      const fresh = qualityScore(0.5, 0, 0, 0, 0);
+      const old = qualityScore(0.5, 0, 0, 0, 90);
+      expect(fresh).toBeGreaterThan(old);
+    });
+  });
+
+  describe("usefulnessScore", () => {
+    it("should return 0 for zero or negative count", () => {
+      expect(usefulnessScore(0)).toBe(0);
+      expect(usefulnessScore(-1)).toBe(0);
+    });
+
+    it("should saturate at 1.0 around count=8", () => {
+      expect(usefulnessScore(8)).toBeCloseTo(1.0, 1);
+    });
+
+    it("should increase monotonically", () => {
+      const a = usefulnessScore(1);
+      const b = usefulnessScore(3);
+      const c = usefulnessScore(5);
+      expect(b).toBeGreaterThan(a);
+      expect(c).toBeGreaterThan(b);
+    });
+  });
+
+  describe("valenceScore", () => {
+    it("should return absolute value", () => {
+      expect(valenceScore(0.8)).toBe(0.8);
+      expect(valenceScore(-0.8)).toBe(0.8);
+      expect(valenceScore(0)).toBe(0);
+    });
+
+    it("should treat breakthroughs and failures equally", () => {
+      expect(valenceScore(1.0)).toBe(valenceScore(-1.0));
     });
   });
 });
