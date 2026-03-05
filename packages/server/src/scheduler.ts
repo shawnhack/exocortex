@@ -353,8 +353,12 @@ export function startScheduler(): void {
 
   // Run maintenance on startup (short delay to not block server init)
   setTimeout(async () => {
-    console.log("[maintenance] Running startup maintenance...");
-    await runMaintenanceNow();
+    try {
+      console.log("[maintenance] Running startup maintenance...");
+      await runMaintenanceNow();
+    } catch (err) {
+      console.error("[maintenance] Startup maintenance error:", err);
+    }
   }, 5000);
 
   // Re-embed memories with missing embeddings on startup
