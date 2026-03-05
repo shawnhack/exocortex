@@ -125,6 +125,8 @@ User prompt → Agent reads/writes memories via MCP tools
      Ranked results + linked context
 ```
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed Mermaid diagrams of the module dependency graph, storage flow, search pipeline, intelligence pipeline, and scoring system.
+
 **Key design choices:**
 - **No external services** — embeddings run locally via HuggingFace transformers
 - **Hybrid retrieval** — vector similarity + BM25 full-text search, fused with RRF
@@ -186,6 +188,12 @@ The MCP server exposes all Exocortex tools over stdio. See [Quick Start](#connec
 | `goal_add_milestone` | Add a milestone to a goal |
 | `goal_update_milestone` | Update milestone title/status/order/deadline |
 | `goal_remove_milestone` | Remove a milestone from a goal |
+| `memory_facts` | Query structured subject-predicate-object facts extracted from memories |
+| `prediction_create` | Create a prediction with claim, confidence, deadline, and domain |
+| `prediction_list` | List predictions filtered by status, domain, source, or overdue |
+| `prediction_get` | Get full details of a specific prediction |
+| `prediction_resolve` | Resolve a prediction as true, false, or partial |
+| `prediction_stats` | Calibration statistics: Brier score, calibration curve, overconfidence bias |
 
 ### Search workflow
 
@@ -354,6 +362,16 @@ GET    /api/goals/:id          — Get goal with progress + milestones
 POST   /api/goals              — Create goal
 PATCH  /api/goals/:id          — Update goal
 DELETE /api/goals/:id          — Delete goal
+```
+
+### Predictions
+
+```
+GET    /api/predictions        — List predictions (filter by status, domain, source, overdue)
+POST   /api/predictions        — Create prediction (claim, confidence, deadline, domain)
+GET    /api/predictions/stats  — Calibration stats (Brier score, curve, bias, domain breakdown)
+GET    /api/predictions/:id    — Get prediction by ID
+PATCH  /api/predictions/:id/resolve — Resolve as true/false/partial
 ```
 
 ### Data
@@ -539,7 +557,7 @@ Each memory tracks its origin: `provider`, `model_id`, `model_name`, `agent`, `s
 
 ## Database Schema
 
-17 tables + 1 virtual FTS5 table:
+19 tables + 1 virtual FTS5 table:
 
 | Table | Purpose |
 |-------|---------|
@@ -559,6 +577,8 @@ Each memory tracks its origin: `provider`, `model_id`, `model_name`, `agent`, `s
 | `co_retrievals` | Co-retrieval history used to infer links |
 | `retrieval_regression_baselines` | Golden query baseline result IDs |
 | `retrieval_regression_runs` | Retrieval regression run history + drift metrics |
+| `memory_facts` | Subject-predicate-object triples extracted from memories |
+| `predictions` | Forecasting claims with confidence, deadline, and resolution tracking |
 | `settings` | Key-value configuration store |
 | `memories_fts` | FTS5 virtual table with auto-sync triggers on insert/update/delete |
 
@@ -585,6 +605,8 @@ All settings are stored in the `settings` table and can be changed via the REST 
 | `scoring.graph_weight` | `0.10` | Graph proximity weight |
 | `scoring.usefulness_weight` | `0.05` | Usefulness feedback weight |
 | `scoring.valence_weight` | `0.05` | Valence (emotional significance) weight |
+| `scoring.quality_weight` | `0.10` | Composite quality score weight |
+| `scoring.goal_gated_weight` | `0.15` | Active goal relevance weight |
 
 ### Embedding
 
@@ -698,6 +720,10 @@ pnpm test
 
 # Run UI regression checks (layout + interaction flows on desktop/mobile)
 pnpm test:ui
+
+# Run memory benchmark (requires ANTHROPIC_API_KEY)
+pnpm benchmark          # markdown report
+pnpm benchmark --json   # machine-readable output
 
 # Type-check
 pnpm lint

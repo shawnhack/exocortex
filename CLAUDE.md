@@ -5,18 +5,19 @@ Personal unified memory system — SQLite-backed, local-first, hybrid RAG retrie
 ## Stack
 
 - Monorepo: pnpm workspaces
-- Packages: `core`, `cli`, `server`, `mcp`, `dashboard`
+- Packages: `core` (+ benchmark suite at `core/src/benchmark/`), `cli`, `server`, `mcp`, `dashboard`
 - DB: Node built-in SQLite (`node:sqlite`)
-- Embeddings: HuggingFace `all-MiniLM-L6-v2` (local, no API key)
-- Scoring: Reciprocal Rank Fusion (RRF) by default, fusing vector + FTS + graph ranked lists with recency/frequency/usefulness boost. Legacy weighted-average mode available via `scoring.use_rrf=false`.
+- Embeddings: HuggingFace `bge-small-en-v1.5` (local, 384 dims, no API key)
+- Scoring: Reciprocal Rank Fusion (RRF) by default, fusing vector + FTS + graph ranked lists with recency/frequency/usefulness/valence/quality/goal-relevance boost. Legacy weighted-average mode available via `scoring.use_rrf=false`. All parseFloat calls have NaN guards with safe fallbacks.
 - Dashboard: React + Vite, Neural Interface theme
 - Tests: Vitest
 
 ## Key Commands
 
-- `pnpm test` — run all tests
+- `pnpm test` — run all tests (~533 tests)
 - `pnpm build` — build all packages
 - `pnpm lint` — typecheck with tsc
+- `pnpm benchmark` — run memory benchmark (requires ANTHROPIC_API_KEY)
 
 ## MCP Setup
 
@@ -58,6 +59,10 @@ All data stored in `~/.exocortex/` (DB + cached embedding models). Override mode
 - **Trash** (`/trash`) — archived/superseded memories with restore and permanent delete
 - **Chat** (`/chat`) — RAG-powered Q&A with multi-turn conversation history, sources linked to memory detail
 - **Settings** (`/settings`) — system configuration, export, and bulk import. API keys are masked in responses
+
+## Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for Mermaid diagrams of module dependencies, storage flow, search pipeline, intelligence pipeline, and scoring system.
 
 ## Architecture Notes
 
