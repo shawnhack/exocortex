@@ -17,15 +17,25 @@ links.get("/api/memories/:id/links", (c) => {
 
   const memoryLinks = store.getLinks(id);
 
-  // For each link, resolve the "other" side's content preview
+  // Batch-fetch all linked memory previews in one query
+  const otherIds = memoryLinks.map((link) =>
+    link.source_id === id ? link.target_id : link.source_id
+  );
+  const previewMap = new Map<string, { id: string; content: string; content_type: string; importance: number; created_at: string }>();
+  if (otherIds.length > 0) {
+    const placeholders = otherIds.map(() => "?").join(",");
+    const rows = db
+      .prepare(`SELECT id, content, content_type, importance, created_at FROM memories WHERE id IN (${placeholders})`)
+      .all(...otherIds) as Array<{ id: string; content: string; content_type: string; importance: number; created_at: string }>;
+    for (const row of rows) {
+      previewMap.set(row.id, row);
+    }
+  }
+
   const results = memoryLinks.map((link) => {
     const otherId = link.source_id === id ? link.target_id : link.source_id;
     const direction = link.source_id === id ? "outgoing" : "incoming";
-
-    // Get a content preview for the linked memory
-    const row = db
-      .prepare("SELECT id, content, content_type, importance, created_at FROM memories WHERE id = ?")
-      .get(otherId) as { id: string; content: string; content_type: string; importance: number; created_at: string } | undefined;
+    const row = previewMap.get(otherId);
 
     return {
       memory_id: otherId,

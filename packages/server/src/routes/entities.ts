@@ -32,12 +32,13 @@ entities.get("/api/entities/graph", (c) => {
   const store = new EntityStore(db);
   const allEntities = store.list();
 
-  // Single query for all relationships instead of N+1
+  // Single query for all relationships with safety limit
+  const limit = Math.min(parseInt(c.req.query("limit") || "10000", 10), 50000);
   const rows = db
     .prepare(
-      "SELECT source_entity_id, target_entity_id, relationship FROM entity_relationships ORDER BY created_at DESC"
+      "SELECT source_entity_id, target_entity_id, relationship FROM entity_relationships ORDER BY created_at DESC LIMIT ?"
     )
-    .all() as Array<{ source_entity_id: string; target_entity_id: string; relationship: string }>;
+    .all(limit) as Array<{ source_entity_id: string; target_entity_id: string; relationship: string }>;
 
   const relationships = rows.map((r) => ({
     source_id: r.source_entity_id,

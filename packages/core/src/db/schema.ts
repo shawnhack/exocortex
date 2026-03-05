@@ -724,6 +724,11 @@ export function initializeSchema(db: DatabaseSync): void {
     db.exec(CREATE_FTS_TRIGGERS);
   }
 
+  // Ensure performance indexes exist (idempotent — safe to run every startup)
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memories_superseded_by ON memories(superseded_by)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memories_parent_id ON memories(parent_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_entities_entity ON memory_entities(entity_id)");
+
   // Legacy cleanup: older schemas used ON DELETE SET NULL for parent_id, which
   // could leave orphaned chunk rows (chunk_index set, parent_id null) after
   // parent deletion. Remove those stale rows once at startup.

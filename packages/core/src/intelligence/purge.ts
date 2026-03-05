@@ -52,14 +52,26 @@ export function getPurgeCandidates(
     )
     .all(thresholdStr) as unknown as PurgeCandidate[];
 
+  // Batch-fetch active status for all superseded_by targets
+  const supersededIds = candidates
+    .map((c) => c.superseded_by)
+    .filter((id): id is string => id !== null);
+
+  const activeTargets = new Set<string>();
+  if (supersededIds.length > 0) {
+    const placeholders = supersededIds.map(() => "?").join(",");
+    const rows = db
+      .prepare(`SELECT id FROM memories WHERE id IN (${placeholders}) AND is_active = 1`)
+      .all(...supersededIds) as Array<{ id: string }>;
+    for (const row of rows) {
+      activeTargets.add(row.id);
+    }
+  }
+
   // Filter out memories whose superseded_by target is still active
   return candidates.filter((c) => {
     if (!c.superseded_by) return true;
-    const target = db
-      .prepare("SELECT is_active FROM memories WHERE id = ?")
-      .get(c.superseded_by) as { is_active: number } | undefined;
-    // If target doesn't exist or is also inactive, allow purge
-    return !target || target.is_active === 0;
+    return !activeTargets.has(c.superseded_by);
   });
 }
 
