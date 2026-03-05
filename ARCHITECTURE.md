@@ -142,7 +142,7 @@ sequenceDiagram
     participant Embed as EmbeddingManager
     participant Entity as EntityExtractor
     participant FTS as SQLite FTS5
-    participant Links as MemoryLinkStore
+    participant Linker as MemoryLinkStore
 
     Client->>Store: create({ content, tags, importance })
     Store->>Store: validateStorageGate(content)
@@ -169,9 +169,9 @@ sequenceDiagram
     Entity-->>Store: matched entities
     Store->>Store: link memory ↔ entities
 
-    Store->>Links: findSimilar(embedding, top 5)
-    Links->>Links: cosine ≥ 0.75 → auto-link
-    Links-->>Store: created memory_links
+    Store->>Linker: findSimilar(embedding, top 5)
+    Linker->>Linker: cosine ≥ 0.75 → auto-link
+    Linker-->>Store: created memory_links
 
     Store-->>Client: Memory { id, content, ... }
 ```
@@ -287,7 +287,7 @@ flowchart LR
         val["Valence<br/>(|emotional significance|)"]
         qual["Quality<br/>(composite: importance,<br/>usefulness, access, links, freshness)"]
         goal["Goal relevance<br/>(tag/content overlap<br/>with active goals)"]
-        graph["Graph proximity<br/>(linked to top results)"]
+        graphProx["Graph proximity<br/>(linked to top results)"]
     end
 
     subgraph RRF["RRF Fusion"]
@@ -312,7 +312,7 @@ flowchart LR
 
     vec --> rank_vec --> fusion
     fts --> rank_fts --> fusion
-    graph --> rank_graph --> fusion
+    graphProx --> rank_graph --> fusion
     fusion --> mult
     rec --> mult
     freq --> mult
