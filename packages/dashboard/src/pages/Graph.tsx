@@ -407,6 +407,58 @@ export function Graph() {
 
   const stats = analysisData?.stats;
 
+  // Empty state — no entities yet
+  if (!isLoading && graphData && graphData.entities.length === 0) {
+    return (
+      <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        <h1 style={{ marginBottom: 8 }}>Knowledge Graph</h1>
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: `1px solid ${BORDER}`,
+            borderRadius: 12,
+            background: BG,
+            minHeight: 400,
+          }}
+        >
+          <div style={{ textAlign: "center", padding: "48px 24px", maxWidth: 420 }}>
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                margin: "0 auto 16px",
+                borderRadius: "50%",
+                border: `1px solid ${BORDER}`,
+                background: "var(--bg-card)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={TEXT_DIM} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="6" cy="6" r="3" />
+                <circle cx="18" cy="18" r="3" />
+                <circle cx="18" cy="6" r="3" />
+                <line x1="8.5" y1="7.5" x2="15.5" y2="16.5" />
+                <line x1="15.5" y1="7.5" x2="8.5" y2="16.5" />
+              </svg>
+            </div>
+            <h3 style={{ color: TEXT_SECONDARY, fontSize: 16, marginBottom: 8 }}>
+              No entities yet
+            </h3>
+            <p style={{ color: TEXT_DIM, fontSize: 13, lineHeight: 1.7 }}>
+              The knowledge graph will appear here as entities are extracted from your memories.
+              Store memories with rich content and entities will be discovered automatically.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ animation: "slideUp 0.3s ease-out both", height: "100%", display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>

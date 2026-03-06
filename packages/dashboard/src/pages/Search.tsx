@@ -320,6 +320,32 @@ export function Search() {
 
         {/* Quick filters */}
         <div style={{ display: "flex", gap: 6, marginBottom: 12, marginTop: 12, flexWrap: "wrap" }}>
+          <button
+            onClick={() => {
+              setQuery("");
+              setSearchParams(new URLSearchParams());
+            }}
+            style={{
+              background: !query && filterTags.length === 0 && activeFilterCount === 0
+                ? "rgba(34, 211, 238, 0.2)"
+                : "rgba(34, 211, 238, 0.04)",
+              color: !query && filterTags.length === 0 && activeFilterCount === 0
+                ? "#22d3ee"
+                : "rgba(34, 211, 238, 0.6)",
+              border: `1px solid ${!query && filterTags.length === 0 && activeFilterCount === 0 ? "rgba(34, 211, 238, 0.55)" : "rgba(34, 211, 238, 0.15)"}`,
+              borderRadius: 20,
+              padding: "4px 14px",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.15s",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+            }}
+          >
+            Recent
+          </button>
           {([
             { tag: "session-fact", label: "Facts", color: "#38bdf8" },
             { tag: "decision", label: "Decisions", color: "#38bdf8" },
@@ -386,22 +412,59 @@ export function Search() {
           </div>
         )}
 
-        {/* Stat pills */}
-        {statsQuery.data && !query && filterTags.length === 0 && (
-          <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
-            <div className="stat-pill">
-              <strong>{statsQuery.data.total_memories}</strong> memories
-            </div>
-            {statsQuery.data.total_entities > 0 && (
-              <div className="stat-pill">
-                <strong>{statsQuery.data.total_entities}</strong> entities
-              </div>
-            )}
-            {statsQuery.data.total_tags > 0 && (
-              <div className="stat-pill">
-                <strong>{statsQuery.data.total_tags}</strong> tags
-              </div>
-            )}
+        {/* Stats cards */}
+        {statsQuery.data && !query && filterTags.length === 0 && statsQuery.data.total_memories > 0 && (
+          <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+            {[
+              { label: "Memories", value: statsQuery.data.total_memories },
+              { label: "Entities", value: statsQuery.data.total_entities },
+              { label: "Tags", value: statsQuery.data.total_tags },
+              ...(statsQuery.data.by_source
+                ? Object.entries(statsQuery.data.by_source).map(([source, count]) => ({
+                    label: source.charAt(0).toUpperCase() + source.slice(1),
+                    value: count,
+                  }))
+                : []),
+            ]
+              .filter((s) => s.value > 0)
+              .map((s) => (
+                <div
+                  key={s.label}
+                  style={{
+                    background: "var(--bg-card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    padding: "14px 20px",
+                    minWidth: 110,
+                    flex: "1 1 0",
+                    maxWidth: 180,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 22,
+                      fontWeight: 700,
+                      color: "var(--cyan)",
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {s.value.toLocaleString()}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-secondary)",
+                      marginTop: 2,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {s.label}
+                  </div>
+                </div>
+              ))}
           </div>
         )}
 
@@ -812,8 +875,72 @@ export function Search() {
         </p>
       )}
 
+      {/* Empty state — no memories at all */}
+      {!isLoading && !error && statsQuery.data && statsQuery.data.total_memories === 0 && (
+        <div
+          style={{
+            textAlign: "center",
+            padding: "64px 24px",
+            animation: "fadeIn 0.3s ease-out",
+          }}
+        >
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              margin: "0 auto 16px",
+              borderRadius: "50%",
+              border: "1px solid var(--border)",
+              background: "var(--bg-card)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" />
+              <line x1="9" y1="21" x2="15" y2="21" />
+            </svg>
+          </div>
+          <h3 style={{ color: "var(--text-secondary)", fontSize: 16, marginBottom: 8 }}>
+            No memories yet
+          </h3>
+          <p style={{ color: "var(--text-dim)", fontSize: 13, maxWidth: 380, margin: "0 auto", lineHeight: 1.7 }}>
+            Connect an AI agent via MCP to start building your knowledge base, or create a memory manually using the form above.
+          </p>
+          <a
+            href="https://github.com/shawnhack/exocortex#readme"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "inline-block",
+              marginTop: 16,
+              padding: "8px 20px",
+              borderRadius: 20,
+              border: "1px solid rgba(34, 211, 238, 0.25)",
+              background: "var(--cyan-dim)",
+              color: "var(--cyan)",
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: "none",
+              transition: "all 0.2s",
+            }}
+          >
+            View Documentation
+          </a>
+        </div>
+      )}
+
+      {/* Empty search results */}
+      {!isLoading && hasData && allResults.length === 0 && query.length > 0 && (
+        <div className="empty-state">
+          <h3>No results found</h3>
+          <p style={{ fontSize: 13 }}>Try a different search query or adjust your filters.</p>
+        </div>
+      )}
+
       {/* Results */}
-      {hasData && (
+      {hasData && allResults.length > 0 && (
         <div>
           {query.length > 0 ? (
             allResults.map((memory, i) => {

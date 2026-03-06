@@ -10,9 +10,15 @@ export function SearchBar({
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
 
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    setValue(v);
+    if (v.trim() === "") onSearch("");
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (value.trim()) onSearch(value.trim());
+    onSearch(value.trim());
   };
 
   return (
@@ -47,10 +53,10 @@ export function SearchBar({
         ref={inputRef}
         type="text"
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={handleChange}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        placeholder="Search memories..."
+        placeholder="Search memories semantically..."
         style={{
           width: "100%",
           padding: "14px 16px 14px 46px",
