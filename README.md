@@ -129,6 +129,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed Mermaid diagrams of the modu
 
 **Key design choices:**
 - **No external services** — embeddings run locally via HuggingFace transformers
+- **Five-tier knowledge** — working (24h auto-expire), episodic (events, decays), semantic (permanent facts), procedural (permanent techniques), reference (permanent documents). Tier-aware scoring boosts permanent knowledge
 - **Hybrid retrieval** — vector similarity + BM25 full-text search, fused with RRF
 - **Graph-aware retrieval** — search results include 1-hop linked memories for richer context
 - **Usefulness feedback** — memories accessed after search get implicit quality signals, improving future ranking
@@ -146,7 +147,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed Mermaid diagrams of the modu
 | `@exocortex/mcp` | MCP server — exposes all memory tools via stdio (works with any MCP client) |
 | `@exocortex/server` | Hono REST API on port 3210 + serves the React dashboard |
 | `@exocortex/cli` | CLI tool (`exo`) — add, search, import/export, serve, consolidate, retrieval-regression, backfill, verify-backup |
-| `@exocortex/dashboard` | React SPA with Neural Interface theme — memories, chat, graph, entities, goals, analytics, timeline, skills, trash, mobile-responsive |
+| `@exocortex/dashboard` | React SPA with Neural Interface theme — memories, chat, graph, entities, goals, analytics, library, sources, timeline, skills, trash, mobile-responsive |
 
 ---
 
@@ -158,7 +159,7 @@ The MCP server exposes all Exocortex tools over stdio. See [Quick Start](#connec
 
 | Tool | Description |
 |------|-------------|
-| `memory_store` | Store a new memory with tags, importance, and content type |
+| `memory_store` | Store a new memory with tags, importance, content type, and knowledge tier |
 | `memory_search` | Hybrid search with RRF scoring, token budgets, and compact mode |
 | `memory_get` | Fetch full content for specific memory IDs (use after compact search) |
 | `memory_update` | Update content, tags, importance, or content type of an existing memory |

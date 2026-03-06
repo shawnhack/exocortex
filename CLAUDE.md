@@ -48,14 +48,18 @@ All data stored in `~/.exocortex/` (DB + cached embedding models). Override mode
 
 ## Dashboard Pages
 
-- **Dashboard** (`/dashboard`) — memory storage overview (stats, charts, temporal data)
-- **Search** (`/`) — hybrid search with tag filtering, advanced filters (content type, date range, importance), bulk select/delete, inline new memory creation, keyboard shortcuts (`/` to focus, arrow keys to paginate, `Escape` to cancel select)
+- **Dashboard** (`/dashboard`) — memory storage overview (stats, charts, temporal data, tier distribution)
+- **Search** (`/`) — hybrid search with tier quick-filters, advanced filters (content type, tier, date range, importance, namespace), bulk select/delete, inline new memory creation, keyboard shortcuts (`/` to focus, arrow keys to paginate, `Escape` to cancel select)
 - **Timeline** (`/timeline`) — chronological memory view with keyboard shortcuts
-- **Entities** (`/entities`) — entity list by type with bulk select/delete
+- **Entities** (`/entities`) — entity list by type with bulk select/delete, scrollable layout
 - **Entity Detail** (`/entities/:id`) — entity info, relationship list + radial SVG graph, linked memories
 - **Graph** (`/graph`) — interactive force-directed knowledge graph (canvas-based). Drag nodes, scroll to zoom, click to navigate
 - **Goals** (`/goals`) — goal tracking with milestone progress
 - **Memory Detail** (`/memory/:id`) — full memory view with inline edit mode (content, tags, importance), supersession diff view, soft-delete to trash
+- **Library** (`/library`) — ingested reference documents with server-side search
+- **Sources** (`/sources`) — memory attribution breakdown by provider/model/agent
+- **Analytics** (`/analytics`) — quality trends, tier distribution, producer quality, tag health, embedding coverage
+- **Skills** (`/skills`) — agent-created knowledge skills from Exocortex
 - **Trash** (`/trash`) — archived/superseded memories with restore and permanent delete
 - **Chat** (`/chat`) — RAG-powered Q&A with multi-turn conversation history, sources linked to memory detail
 - **Settings** (`/settings`) — system configuration, export, and bulk import. API keys are masked in responses
@@ -97,5 +101,5 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for Mermaid diagrams of module dependenci
 - Dashboard is mobile-responsive (hamburger sidebar at <=768px) with a toast notification system replacing native `alert()`/`confirm()`
 - Auto-start: Can be configured via OS-specific mechanisms (systemd, launchd, Windows Task Scheduler, PM2) to start the HTTP server at logon. Log output: `~/.exocortex/server.log`
 - Automatic maintenance: importance adjustment + archival run on server startup (5s delay), after every 50 memory stores, and via nightly cron jobs. Database backup runs nightly (SQLite `VACUUM INTO`, rotates to `~/.exocortex/backups/`, keeps last `backup.max_count` copies, default 7). Consolidation, contradiction detection, entity extraction, and trash auto-purge also run nightly. Trash auto-purge permanently deletes memories in trash for more than `trash.auto_purge_days` (default 30). Set to `"0"` to disable. Superseded memories are preserved while their superseding target is still active.
-- Session orient hook (`packages/mcp/src/hooks/session-orient.js`) — fires on SessionStart, queries SQLite directly (no HTTP dependency) for: (1) recent project memories (7 days, tag-filtered by CWD project name), (2) active goals with milestone progress, (3) recent decisions (30 days), (4) learned techniques (by importance), (5) open threads (plan/todo/in-progress memories from 14 days, not superseded). Outputs compact context via `additionalContext`. Registered in `~/.claude/settings.json` with 3s timeout.
+- Session orient hook (`packages/mcp/src/hooks/session-orient.js`) — fires on SessionStart, queries SQLite directly (no HTTP dependency) for: (1) active goals with milestone progress + stalled goal detection, (2) recent decisions (30 days), (3) open threads (plan/todo/in-progress from 14 days, not superseded), (4) recent project memories (7 days, tag-filtered by CWD project name), (5) permanent knowledge (semantic/procedural tier memories, excludes chunks and consolidated summaries, deduplicates against earlier sections), (6) key entity profiles, (7) pending contradictions, (8) known facts, (9) auto-detected skills from project tech stack, (10) self-model functional directives. Two-pass token budget: first pass fills greedily by priority, second pass expands entries with remaining budget. Outputs compact context via `additionalContext`. Registered in `~/.claude/settings.json` with 3s timeout.
 - Stop hook (`packages/mcp/src/hooks/stop.js`) is available but not enabled by default. Can be added to `~/.claude/settings.json` hooks if session summary reminders are desired.
