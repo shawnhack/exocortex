@@ -167,25 +167,27 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
   // memory_store
   server.tool(
     "memory_store",
-    "Store a new memory in Exocortex. Use this to save important information, facts, preferences, decisions, or context that should be remembered for future conversations.",
+    "Store a new memory in Exocortex. Use for: decisions, discovered facts, learned techniques, user preferences, architectural choices, bug fixes worth remembering, and session summaries.\n" +
+    "Do NOT store: trivial observations, information already in the current conversation, obvious facts, or content that duplicates what was just said. When in doubt, ask whether this would be useful in a future session.\n" +
+    "Always set provider/model_id/agent for attribution. Set namespace to the current project name. Use deduplicate: true when storing facts that might already exist.",
     {
       content: z.string().describe("The content to remember"),
       tags: z.array(z.string()).optional().describe("Tags for categorization"),
       importance: z.number().min(0).max(1).optional().describe("Importance 0-1 (default 0.5, use 0.8+ for critical info)"),
       valence: z.number().min(-1).max(1).optional().describe("Emotional significance (-1=failure/warning, 0=neutral, 1=breakthrough/success)"),
       content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("Content type (default 'text')"),
-      provider: z.string().optional().describe("Model provider (e.g. openai, anthropic)"),
-      model_id: z.string().optional().describe("Canonical model identifier (e.g. gpt-5-codex)"),
-      model_name: z.string().optional().describe("Human-readable model name (e.g. GPT-5.3-Codex)"),
-      agent: z.string().optional().describe("Agent/runtime identifier (e.g. codex, claude-code)"),
+      provider: z.string().optional().describe("Model provider — always set this (e.g. 'anthropic', 'openai')"),
+      model_id: z.string().optional().describe("Canonical model identifier — always set this (e.g. 'claude-opus-4-6', 'gpt-5-codex')"),
+      model_name: z.string().optional().describe("Human-readable model name — always set this (e.g. 'Claude Opus 4.6', 'GPT-5.3-Codex')"),
+      agent: z.string().optional().describe("Agent/runtime identifier — always set this (e.g. 'claude-code', 'codex', 'gemini-cli')"),
       session_id: z.string().optional().describe("Optional agent session/thread identifier"),
       conversation_id: z.string().optional().describe("Optional conversation identifier"),
       metadata: z.record(z.string(), z.any()).optional().describe("Arbitrary JSON metadata (e.g. { model: 'claude-opus-4-6' })"),
       is_metadata: z.boolean().optional().describe("Explicitly mark this memory as metadata/system artifact"),
       benchmark: z.boolean().optional().describe("Store as benchmark artifact (low default importance, reduced indexing/chunking)"),
       expires_at: z.string().optional().describe("ISO timestamp when this memory should auto-expire (e.g. '2026-03-01T00:00:00Z')"),
-      namespace: z.string().optional().describe("Project namespace for scoped retrieval (e.g. 'exocortex', 'moodarc')"),
-      deduplicate: z.boolean().optional().describe("Opt-in semantic dedup: if true, checks for existing near-duplicate memories (>85% similar + >60% word overlap) and returns the existing memory instead of creating a new one"),
+      namespace: z.string().optional().describe("Project namespace — set to the current project name (e.g. 'exocortex', 'myapp'). Enables scoped retrieval so memories from different projects don't collide."),
+      deduplicate: z.boolean().optional().describe("Set true when storing facts or knowledge that might already exist — prevents duplicates. Checks for >85% semantic similarity + >60% word overlap."),
       tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe(
         "Knowledge tier — choose based on content type:\n" +
         "• working: scratch/temp context, auto-expires in 24h. Use for in-progress notes, intermediate results.\n" +
@@ -406,7 +408,11 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
   // memory_search
   server.tool(
     "memory_search",
-    "Search Exocortex memories using hybrid retrieval (semantic + keyword + recency + frequency). Use this to recall stored information or find relevant context.",
+    "Search memories using hybrid retrieval (semantic + keyword + graph-aware scoring).\n" +
+    "**Workflow**: Use compact: true first to get previews, then memory_get for full content of relevant results. Or use max_tokens to auto-pack results into a budget.\n" +
+    "**Better recall**: Set expanded_query with 2-3 rephrasings using different vocabulary (e.g. query: 'auth flow' → expanded_query: 'login JWT session tokens authentication').\n" +
+    "**For precise lookups** (ports, versions, config values): use memory_facts instead — it queries structured subject-predicate-object triples.\n" +
+    "**For broad topic loading** at session start: use memory_context instead — it's optimized for loading background on a subject.",
     {
       query: z.string().describe("Natural language search query"),
       expanded_query: z.string().optional().describe("Semantic rephrasings of the query to bridge vocabulary gaps. Provide 2-3 alternative phrasings with different words that capture the same intent (e.g. for 'auth flow' → 'login authentication JWT session tokens'). Feeds into both vector and keyword search."),
@@ -419,8 +425,8 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       include_metadata: z.boolean().optional().describe("Include benchmark/progress/regression metadata memories (default false)"),
       compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
       max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
-      namespace: z.string().optional().describe("Filter by project namespace"),
-      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Filter by knowledge tier"),
+      namespace: z.string().optional().describe("Filter to a specific project's memories (set to project name)"),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Filter by knowledge tier (e.g. 'semantic' for facts, 'procedural' for techniques)"),
       session_id: z.string().optional().describe("Session ID — includes working-tier memories from this session"),
     },
     async (args) => {
@@ -554,13 +560,14 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
   // memory_context
   server.tool(
     "memory_context",
-    "Load contextual memories for a topic. Use at the start of a conversation to get relevant background about a subject, project, or person.",
+    "Load broad context about a topic — use at session start or when switching subjects. Returns memories ranked by relevance + recency + importance for the given topic.\n" +
+    "Prefer this over memory_search when you need general background rather than a specific answer. For targeted queries mid-conversation, use memory_search instead.",
     {
       topic: z.string().describe("Topic to load context for"),
       limit: z.number().min(1).max(30).optional().describe("Max memories (default 15)"),
       compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
       max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
-      namespace: z.string().optional().describe("Filter by project namespace"),
+      namespace: z.string().optional().describe("Filter to a specific project's memories (set to project name)"),
     },
     async (args) => {
       try {
@@ -668,7 +675,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
   // memory_get
   server.tool(
     "memory_get",
-    "Fetch full content for specific memory IDs. Use after compact search to retrieve details for relevant results.",
+    "Fetch full content for specific memory IDs. Use after compact search to retrieve details for the most relevant results. Also implicitly signals that retrieved memories were useful, improving future ranking.",
     {
       ids: z.array(z.string()).min(1).max(10).describe("Memory IDs to fetch (max 10)"),
     },
@@ -772,7 +779,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
   // memory_facts
   server.tool(
     "memory_facts",
-    "Query structured facts extracted from memories. Facts are subject-predicate-object triples (e.g. 'Exocortex port 4010'). Use for precise lookups of ports, versions, paths, dependencies.",
+    "Query structured subject-predicate-object facts (e.g. 'Exocortex → runs on → port 4010'). Use for precise lookups: ports, versions, config values, dependencies, entity relationships. Faster and more precise than memory_search for factual queries.",
     {
       subject: z.string().optional().describe("Filter by subject (LIKE match)"),
       predicate: z.string().optional().describe("Filter by predicate (exact: port, uses, replaced, path, default, version, is)"),
@@ -1070,8 +1077,8 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       before: z.string().optional().describe("Only before this date (YYYY-MM-DD)"),
       limit: z.number().min(1).max(50).optional().describe("Max results (default 20)"),
       compact: z.boolean().optional().describe("Return compact results (ID + preview) to save tokens"),
-      namespace: z.string().optional().describe("Filter by project namespace"),
-      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Filter by knowledge tier"),
+      namespace: z.string().optional().describe("Filter to a specific project's memories (set to project name)"),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Filter by knowledge tier (e.g. 'semantic' for facts, 'procedural' for techniques)"),
     },
     async (args) => {
       try {
