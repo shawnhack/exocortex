@@ -336,3 +336,82 @@ export function getTopBridgeEntities(
 ): EntityCentrality[] {
   return computeCentrality(db).slice(0, limit);
 }
+
+// --- Community Summaries ---
+
+export interface CommunityWithSummary extends Community {
+  summary: string;
+  topMemories: string[];
+}
+
+/**
+ * Generate summaries for detected communities by aggregating member entity
+ * names and their most-linked memories. Enables "what do I know about X domain?"
+ * queries without needing an LLM — pure extractive summarization.
+ */
+export function getCommunitySummaries(
+  db: DatabaseSync,
+  maxCommunities = 20
+): CommunityWithSummary[] {
+  const communities = detectCommunities(db);
+
+  return communities.slice(0, maxCommunities).map((community) => {
+    const entityIds = community.members.map((m) => m.entityId);
+    const entityNames = community.members.map((m) => m.entityName);
+
+    // Get top memories linked to this community's entities
+    const placeholders = entityIds.map(() => "?").join(", ");
+    const topMemories = db
+      .prepare(
+        `SELECT DISTINCT m.id, m.content, m.importance, m.access_count
+         FROM memories m
+         INNER JOIN memory_entities me ON m.id = me.memory_id
+         WHERE me.entity_id IN (${placeholders})
+           AND m.is_active = 1
+           AND m.parent_id IS NULL
+         ORDER BY m.importance DESC, m.access_count DESC
+         LIMIT 5`
+      )
+      .all(...entityIds) as Array<{ id: string; content: string; importance: number; access_count: number }>;
+
+    // Get relationships within the community for richer context
+    const relationships = db
+      .prepare(
+        `SELECT s.name as source_name, t.name as target_name, er.relationship_type
+         FROM entity_relationships er
+         INNER JOIN entities s ON er.source_entity_id = s.id
+         INNER JOIN entities t ON er.target_entity_id = t.id
+         WHERE er.source_entity_id IN (${placeholders})
+           AND er.target_entity_id IN (${placeholders})
+         LIMIT 10`
+      )
+      .all(...entityIds, ...entityIds) as Array<{
+      source_name: string;
+      target_name: string;
+      relationship_type: string;
+    }>;
+
+    // Build extractive summary
+    const relDescriptions = relationships
+      .map((r) => `${r.source_name} ${r.relationship_type} ${r.target_name}`)
+      .join("; ");
+
+    const memoryPreviews = topMemories.map((m) => m.content.slice(0, 150));
+
+    const summary = [
+      `Entities: ${entityNames.join(", ")}`,
+      relDescriptions ? `Relationships: ${relDescriptions}` : "",
+      memoryPreviews.length > 0
+        ? `Key knowledge: ${memoryPreviews.join(" | ")}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(". ");
+
+    return {
+      ...community,
+      summary,
+      topMemories: topMemories.map((m) => m.id),
+    };
+  });
+}

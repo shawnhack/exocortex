@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, PredictionStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, autoConsolidate, applyCommunityAwareFiltering, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, autoDismissContradictions, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent, recomputeQualityScores } from "@exocortex/core";
+import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, PredictionStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, autoConsolidate, applyCommunityAwareFiltering, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getCommunitySummaries, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, autoDismissContradictions, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent, recomputeQualityScores } from "@exocortex/core";
 import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "./utils.js";
@@ -287,6 +287,34 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
             }
             if (linked.length > 0) {
               meta.push(`linked: ${linked.length} related`);
+
+              // Memory evolution: refresh keywords of linked memories
+              // so they become easier to find via the new memory's context
+              try {
+                const { generateKeywords } = await import("@exocortex/core");
+                for (const linkedId of linked) {
+                  const linkedMem = db
+                    .prepare("SELECT content FROM memories WHERE id = ?")
+                    .get(linkedId) as { content: string } | undefined;
+                  if (!linkedMem) continue;
+
+                  const linkedTags = (db
+                    .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
+                    .all(linkedId) as Array<{ tag: string }>).map((t) => t.tag);
+                  const linkedEntities = (db
+                    .prepare(
+                      "SELECT e.name FROM entities e INNER JOIN memory_entities me ON e.id = me.entity_id WHERE me.memory_id = ?"
+                    )
+                    .all(linkedId) as Array<{ name: string }>).map((e) => e.name);
+
+                  const newKeywords = generateKeywords(linkedMem.content, linkedTags, linkedEntities);
+                  if (newKeywords.length > 0) {
+                    db.prepare("UPDATE memories SET keywords = ? WHERE id = ?").run(newKeywords, linkedId);
+                  }
+                }
+              } catch {
+                // Keyword refresh is non-critical
+              }
             }
           }
         } catch {
@@ -867,7 +895,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
     "memory_graph",
     "Analyze the entity relationship graph. Compute centrality metrics to find bridge entities that connect different knowledge domains.",
     {
-      action: z.enum(["stats", "centrality", "bridges", "communities"]).describe("Analysis type: 'stats' for overview, 'centrality' for top entities by betweenness, 'bridges' for bridge entities, 'communities' for dense subgraphs"),
+      action: z.enum(["stats", "centrality", "bridges", "communities", "community_summaries"]).describe("Analysis type: 'stats' for overview, 'centrality' for top entities by betweenness, 'bridges' for bridge entities, 'communities' for dense subgraphs, 'community_summaries' for communities with context"),
       limit: z.number().min(1).max(50).optional().describe("Max results for centrality/bridges (default 10)"),
     },
     async (args) => {
@@ -908,6 +936,17 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
             return `${c.id + 1}. [${c.size} members, ${c.internalEdges} edges] ${members}`;
           });
           return { content: [{ type: "text", text: `Detected ${communities.length} communities:\n\n${lines.join("\n")}` }] };
+        }
+
+        if (args.action === "community_summaries") {
+          const summaries = getCommunitySummaries(db, limit);
+          if (summaries.length === 0) {
+            return { content: [{ type: "text", text: "No communities detected." }] };
+          }
+          const lines = summaries.map((c) => {
+            return `### Community ${c.id + 1} (${c.size} entities, ${c.internalEdges} edges)\n${c.summary}`;
+          });
+          return { content: [{ type: "text", text: `${summaries.length} communities with summaries:\n\n${lines.join("\n\n")}` }] };
         }
 
         // bridges

@@ -51,7 +51,7 @@ export function registerImport(program: Command): void {
     .description("Import memories from a file")
     .option(
       "-f, --format <format>",
-      "File format: json|markdown|chatexport",
+      "File format: json|markdown|chatexport|chatgpt|claude",
       "json"
     )
     .option("--dry-run", "Preview without importing")
@@ -148,6 +148,83 @@ export function registerImport(program: Command): void {
           .map((s) => s.trim())
           .filter(Boolean);
         items = sections.map((content) => ({ content }));
+      } else if (opts.format === "chatgpt") {
+        // ChatGPT conversations.json export
+        const parsed = JSON.parse(raw);
+        const conversations = Array.isArray(parsed) ? parsed : [parsed];
+        for (const conv of conversations) {
+          const title = conv.title ?? "Untitled";
+          const created = conv.create_time
+            ? new Date(conv.create_time * 1000).toISOString()
+            : undefined;
+
+          // Walk the message tree
+          const mapping = conv.mapping ?? {};
+          const messages: string[] = [];
+          for (const node of Object.values(mapping) as any[]) {
+            const msg = node?.message;
+            if (!msg || !msg.content?.parts) continue;
+            const role = msg.author?.role;
+            if (role !== "user" && role !== "assistant") continue;
+            const text = msg.content.parts
+              .filter((p: unknown) => typeof p === "string")
+              .join("\n")
+              .trim();
+            if (text) {
+              messages.push(`**${role === "user" ? "User" : "Assistant"}**: ${text}`);
+            }
+          }
+
+          if (messages.length > 0) {
+            items.push({
+              content: `# ${title}\n\n${messages.join("\n\n")}`,
+              content_type: "conversation",
+              source: "chatgpt",
+              tags: ["imported", "chatgpt"],
+              metadata: created ? { original_date: created } : undefined,
+            });
+          }
+        }
+      } else if (opts.format === "claude") {
+        // Claude conversation export (JSON array of conversations)
+        const parsed = JSON.parse(raw);
+        const conversations = Array.isArray(parsed) ? parsed : [parsed];
+        for (const conv of conversations) {
+          const title = conv.name ?? conv.title ?? "Untitled";
+          const created = conv.created_at ?? conv.updated_at;
+
+          const messages: string[] = [];
+          const chatMessages = conv.chat_messages ?? conv.messages ?? [];
+          for (const msg of chatMessages) {
+            const role = msg.sender ?? msg.role;
+            if (role !== "human" && role !== "assistant") continue;
+            const text = typeof msg.text === "string"
+              ? msg.text
+              : Array.isArray(msg.content)
+                ? msg.content
+                    .filter((c: any) => c.type === "text")
+                    .map((c: any) => c.text)
+                    .join("\n")
+                : typeof msg.content === "string"
+                  ? msg.content
+                  : "";
+            if (text.trim()) {
+              messages.push(
+                `**${role === "human" ? "User" : "Assistant"}**: ${text.trim()}`
+              );
+            }
+          }
+
+          if (messages.length > 0) {
+            items.push({
+              content: `# ${title}\n\n${messages.join("\n\n")}`,
+              content_type: "conversation",
+              source: "claude",
+              tags: ["imported", "claude"],
+              metadata: created ? { original_date: created } : undefined,
+            });
+          }
+        }
       } else if (opts.format === "chatexport") {
         // Simple chat export: each message block separated by blank lines
         const blocks = raw.split(/\n\n+/).filter(Boolean);

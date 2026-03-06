@@ -72,8 +72,8 @@ export type { Entity, EntityType, CreateEntityInput, EntityRelationship, Extract
 export { EntityStore } from "./entities/store.js";
 export { extractEntities, extractRelationships } from "./entities/extractor.js";
 export type { ExtractedEntity } from "./entities/extractor.js";
-export { computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities } from "./entities/graph.js";
-export type { GraphStats, EntityCentrality, Community } from "./entities/graph.js";
+export { computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getCommunitySummaries } from "./entities/graph.js";
+export type { GraphStats, EntityCentrality, Community, CommunityWithSummary } from "./entities/graph.js";
 export { generateEntityProfile, recomputeEntityProfiles, getCachedProfiles } from "./entities/profile.js";
 export type { RecomputeProfilesResult } from "./entities/profile.js";
 

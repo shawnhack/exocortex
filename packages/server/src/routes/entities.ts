@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { getDb, EntityStore, MemoryStore, computeCentrality, detectCommunities, computeGraphStats } from "@exocortex/core";
+import { getDb, EntityStore, MemoryStore, computeCentrality, detectCommunities, computeGraphStats, getCommunitySummaries } from "@exocortex/core";
 import type { EntityType } from "@exocortex/core";
 import { stripEmbedding } from "../utils.js";
 
@@ -56,6 +56,14 @@ entities.get("/api/entities/graph/analysis", (c) => {
   const communities = detectCommunities(db);
   const stats = computeGraphStats(db);
   return c.json({ centrality, communities, stats });
+});
+
+// GET /api/entities/graph/communities — community summaries with top memories
+entities.get("/api/entities/graph/communities", (c) => {
+  const db = getDb();
+  const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 50);
+  const summaries = getCommunitySummaries(db, limit);
+  return c.json({ communities: summaries, count: summaries.length });
 });
 
 // GET /api/entities/tags — distinct tags across all entities
