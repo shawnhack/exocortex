@@ -29,19 +29,28 @@ export class EntityStore {
     const id = ulid();
     const now = new Date().toISOString().replace("T", " ").replace("Z", "");
 
-    this.db
-      .prepare(
-        "INSERT INTO entities (id, name, type, aliases, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      )
-      .run(
-        id,
-        input.name,
-        input.type ?? "concept",
-        JSON.stringify(input.aliases ?? []),
-        JSON.stringify(input.metadata ?? {}),
-        now,
-        now
-      );
+    try {
+      this.db
+        .prepare(
+          "INSERT INTO entities (id, name, type, aliases, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        .run(
+          id,
+          input.name,
+          input.type ?? "concept",
+          JSON.stringify(input.aliases ?? []),
+          JSON.stringify(input.metadata ?? {}),
+          now,
+          now
+        );
+    } catch (err: unknown) {
+      // Handle race condition: entity was created by another concurrent operation
+      if (err instanceof Error && err.message.includes("UNIQUE constraint")) {
+        const existing = this.getByName(input.name);
+        if (existing) return existing;
+      }
+      throw err;
+    }
 
     if (input.tags && input.tags.length > 0) {
       const insertTag = this.db.prepare(
@@ -52,7 +61,9 @@ export class EntityStore {
       }
     }
 
-    return this.getById(id)!;
+    const created = this.getById(id);
+    if (!created) throw new Error(`Entity ${id} was inserted but could not be read back`);
+    return created;
   }
 
   getById(id: string): Entity | null {

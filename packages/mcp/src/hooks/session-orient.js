@@ -182,7 +182,7 @@ async function main() {
                AND m.created_at >= ?`
           )
           .get(`%"goal_id":"${g.id}"%`, stallCutoff);
-        return recentProgress.count === 0;
+        return !recentProgress || recentProgress.count === 0;
       });
 
       if (stalledGoals.length > 0) {

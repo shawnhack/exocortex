@@ -292,8 +292,9 @@ export class MemoryStore {
           embedding.byteOffset,
           embedding.byteLength
         );
-      } catch {
+      } catch (err) {
         // Embedding may fail on first run while model downloads; store without
+        console.error(`[exocortex] Embedding failed, storing memory without vector index: ${err instanceof Error ? err.message : err}`);
       }
     }
 
@@ -493,8 +494,8 @@ export class MemoryStore {
             }
           }
         }
-      } catch {
-        // Entity extraction is non-critical — don't fail memory creation
+      } catch (err) {
+        console.error(`[exocortex] Entity extraction failed: ${err instanceof Error ? err.message : err}`);
       }
 
       // Auto-generate tags
@@ -515,8 +516,8 @@ export class MemoryStore {
             }
           }
         }
-      } catch {
-        // Auto-tagging is non-critical — don't fail memory creation
+      } catch (err) {
+        console.error(`[exocortex] Auto-tagging failed: ${err instanceof Error ? err.message : err}`);
       }
 
       // Generate keywords from content, tags, and entity names
@@ -539,8 +540,8 @@ export class MemoryStore {
             .prepare("UPDATE memories SET keywords = ? WHERE id = ?")
             .run(keywords, id);
         }
-      } catch {
-        // Keyword generation is non-critical
+      } catch (err) {
+        console.error(`[exocortex] Keyword generation failed: ${err instanceof Error ? err.message : err}`);
       }
 
       // Extract and store structured facts (SPO triples)
@@ -550,8 +551,8 @@ export class MemoryStore {
         if (facts.length > 0) {
           storeFactsFn(this.db, id, facts);
         }
-      } catch {
-        // Fact extraction is non-critical
+      } catch (err) {
+        console.error(`[exocortex] Fact extraction failed: ${err instanceof Error ? err.message : err}`);
       }
     }
 
