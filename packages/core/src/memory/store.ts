@@ -44,6 +44,7 @@ function rowToMemory(row: MemoryRow, tags?: string[]): Memory {
     chunk_index: rowData.chunk_index ?? null,
     keywords: rowData.keywords ?? undefined,
     metadata: safeJsonParse<Record<string, unknown> | undefined>(rowData.metadata, undefined),
+    tier: (rowData.tier as import("./types.js").MemoryTier) ?? "episodic",
     expires_at: rowData.expires_at ?? null,
     namespace: rowData.namespace ?? null,
     tags,
@@ -386,8 +387,8 @@ export class MemoryStore {
     }
 
     const insertMemory = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, metadata, expires_at, namespace, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, metadata, tier, expires_at, namespace, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertTag = this.db.prepare(
@@ -430,7 +431,10 @@ export class MemoryStore {
         input.valence ?? 0,
         input.parent_id ?? null,
         input.metadata ? JSON.stringify(input.metadata) : null,
-        input.expires_at ?? null,
+        input.tier ?? (input.parent_id ? "reference" : "episodic"),
+        input.tier === "working" && !input.expires_at
+          ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+          : (input.expires_at ?? null),
         input.namespace ?? null,
         now,
         now
@@ -936,8 +940,8 @@ export class MemoryStore {
 
     // Insert parent (no embedding)
     const insertMemory = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, metadata, expires_at, namespace, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, metadata, tier, expires_at, namespace, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertTag = this.db.prepare(
       "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
@@ -973,6 +977,7 @@ export class MemoryStore {
         input.valence ?? 0,
         input.parent_id ?? null,
         input.metadata ? JSON.stringify(input.metadata) : null,
+        input.tier ?? "episodic",
         input.expires_at ?? null,
         input.namespace ?? null,
         now,
@@ -992,8 +997,8 @@ export class MemoryStore {
 
     // Insert chunks with individual embeddings
     const insertChunk = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, chunk_index, metadata, expires_at, namespace, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, chunk_index, metadata, tier, expires_at, namespace, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const provider = isIndexed ? await getEmbeddingProvider().catch(() => null) : null;
@@ -1033,6 +1038,7 @@ export class MemoryStore {
           parentId,
           i,
           input.metadata ? JSON.stringify(input.metadata) : null,
+          input.tier ?? "episodic",
           input.expires_at ?? null,
           input.namespace ?? null,
           now,
@@ -1365,6 +1371,11 @@ export class MemoryStore {
       params.push(attributionUpdates.conversation_id);
     }
 
+    if (input.tier !== undefined) {
+      sets.push("tier = ?");
+      params.push(input.tier);
+    }
+
     const shouldRecomputeMetadataFlag =
       input.is_metadata !== undefined ||
       normalizedTagUpdate !== undefined ||
@@ -1441,8 +1452,8 @@ export class MemoryStore {
             .all(id) as Array<{ tag: string }>;
 
           const insertChunk = this.db.prepare(`
-            INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, chunk_index, metadata, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, chunk_index, metadata, tier, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `);
           const insertTag = this.db.prepare(
             "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
@@ -1487,6 +1498,7 @@ export class MemoryStore {
               id,
               i,
               parentRow.metadata,
+              (parentRow as any).tier ?? "episodic",
               now,
               now
             );
@@ -1909,6 +1921,12 @@ export class MemoryStore {
       )
       .all() as Array<{ source: string; count: number }>;
 
+    const byTier = this.db
+      .prepare(
+        "SELECT tier, COUNT(*) as count FROM memories WHERE is_active = 1 GROUP BY tier"
+      )
+      .all() as Array<{ tier: string; count: number }>;
+
     const entityCount = this.db
       .prepare("SELECT COUNT(*) as count FROM entities")
       .get() as { count: number };
@@ -1937,6 +1955,9 @@ export class MemoryStore {
       ),
       by_source: Object.fromEntries(
         bySource.map((r) => [r.source, r.count])
+      ),
+      by_tier: Object.fromEntries(
+        byTier.map((r) => [r.tier, r.count])
       ),
       total_entities: entityCount.count,
       total_tags: tagCount.count,

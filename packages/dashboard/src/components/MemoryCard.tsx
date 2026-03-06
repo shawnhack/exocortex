@@ -21,6 +21,14 @@ function timeAgo(dateStr: string): string {
   return `${months}mo ago`;
 }
 
+const TIER_COLORS: Record<string, string> = {
+  working: "#8080a0",
+  episodic: "#fbbf24",
+  semantic: "#a78bfa",
+  procedural: "#34d399",
+  reference: "#38bdf8",
+};
+
 const FACT_TAG_COLORS: Record<string, { color: string; bg: string; border: string }> = {
   decision: { color: "#38bdf8", bg: "rgba(56, 189, 248, 0.1)", border: "rgba(56, 189, 248, 0.2)" },
   discovery: { color: "#22d3ee", bg: "rgba(34, 211, 238, 0.1)", border: "rgba(34, 211, 238, 0.2)" },
@@ -169,11 +177,28 @@ export function MemoryCard({
             </span>
           );
         })}
+        {memory.tier && (
+          <span
+            style={{
+              marginLeft: "auto",
+              background: `${TIER_COLORS[memory.tier] ?? "#8080a0"}18`,
+              color: TIER_COLORS[memory.tier] ?? "#8080a0",
+              border: `1px solid ${TIER_COLORS[memory.tier] ?? "#8080a0"}30`,
+              padding: "1px 8px",
+              borderRadius: 20,
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.02em",
+            }}
+          >
+            {memory.tier}
+          </span>
+        )}
         <span
           style={{
             fontSize: 10,
             color: "#8080a0",
-            marginLeft: "auto",
+            marginLeft: memory.tier ? 0 : "auto",
             fontFamily: "var(--font-mono)",
             letterSpacing: "0.02em",
             overflowWrap: "anywhere",

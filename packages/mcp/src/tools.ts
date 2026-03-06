@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, PredictionStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, autoConsolidate, applyCommunityAwareFiltering, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getCommunitySummaries, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, autoDismissContradictions, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent, recomputeQualityScores } from "@exocortex/core";
+import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, PredictionStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, ingestUrl, researchTopic, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, autoConsolidate, applyCommunityAwareFiltering, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getCommunitySummaries, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, autoDismissContradictions, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent, recomputeQualityScores, promoteMemoryTiers } from "@exocortex/core";
 import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "./utils.js";
@@ -186,6 +186,15 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       expires_at: z.string().optional().describe("ISO timestamp when this memory should auto-expire (e.g. '2026-03-01T00:00:00Z')"),
       namespace: z.string().optional().describe("Project namespace for scoped retrieval (e.g. 'exocortex', 'moodarc')"),
       deduplicate: z.boolean().optional().describe("Opt-in semantic dedup: if true, checks for existing near-duplicate memories (>85% similar + >60% word overlap) and returns the existing memory instead of creating a new one"),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe(
+        "Knowledge tier — choose based on content type:\n" +
+        "• working: scratch/temp context, auto-expires in 24h. Use for in-progress notes, intermediate results.\n" +
+        "• episodic (default): events, conversations, session summaries. Decays over time. Use for 'what happened' memories.\n" +
+        "• semantic: permanent facts, definitions, relationships. Use for 'X is Y', stable truths, entity properties. Never decays.\n" +
+        "• procedural: permanent techniques, how-to knowledge, reusable skills. Use for 'how to do X', workflows, patterns. Never decays.\n" +
+        "• reference: permanent documents, articles, API docs. Use for ingested content, specs, guides. Never decays.\n" +
+        "Rule of thumb: if it's a fact → semantic. If it's a technique/skill → procedural. If it's a report/event → episodic. If it's a doc → reference."
+      ),
     },
     async (args) => {
       try {
@@ -225,6 +234,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           metadata: args.metadata,
           is_metadata: args.is_metadata,
           benchmark: args.benchmark,
+          tier: args.tier,
           expires_at: expiresAt,
           namespace: args.namespace,
           deduplicate: args.deduplicate,
@@ -410,6 +420,8 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
       max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
       namespace: z.string().optional().describe("Filter by project namespace"),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Filter by knowledge tier"),
+      session_id: z.string().optional().describe("Session ID — includes working-tier memories from this session"),
     },
     async (args) => {
       try {
@@ -429,6 +441,8 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           min_score: args.min_score,
           include_metadata: args.include_metadata,
           namespace: args.namespace,
+          tier: args.tier,
+          session_id: args.session_id,
         });
 
         if (results.length === 0) {
@@ -994,6 +1008,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       metadata: z.record(z.string(), z.any()).optional().describe("Merge metadata keys (set value to null to delete a key)"),
       expires_at: z.string().nullable().optional().describe("Set/clear expiry timestamp (ISO format)"),
       namespace: z.string().nullable().optional().describe("Set/clear project namespace"),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Move memory to a different knowledge tier"),
     },
     async (args) => {
       try {
@@ -1014,13 +1029,14 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           updates.is_metadata === undefined &&
           updates.expires_at === undefined &&
           updates.namespace === undefined &&
+          updates.tier === undefined &&
           !updates.tags &&
           !updates.metadata
         ) {
           return {
             content: [{
               type: "text",
-              text: "No update fields provided. Specify at least one of: content, content_type, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, valence, is_metadata, expires_at, namespace, tags, metadata.",
+              text: "No update fields provided. Specify at least one of: content, content_type, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, valence, is_metadata, expires_at, namespace, tier, tags, metadata.",
             }],
           };
         }
@@ -1055,6 +1071,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       limit: z.number().min(1).max(50).optional().describe("Max results (default 20)"),
       compact: z.boolean().optional().describe("Return compact results (ID + preview) to save tokens"),
       namespace: z.string().optional().describe("Filter by project namespace"),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Filter by knowledge tier"),
     },
     async (args) => {
       try {
@@ -1065,6 +1082,11 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
         if (args.namespace) {
           conditions.push("m.namespace = ?");
           params.push(args.namespace);
+        }
+
+        if (args.tier) {
+          conditions.push("m.tier = ?");
+          params.push(args.tier);
         }
 
         let tagJoin = "";
@@ -1271,6 +1293,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       recompute_profiles: z.boolean().optional().describe("Recompute entity profiles for entities with ≥3 active memories"),
       recompute_quality: z.boolean().optional().describe("Recompute quality_score for all active memories"),
       auto_consolidate: z.boolean().optional().describe("Run auto-consolidation to merge similar memory clusters"),
+      promote_tiers: z.boolean().optional().describe("Auto-promote memories between tiers (episodic→semantic if useful, episodic→procedural if technique-tagged, working→episodic if accessed)"),
     },
     async (args) => {
       try {
@@ -1463,6 +1486,20 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
             parts.push(`\nAuto-consolidation: ${consolidateResult.clustersFound} clusters found, ${consolidateResult.clustersConsolidated} consolidated, ${consolidateResult.memoriesMerged} memories merged`);
           } catch (err) {
             parts.push(`\nAuto-consolidation: error — ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
+        if (args.promote_tiers) {
+          try {
+            const tierResult = promoteMemoryTiers(db);
+            const total = tierResult.episodicToSemantic + tierResult.episodicToProcedural + tierResult.workingToEpisodic;
+            if (total > 0) {
+              parts.push(`\nTier promotions: ${total} total (${tierResult.episodicToSemantic} episodic→semantic, ${tierResult.episodicToProcedural} episodic→procedural, ${tierResult.workingToEpisodic} working→episodic)`);
+            } else {
+              parts.push(`\nTier promotions: no memories eligible for promotion`);
+            }
+          } catch (err) {
+            parts.push(`\nTier promotions: error — ${err instanceof Error ? err.message : String(err)}`);
           }
         }
 
@@ -1808,6 +1845,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       tags: z.array(z.string()).optional().describe("Tags to apply to all ingested memories"),
       importance: z.number().min(0).max(1).optional().describe("Importance score (default 0.5)"),
       content_type: z.enum(["text", "conversation", "note", "summary"]).optional().describe("Content type (default 'note')"),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Knowledge tier (default 'reference')"),
     },
     async (args) => {
       const inputPaths = Array.isArray(args.path) ? args.path : [args.path];
@@ -1854,6 +1892,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           tags: args.tags,
           importance: args.importance,
           content_type: args.content_type as ContentType | undefined,
+          tier: args.tier as import("@exocortex/core").MemoryTier | undefined,
         });
 
         const lines = result.files.map((f) => {
@@ -1872,6 +1911,113 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
       } catch (err) {
         return {
           content: [{ type: "text", text: `Ingest error: ${err instanceof Error ? err.message : String(err)}` }],
+        };
+      }
+    }
+  );
+
+  // memory_ingest_url
+  server.tool(
+    "memory_ingest_url",
+    "Ingest a URL (web page, article, documentation) into Exocortex as chunked reference knowledge. Fetches the page, extracts text from HTML, creates a parent document memory and child chunk memories. For JavaScript-heavy pages, use browser_scrape first and pass the content parameter.",
+    {
+      url: z.string().url().describe("URL to ingest"),
+      content: z.string().optional().describe("Pre-fetched content (markdown/text). If provided, skips HTTP fetch — use this with browser_scrape output"),
+      title: z.string().optional().describe("Document title. Auto-extracted from HTML if not provided"),
+      tags: z.array(z.string()).optional().describe("Tags to apply to all chunks"),
+      importance: z.number().min(0).max(1).optional().describe("Importance score (default 0.6)"),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Knowledge tier (default 'reference')"),
+      namespace: z.string().optional().describe("Namespace for organization"),
+      chunk_size: z.number().min(100).max(5000).optional().describe("Target chunk size in characters (default from settings, fallback 500)"),
+      chunk_overlap: z.number().min(0).max(500).optional().describe("Chunk overlap in characters (default 50)"),
+    },
+    async (args) => {
+      try {
+        const result = await ingestUrl(db, {
+          url: args.url,
+          content: args.content,
+          title: args.title,
+          tags: args.tags,
+          importance: args.importance,
+          tier: args.tier as import("@exocortex/core").MemoryTier | undefined,
+          namespace: args.namespace,
+          chunk_size: args.chunk_size,
+          chunk_overlap: args.chunk_overlap,
+          ...DEFAULT_ATTRIBUTION,
+        });
+
+        const replacedStr = result.replaced > 0 ? ` (replaced ${result.replaced} existing)` : "";
+        return {
+          content: [{
+            type: "text",
+            text: `Ingested "${result.title}" from ${result.url}${replacedStr}\n\n` +
+              `- Parent ID: ${result.parent_id}\n` +
+              `- Chunks stored: ${result.chunks_stored}\n` +
+              `- Total characters: ${result.total_chars.toLocaleString()}\n` +
+              `- Tier: ${result.tier}\n` +
+              (result.description ? `- Description: ${result.description}\n` : ""),
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Ingest error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // memory_research
+  server.tool(
+    "memory_research",
+    "Research a topic by searching the web and ingesting the best sources into the knowledge library. Searches DuckDuckGo, ranks results by relevance, skips already-ingested URLs, and stores each source as chunked reference knowledge. Use this to build domain knowledge on any subject.",
+    {
+      topic: z.string().describe("Topic to research (e.g. 'crypto trading strategies', 'TypeScript design patterns')"),
+      queries: z.array(z.string()).optional().describe("Additional search queries beyond auto-generated ones. If not provided, generates 'topic guide', 'topic tutorial', 'topic explained'"),
+      max_sources: z.number().min(1).max(20).optional().describe("Max sources to ingest (default 5)"),
+      tags: z.array(z.string()).optional().describe("Extra tags to apply to all ingested content"),
+      importance: z.number().min(0).max(1).optional().describe("Importance score (default 0.6)"),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Knowledge tier (default 'reference')"),
+      namespace: z.string().optional().describe("Namespace for organization"),
+    },
+    async (args) => {
+      try {
+        const result = await researchTopic(db, {
+          topic: args.topic,
+          queries: args.queries,
+          max_sources: args.max_sources,
+          tags: args.tags,
+          importance: args.importance,
+          tier: args.tier as import("@exocortex/core").MemoryTier | undefined,
+          namespace: args.namespace,
+          ...DEFAULT_ATTRIBUTION,
+        });
+
+        const sourceLines = result.sources.map((s) => {
+          if (s.status === "ingested") {
+            return `  [OK] ${s.title} (${s.chunks_stored} chunks, ${(s.total_chars ?? 0).toLocaleString()} chars)\n       ${s.url}`;
+          } else if (s.status === "skipped") {
+            return `  [SKIP] ${s.title} — ${s.error}\n         ${s.url}`;
+          } else {
+            return `  [FAIL] ${s.title} — ${s.error}\n         ${s.url}`;
+          }
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: `Research complete: "${result.topic}"\n\n` +
+              `Queries: ${result.queries_run.join(", ")}\n` +
+              `Sources found: ${result.sources_found}\n` +
+              `Ingested: ${result.sources_ingested} | Failed: ${result.sources_failed} | Skipped: ${result.sources_skipped}\n` +
+              `Total: ${result.total_chunks} chunks, ${result.total_chars.toLocaleString()} chars\n\n` +
+              `Sources:\n${sourceLines.join("\n")}`,
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Research error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
         };
       }
     }

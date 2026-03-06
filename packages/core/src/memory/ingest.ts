@@ -10,6 +10,7 @@ export interface IngestOptions {
   importance?: number;
   content_type?: ContentType;
   benchmark?: boolean;
+  tier?: import("./types.js").MemoryTier;
 }
 
 export interface IngestFileResult {
@@ -138,9 +139,10 @@ export async function ingestMarkdownFile(
       content_type: options?.content_type ?? "note",
       source: "import",
       source_uri: absolutePath,
-      importance: options?.importance ?? 0.5,
+      importance: options?.importance ?? 0.6,
       tags: normalizedTags,
       benchmark: options?.benchmark,
+      tier: options?.tier ?? "reference",
     });
     memories.push(memory);
   }

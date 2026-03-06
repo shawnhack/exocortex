@@ -30,6 +30,8 @@ export interface ProducerQuality {
 export interface QualityTrendEntry {
   period: string;
   created: number;
+  totalMemories: number;
+  searches: number;
   avgUseful: number;
   neverAccessedPct: number;
 }
@@ -153,28 +155,67 @@ export function getProducerQuality(
 
 export function getQualityTrend(
   db: DatabaseSync,
-  granularity: "month" | "week" = "month",
+  granularity: "month" | "week" | "day" = "month",
   limit = 12
 ): QualityTrendEntry[] {
   const format =
-    granularity === "month" ? "%Y-%m" : "%Y-W%W";
+    granularity === "day" ? "%Y-%m-%d" : granularity === "month" ? "%Y-%m" : "%Y-W%W";
 
+  // Single query: per-period stats with window functions for cumulative totals
   const rows = db
     .prepare(
-      `SELECT
-        strftime('${format}', created_at) as period,
-        COUNT(*) as created,
-        ROUND(AVG(useful_count), 2) as avg_useful,
-        ROUND(100.0 * SUM(CASE WHEN access_count = 0 THEN 1 ELSE 0 END) / COUNT(*), 1) as never_accessed_pct
-       FROM memories
-       WHERE is_active = 1
-       GROUP BY period
-       ORDER BY period DESC
+      `WITH active_period AS (
+         SELECT
+           strftime('${format}', created_at) as period,
+           COUNT(*) as created,
+           SUM(useful_count) as sum_useful,
+           SUM(CASE WHEN access_count = 0 THEN 1 ELSE 0 END) as sum_never
+         FROM memories WHERE is_active = 1
+         GROUP BY period
+       ),
+       all_period AS (
+         SELECT
+           strftime('${format}', created_at) as period,
+           COUNT(*) as created_all
+         FROM memories
+         GROUP BY period
+       ),
+       cumulative AS (
+         SELECT
+           a.period,
+           a.created,
+           SUM(COALESCE(t.created_all, a.created)) OVER (ORDER BY a.period) as total_memories,
+           SUM(a.sum_useful) OVER (ORDER BY a.period) as cum_useful,
+           SUM(a.created) OVER (ORDER BY a.period) as cum_count,
+           SUM(a.sum_never) OVER (ORDER BY a.period) as cum_never
+         FROM active_period a
+         LEFT JOIN all_period t ON t.period = a.period
+       ),
+       searches AS (
+         SELECT
+           strftime('${format}', accessed_at) as period,
+           COUNT(DISTINCT query || ':' || strftime('%Y-%m-%dT%H:%M', accessed_at)) as searches
+         FROM access_log
+         WHERE query IS NOT NULL
+         GROUP BY period
+       )
+       SELECT
+         c.period,
+         c.created,
+         c.total_memories,
+         COALESCE(s.searches, 0) as searches,
+         CASE WHEN c.cum_count > 0 THEN ROUND(1.0 * c.cum_useful / c.cum_count, 2) ELSE 0 END as avg_useful,
+         CASE WHEN c.cum_count > 0 THEN ROUND(100.0 * c.cum_never / c.cum_count, 1) ELSE 0 END as never_accessed_pct
+       FROM cumulative c
+       LEFT JOIN searches s ON s.period = c.period
+       ORDER BY c.period DESC
        LIMIT ?`
     )
-    .all(limit) as unknown as Array<{
+    .all(limit) as Array<{
     period: string;
     created: number;
+    total_memories: number;
+    searches: number;
     avg_useful: number;
     never_accessed_pct: number;
   }>;
@@ -182,6 +223,8 @@ export function getQualityTrend(
   return rows.map((r) => ({
     period: r.period,
     created: r.created,
+    totalMemories: r.total_memories,
+    searches: r.searches,
     avgUseful: r.avg_useful,
     neverAccessedPct: r.never_accessed_pct,
   }));

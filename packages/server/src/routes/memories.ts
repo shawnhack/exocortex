@@ -97,6 +97,7 @@ const searchSchema = z.object({
   include_metadata: z.boolean().optional(),
   compact: z.boolean().optional(),
   namespace: z.string().optional(),
+  tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional(),
 });
 
 const settingsPatchSchema = z.record(z.string(), z.string());
@@ -156,6 +157,7 @@ memories.get("/api/memories/recent", async (c) => {
   const tagsParam = c.req.query("tags");
   const tags = tagsParam ? tagsParam.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
   const contentType = c.req.query("content_type");
+  const tier = c.req.query("tier");
   const after = c.req.query("after");
   const before = c.req.query("before");
   const minImportanceParam = c.req.query("min_importance");
@@ -165,11 +167,14 @@ memories.get("/api/memories/recent", async (c) => {
   const db = getDb();
   const store = new MemoryStore(db);
   // Fetch extra rows to account for filtering, then trim to requested limit
-  const fetchLimit = (contentType || after || before || minImportance !== undefined) ? limit * 5 : limit;
+  const fetchLimit = (contentType || tier || after || before || minImportance !== undefined) ? limit * 5 : limit;
   let results = await store.getRecent(fetchLimit, offset, tags, namespace);
 
   if (contentType) {
     results = results.filter((m) => m.content_type === contentType);
+  }
+  if (tier) {
+    results = results.filter((m) => m.tier === tier);
   }
   if (after) {
     results = results.filter((m) => m.created_at >= after);

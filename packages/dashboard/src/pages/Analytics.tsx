@@ -1,15 +1,191 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { QueryOutcome } from "../api/client";
 import { useToast } from "../components/Toast";
 
+interface LineChartLine {
+  data: number[];
+  color: string;
+  label: string;
+  format?: (v: number) => string;
+}
+
+function LineChart({
+  periods,
+  lines,
+  leftLabel,
+  rightLine,
+}: {
+  periods: string[];
+  lines: LineChartLine[];
+  leftLabel: (max: number) => string;
+  rightLine?: LineChartLine;
+}) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const n = periods.length;
+  const W = 600, H = 150, padL = 40, padR = rightLine ? 40 : 12, padT = 14, padB = 26;
+  const chartW = W - padL - padR, chartH = H - padT - padB;
+
+  const allLeft = lines.flatMap((l) => l.data);
+  const leftMax = Math.max(...allLeft, 0.1);
+  const rightMax = rightLine ? Math.max(...rightLine.data, 1) : 0;
+
+  function pts(data: number[], max: number) {
+    return data.map((v, i) => ({
+      x: padL + (i / (n - 1)) * chartW,
+      y: padT + chartH - (v / max) * chartH,
+      v,
+    }));
+  }
+
+  const leftPts = lines.map((l) => ({ ...l, pts: pts(l.data, leftMax) }));
+  const rightPts = rightLine ? { ...rightLine, pts: pts(rightLine.data, rightMax) } : null;
+
+  function toPath(points: Array<{ x: number; y: number }>) {
+    return points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+  }
+
+  const fmtVal = (l: LineChartLine, v: number) =>
+    l.format ? l.format(v) : (v % 1 !== 0 ? v.toFixed(2) : String(v));
+
+  const onMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const svgX = ((e.clientX - rect.left) / rect.width) * W;
+    const relX = svgX - padL;
+    if (relX < 0 || relX > chartW) { setHoverIdx(null); return; }
+    const idx = Math.round((relX / chartW) * (n - 1));
+    setHoverIdx(Math.max(0, Math.min(n - 1, idx)));
+  }, [n, chartW]);
+
+  const hoverX = hoverIdx !== null ? padL + (hoverIdx / (n - 1)) * chartW : 0;
+  const tooltipRight = hoverIdx !== null && hoverIdx > n * 0.65;
+
+  return (
+    <div>
+      <div style={{ position: "relative" }}>
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${H}`}
+          style={{ width: "100%", height: "auto", cursor: "crosshair" }}
+          onMouseMove={onMouseMove}
+          onMouseLeave={() => setHoverIdx(null)}
+        >
+          {/* Grid */}
+          {[0, 0.5, 1].map((f) => (
+            <line key={f} x1={padL} y1={padT + chartH * (1 - f)} x2={W - padR} y2={padT + chartH * (1 - f)} stroke="#16163a" strokeWidth={1} />
+          ))}
+
+          {/* Lines + dots */}
+          {leftPts.map((l) => (
+            <g key={l.label}>
+              <path d={toPath(l.pts)} fill="none" stroke={l.color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+              {l.pts.map((p, i) => (
+                <circle key={i} cx={p.x} cy={p.y} r={hoverIdx === i ? 5 : 3} fill={l.color} stroke="#0a0a1e" strokeWidth={1.5} style={{ transition: "r 0.1s" }} />
+              ))}
+            </g>
+          ))}
+
+          {rightPts && (
+            <g>
+              <path d={toPath(rightPts.pts)} fill="none" stroke={rightPts.color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" opacity={0.7} />
+              {rightPts.pts.map((p, i) => (
+                <circle key={i} cx={p.x} cy={p.y} r={hoverIdx === i ? 5 : 3} fill={rightPts.color} stroke="#0a0a1e" strokeWidth={1.5} opacity={0.8} style={{ transition: "r 0.1s" }} />
+              ))}
+            </g>
+          )}
+
+          {/* Hover crosshair */}
+          {hoverIdx !== null && (
+            <line x1={hoverX} y1={padT} x2={hoverX} y2={padT + chartH} stroke="#8080a0" strokeWidth={1} strokeDasharray="3,3" opacity={0.5} />
+          )}
+
+          {/* Axes */}
+          <text x={padL - 4} y={padT + 4} textAnchor="end" fontSize={9} fill={lines[0].color} fontFamily="var(--font-mono)">{leftLabel(leftMax)}</text>
+          <text x={padL - 4} y={padT + chartH + 4} textAnchor="end" fontSize={9} fill="#6060a0" fontFamily="var(--font-mono)">0</text>
+          {rightPts && (
+            <>
+              <text x={W - padR + 4} y={padT + 4} textAnchor="start" fontSize={9} fill={rightPts.color} fontFamily="var(--font-mono)">{Math.round(rightMax)}</text>
+              <text x={W - padR + 4} y={padT + chartH + 4} textAnchor="start" fontSize={9} fill="#6060a0" fontFamily="var(--font-mono)">0</text>
+            </>
+          )}
+
+          {/* X labels */}
+          {periods.map((period, i) => {
+            const x = padL + (i / (n - 1)) * chartW;
+            const step = Math.max(1, Math.ceil(n / 6));
+            if (i !== 0 && i !== n - 1 && i % step !== 0) return null;
+            return (
+              <text key={period} x={x} y={H - 4} textAnchor="middle" fontSize={9} fill="#6060a0" fontFamily="var(--font-mono)">
+                {period.replace(/^\d{4}-/, "")}
+              </text>
+            );
+          })}
+        </svg>
+
+        {/* Tooltip overlay */}
+        {hoverIdx !== null && (() => {
+          const pctX = (hoverX / W) * 100;
+          return (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: `${pctX}%`,
+                transform: tooltipRight ? "translateX(-100%)" : "translateX(0)",
+                pointerEvents: "none",
+                background: "rgba(8, 8, 26, 0.92)",
+                border: "1px solid #22223a",
+                borderRadius: 6,
+                padding: "6px 10px",
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                lineHeight: 1.6,
+                whiteSpace: "nowrap",
+                zIndex: 10,
+                marginLeft: tooltipRight ? -8 : 8,
+              }}
+            >
+              <div style={{ color: "#e8e8f4", fontWeight: 600, marginBottom: 2 }}>
+                {periods[hoverIdx]}
+              </div>
+              {lines.map((l) => (
+                <div key={l.label} style={{ color: l.color }}>
+                  {l.label}: {fmtVal(l, l.data[hoverIdx])}
+                </div>
+              ))}
+              {rightLine && (
+                <div style={{ color: rightLine.color }}>
+                  {rightLine.label}: {fmtVal(rightLine, rightLine.data[hoverIdx])}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 11, color: "#8080a0" }}>
+        {[...lines, ...(rightLine ? [rightLine] : [])].map((l) => (
+          <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{ width: 14, height: 2, borderRadius: 1, background: l.color, opacity: 0.8 }} />
+            <span>{l.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function Analytics() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [producerBy, setProducerBy] = useState<"model" | "agent">("model");
-  const [trendGranularity, setTrendGranularity] = useState<"month" | "week">(
-    "month"
+  const [trendGranularity, setTrendGranularity] = useState<"day" | "week" | "month">(
+    "day"
   );
 
   const { data: summary, isLoading } = useQuery({
@@ -46,7 +222,7 @@ export function Analytics() {
 
   const { data: trend } = useQuery({
     queryKey: ["analytics-trend", trendGranularity],
-    queryFn: () => api.getQualityTrend(trendGranularity),
+    queryFn: () => api.getQualityTrend(trendGranularity, trendGranularity === "day" ? 30 : trendGranularity === "week" ? 12 : 12),
   });
 
   const { data: decayPreview } = useQuery({
@@ -114,6 +290,57 @@ export function Analytics() {
       <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
         Memory quality and usage insights
       </p>
+
+      {/* Trend charts */}
+      {trend && trend.length > 1 && (() => {
+        const sorted = [...trend].reverse();
+        const periods = sorted.map((t) => t.period);
+
+        return (
+          <>
+            <Section
+              title="Activity"
+              actions={
+                <Toggle
+                  options={["day", "week", "month"]}
+                  active={trendGranularity}
+                  onChange={(v) => setTrendGranularity(v as "day" | "week" | "month")}
+                />
+              }
+            >
+              <LineChart
+                periods={periods}
+                lines={[
+                  { data: sorted.map((t) => t.searches), color: "#22d3ee", label: "Searches" },
+                ]}
+                leftLabel={(max) => String(Math.round(max))}
+              />
+            </Section>
+
+            <Section title="Memory Health">
+              <LineChart
+                periods={periods}
+                lines={[
+                  { data: sorted.map((t) => t.avgUseful), color: "#34d399", label: "Avg Useful", format: (v) => v.toFixed(2) },
+                ]}
+                leftLabel={(max) => max.toFixed(1)}
+                rightLine={{ data: sorted.map((t) => t.neverAccessedPct), color: "#f59e0b", label: "Never Accessed %", format: (v) => `${v.toFixed(1)}%` }}
+              />
+            </Section>
+
+            <Section title="Memory Growth">
+              <LineChart
+                periods={periods}
+                lines={[
+                  { data: sorted.map((t) => t.totalMemories), color: "#22d3ee", label: "Total Memories", format: (v) => v.toLocaleString() },
+                ]}
+                leftLabel={(max) => Math.round(max).toLocaleString()}
+                rightLine={{ data: sorted.map((t) => t.created), color: "#a78bfa", label: "Created", format: (v) => String(v) }}
+              />
+            </Section>
+          </>
+        );
+      })()}
 
       {/* Quality distribution */}
       {qualityDist && (
@@ -318,31 +545,7 @@ export function Analytics() {
         </Section>
       )}
 
-      {/* Quality trend */}
-      {trend && trend.length > 0 && (
-        <Section
-          title="Quality Trend"
-          actions={
-            <Toggle
-              options={["month", "week"]}
-              active={trendGranularity}
-              onChange={(v) =>
-                setTrendGranularity(v as "month" | "week")
-              }
-            />
-          }
-        >
-          <Table
-            headers={["Period", "Created", "Avg Useful", "Never Accessed %"]}
-            rows={trend.map((t) => [
-              t.period,
-              String(t.created),
-              t.avgUseful.toFixed(2),
-              `${t.neverAccessedPct}%`,
-            ])}
-          />
-        </Section>
-      )}
+      {/* Quality trend — moved to top as line chart */}
 
       {/* Decay preview */}
       {decayPreview && decayPreview.candidates.length > 0 && (

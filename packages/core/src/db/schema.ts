@@ -28,6 +28,8 @@ const CREATE_TABLES = `
     last_accessed_at TEXT,
     parent_id TEXT REFERENCES memories(id) ON DELETE CASCADE,
     is_active INTEGER NOT NULL DEFAULT 1,
+    tier TEXT NOT NULL DEFAULT 'episodic'
+      CHECK(tier IN ('working', 'episodic', 'semantic', 'procedural', 'reference')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -702,6 +704,14 @@ export function initializeSchema(db: DatabaseSync): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_memories_quality_score ON memories(quality_score)");
   }
 
+  // Knowledge tier column
+  let needsTierBackfill = false;
+  if (!colNames.has("tier")) {
+    db.exec("ALTER TABLE memories ADD COLUMN tier TEXT NOT NULL DEFAULT 'episodic'");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memories_tier ON memories(tier)");
+    needsTierBackfill = true;
+  }
+
   // Rebuild FTS5 to include keywords if needed
   if (needsFtsRebuild) {
     // Drop existing FTS table and triggers, recreate with keywords
@@ -735,6 +745,25 @@ export function initializeSchema(db: DatabaseSync): void {
   db.prepare(
     "DELETE FROM memories WHERE chunk_index IS NOT NULL AND parent_id IS NULL"
   ).run();
+
+  // Backfill tier classification for existing memories
+  if (needsTierBackfill) {
+    db.exec("BEGIN");
+    try {
+      // Consolidation summaries → semantic
+      db.exec("UPDATE memories SET tier = 'semantic' WHERE source = 'consolidation'");
+      // Imported docs → reference
+      db.exec("UPDATE memories SET tier = 'reference' WHERE source = 'import'");
+      // Technique/learning tagged → procedural
+      db.exec(`UPDATE memories SET tier = 'procedural'
+        WHERE id IN (SELECT memory_id FROM memory_tags WHERE tag IN ('technique', 'learning', 'how-to', 'procedure'))`);
+      // Everything else stays 'episodic' (the default)
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
 
   // Backfill content_hash with proper SHA-256 when column is newly added.
   if (needsHashBackfill) {

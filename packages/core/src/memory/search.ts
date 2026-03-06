@@ -11,6 +11,7 @@ import {
   valenceScore,
   qualityScore,
   goalRelevanceScore,
+  tierBoost,
   computeHybridScore,
   getWeights,
   getRRFConfig,
@@ -138,6 +139,22 @@ export class MemorySearch {
     if (query.namespace) {
       conditions.push("m.namespace = ?");
       params.push(query.namespace);
+    }
+
+    if (query.tier) {
+      conditions.push("m.tier = ?");
+      params.push(query.tier);
+    }
+
+    // Working-tier memories are session-scoped: exclude from general search
+    // unless explicitly filtered to working tier or same session
+    if (!query.tier || query.tier !== "working") {
+      if (query.session_id) {
+        conditions.push("(m.tier != 'working' OR m.session_id = ?)");
+        params.push(query.session_id);
+      } else {
+        conditions.push("m.tier != 'working'");
+      }
     }
 
     let excludedMetadataCount = 0;
@@ -438,8 +455,9 @@ export class MemorySearch {
           }
         }
 
-        // Post-RRF multiplicative boost from recency + frequency + usefulness + valence + quality
-        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.quality * c.quality + weights.goalGated * c.goalRelevance;
+        // Post-RRF multiplicative boost from recency + frequency + usefulness + valence + quality + tier
+        const memTier = (c.row as any).tier ?? "episodic";
+        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.quality * c.quality + weights.goalGated * c.goalRelevance + tierBoost(memTier);
         let score = baseRrf * boostMultiplier;
 
         // Superseded memories get 80% demotion (before tag boost so tags can't undo it)
@@ -478,11 +496,13 @@ export class MemorySearch {
           weights
         );
 
-        // Additive usefulness + valence + quality + goal boosts (only positive, never penalizes)
+        // Additive usefulness + valence + quality + goal + tier boosts
         score += weights.usefulness * c.usefulness;
         score += weights.valence * c.valence;
         score += weights.quality * c.quality;
         score += weights.goalGated * c.goalRelevance;
+        const memTierLegacy = (c.row as any).tier ?? "episodic";
+        score *= (1 + tierBoost(memTierLegacy));
 
         if (tagBoost > 0 && queryTerms.length > 0) {
           const memTags = candidateTagMap.get(c.row.id);
@@ -597,6 +617,7 @@ export class MemorySearch {
           chunk_index: row.chunk_index ?? null,
           keywords: row.keywords ?? undefined,
           metadata: rawMeta ? JSON.parse(rawMeta) : undefined,
+          tier: ((p.row as any).tier ?? "episodic") as import("./types.js").MemoryTier,
           tags: tagMap.get(row.id) ?? [],
         },
         score: p.score,

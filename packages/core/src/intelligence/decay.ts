@@ -81,6 +81,9 @@ export function getArchiveCandidates(
   forgottenDate.setDate(forgottenDate.getDate() - forgottenDays);
   const forgottenDateStr = forgottenDate.toISOString().slice(0, 19).replace("T", " ");
 
+  // Permanent tiers (semantic, procedural, reference) are exempt from time-based decay
+  const tierFilter = "AND tier NOT IN ('semantic', 'procedural', 'reference')";
+
   // Stale memories: low importance + old + rarely accessed
   const staleRows = db
     .prepare(
@@ -90,6 +93,7 @@ export function getArchiveCandidates(
          AND importance < ?
          AND created_at < ?
          AND access_count < ?
+         ${tierFilter}
        ORDER BY created_at ASC`
     )
     .all(maxImportance, staleDateStr, maxAccessCount) as unknown as Array<{
@@ -109,6 +113,7 @@ export function getArchiveCandidates(
        WHERE is_active = 1
          AND created_at < ?
          AND access_count = 0
+         ${tierFilter}
        ORDER BY created_at ASC`
     )
     .all(abandonedDateStr) as unknown as Array<{
@@ -129,6 +134,7 @@ export function getArchiveCandidates(
          AND access_count = 0
          AND importance < ?
          AND created_at < ?
+         ${tierFilter}
        ORDER BY created_at ASC`
     )
     .all(neglectedMaxImportance, neglectedDateStr) as unknown as Array<{
@@ -150,6 +156,7 @@ export function getArchiveCandidates(
          AND access_count = 0
          AND importance < ?
          AND created_at < ?
+         ${tierFilter}
        ORDER BY created_at ASC`
     )
     .all(forgottenMaxImportance, forgottenDateStr) as unknown as Array<{
@@ -198,10 +205,18 @@ export function getArchiveCandidates(
 
 /**
  * Archive memories whose expires_at timestamp has passed.
+ * Also auto-sets expires_at on working-tier memories that lack one (24h default).
  * Returns the number of memories archived.
  */
 export function archiveExpired(db: DatabaseSync): number {
   const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+
+  // Auto-set expires_at on working-tier memories that don't have one (24h from creation)
+  db.prepare(
+    `UPDATE memories SET expires_at = datetime(created_at, '+1 day'), updated_at = ?
+     WHERE is_active = 1 AND tier = 'working' AND expires_at IS NULL`
+  ).run(now);
+
   const result = db
     .prepare(
       `UPDATE memories SET is_active = 0, updated_at = ?

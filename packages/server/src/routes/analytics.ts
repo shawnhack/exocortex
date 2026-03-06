@@ -55,9 +55,10 @@ analytics.get("/api/analytics/producer-quality", (c) => {
 
 analytics.get("/api/analytics/quality-trend", (c) => {
   const db = getDb();
-  const granularity =
-    c.req.query("granularity") === "week" ? "week" : "month";
-  const limit = parseIntQuery(c.req.query("limit"), 12, 1, 52);
+  const g = c.req.query("granularity");
+  const granularity: "day" | "week" | "month" =
+    g === "day" ? "day" : g === "week" ? "week" : "month";
+  const limit = parseIntQuery(c.req.query("limit"), 12, 1, 90);
   return c.json(getQualityTrend(db, granularity, limit));
 });
 

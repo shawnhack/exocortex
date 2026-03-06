@@ -21,6 +21,7 @@ export type {
   MemoryStats,
   ContentType,
   MemorySource,
+  MemoryTier,
 } from "./memory/types.js";
 export { MemoryStore, stripPrivateContent, validateStorageGate } from "./memory/store.js";
 export { MemorySearch, getSearchMisses } from "./memory/search.js";
@@ -33,6 +34,7 @@ export {
   frequencyScore,
   usefulnessScore,
   qualityScore,
+  tierBoost,
   computeHybridScore,
   getWeights,
   getRRFConfig,
@@ -53,6 +55,25 @@ export type {
   IngestFileResult,
   IngestResult,
 } from "./memory/ingest.js";
+export {
+  htmlToText,
+  ingestUrl,
+  ingestUrls,
+} from "./memory/ingest-url.js";
+export type {
+  IngestUrlOptions,
+  IngestUrlResult,
+} from "./memory/ingest-url.js";
+export {
+  searchWeb,
+  researchTopic,
+} from "./memory/research.js";
+export type {
+  SearchHit,
+  ResearchOptions,
+  ResearchSourceResult,
+  ResearchResult,
+} from "./memory/research.js";
 export { digestTranscript, extractFacts as extractDigestFacts } from "./memory/digest.js";
 export type { DigestResult, DigestAction, ExtractedFact as DigestExtractedFact, FactType } from "./memory/digest.js";
 export { extractFacts, storeFacts, searchFacts } from "./memory/facts.js";
@@ -146,6 +167,7 @@ export {
   backfillMemoryCanonicalization,
   pruneOldData,
   recomputeQualityScores,
+  promoteMemoryTiers,
 } from "./intelligence/maintenance.js";
 export type {
   ReembedResult,
@@ -156,6 +178,7 @@ export type {
   CanonicalBackfillResult,
   PruneResult,
   RecomputeQualityResult,
+  TierPromotionResult,
 } from "./intelligence/maintenance.js";
 export { densifyEntityGraph } from "./intelligence/graph-densify.js";
 export type { DensifyOptions, DensifyResult } from "./intelligence/graph-densify.js";

@@ -36,6 +36,7 @@ export interface Memory {
   is_active: boolean;
   expires_at: string | null;
   namespace: string | null;
+  tier: string;
   metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -229,6 +230,8 @@ export interface ProducerQuality {
 export interface QualityTrendEntry {
   period: string;
   created: number;
+  totalMemories: number;
+  searches: number;
   avgUseful: number;
   neverAccessedPct: number;
 }
@@ -276,11 +279,61 @@ export interface TemporalHierarchy {
   time_range: { start: string; end: string } | null;
 }
 
+export interface LibraryDocument {
+  id: string;
+  title: string;
+  url: string;
+  description: string | null;
+  total_chars: number;
+  chunk_count: number;
+  importance: number;
+  tier: string;
+  namespace: string | null;
+  tags: string[];
+  ingested_at: string;
+  created_at: string;
+}
+
+export interface LibraryDocumentChunk {
+  id: string;
+  index: number;
+  content: string;
+  chars: number;
+}
+
+export interface LibraryDocumentDetail extends LibraryDocument {
+  content: string;
+  chunks: LibraryDocumentChunk[];
+}
+
+export interface ResearchSourceResult {
+  url: string;
+  title: string;
+  status: "ingested" | "failed" | "skipped";
+  chunks_stored?: number;
+  total_chars?: number;
+  error?: string;
+  parent_id?: string;
+}
+
+export interface ResearchResult {
+  topic: string;
+  queries_run: string[];
+  sources_found: number;
+  sources_ingested: number;
+  sources_failed: number;
+  sources_skipped: number;
+  total_chunks: number;
+  total_chars: number;
+  sources: ResearchSourceResult[];
+}
+
 export interface Stats {
   total_memories: number;
   active_memories: number;
   by_content_type: Record<string, number>;
   by_source: Record<string, number>;
+  by_tier: Record<string, number>;
   total_entities: number;
   total_tags: number;
   oldest_memory: string | null;
@@ -294,7 +347,7 @@ export const api = {
     limit = 20,
     tags?: string[],
     offset = 0,
-    filters?: { content_type?: string; after?: string; before?: string; min_importance?: number; namespace?: string }
+    filters?: { content_type?: string; after?: string; before?: string; min_importance?: number; namespace?: string; tier?: string }
   ) {
     return request<{ results: SearchResult[]; count: number }>(
       "/api/memories/search",
@@ -315,7 +368,7 @@ export const api = {
     limit = 20,
     offset = 0,
     tags?: string[],
-    filters?: { content_type?: string; after?: string; before?: string; min_importance?: number }
+    filters?: { content_type?: string; after?: string; before?: string; min_importance?: number; tier?: string }
   ) {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (tags && tags.length > 0) params.set("tags", tags.join(","));
@@ -323,6 +376,7 @@ export const api = {
     if (filters?.after) params.set("after", filters.after);
     if (filters?.before) params.set("before", filters.before);
     if (filters?.min_importance !== undefined) params.set("min_importance", String(filters.min_importance));
+    if (filters?.tier) params.set("tier", filters.tier);
     return request<{ results: Memory[]; count: number }>(
       `/api/memories/recent?${params}`
     );
@@ -610,7 +664,7 @@ export const api = {
     );
   },
 
-  getQualityTrend(granularity: "month" | "week" = "month", limit = 12) {
+  getQualityTrend(granularity: "day" | "week" | "month" = "day", limit = 30) {
     return request<QualityTrendEntry[]>(
       `/api/analytics/quality-trend?granularity=${granularity}&limit=${limit}`
     );
@@ -618,6 +672,67 @@ export const api = {
 
   getQualityDistribution() {
     return request<QualityDistribution>("/api/analytics/quality-distribution");
+  },
+
+  // Library
+  getLibraryDocuments(limit = 50, offset = 0, search?: string) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (search) params.set("search", search);
+    return request<{
+      documents: LibraryDocument[];
+      total: number;
+    }>(`/api/library/documents?${params}`);
+  },
+
+  getLibraryDocument(id: string) {
+    return request<LibraryDocumentDetail>(`/api/library/documents/${id}`);
+  },
+
+  ingestUrl(data: {
+    url: string;
+    content?: string;
+    title?: string;
+    tags?: string[];
+    importance?: number;
+    tier?: string;
+    namespace?: string;
+    chunk_size?: number;
+    chunk_overlap?: number;
+  }) {
+    return request<{
+      url: string;
+      title: string;
+      description: string | null;
+      parent_id: string;
+      chunks_stored: number;
+      total_chars: number;
+      replaced: number;
+      tier: string;
+    }>("/api/library/ingest", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteDocument(id: string) {
+    return request<{ ok: boolean; deleted: number }>(
+      `/api/library/documents/${id}`,
+      { method: "DELETE" }
+    );
+  },
+
+  researchTopic(data: {
+    topic: string;
+    queries?: string[];
+    max_sources?: number;
+    tags?: string[];
+    tier?: string;
+    namespace?: string;
+  }) {
+    return request<ResearchResult>("/api/library/research", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
 
   getQualityHistogram() {

@@ -57,8 +57,9 @@ export function Search() {
   const filterBefore = searchParams.get("before") || "";
   const filterMinImportance = searchParams.get("min_importance") || "";
   const filterNamespace = searchParams.get("namespace") || "";
+  const filterTier = searchParams.get("tier") || "";
 
-  const activeFilterCount = [filterContentType, filterAfter, filterBefore, filterMinImportance, filterNamespace].filter(Boolean).length;
+  const activeFilterCount = [filterContentType, filterAfter, filterBefore, filterMinImportance, filterNamespace, filterTier].filter(Boolean).length;
 
   const setFilterParam = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams);
@@ -75,6 +76,7 @@ export function Search() {
     before: filterBefore || undefined,
     min_importance: filterMinImportance ? Number(filterMinImportance) : undefined,
     namespace: filterNamespace || undefined,
+    tier: filterTier || undefined,
   };
 
   // Search mode: query + optional tag filter
@@ -308,9 +310,9 @@ export function Search() {
   });
 
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 64px)", minHeight: 0 }}>
       {/* Sticky header — negative margin extends into <main> padding so it sticks flush at top */}
-      <div ref={stickyRef} style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--bg-root, #06060e)", margin: "-32px -40px 0", padding: "32px 40px 4px" }}>
+      <div ref={stickyRef} style={{ flexShrink: 0, zIndex: 10, background: "var(--bg-root, #06060e)", margin: "-32px -40px 0", padding: "32px 40px 4px" }}>
         <h1>Memories</h1>
         <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
           Search, browse, and manage your second brain
@@ -326,13 +328,13 @@ export function Search() {
               setSearchParams(new URLSearchParams());
             }}
             style={{
-              background: !query && filterTags.length === 0 && activeFilterCount === 0
+              background: !query && filterTags.length === 0 && !filterTier && activeFilterCount === 0
                 ? "rgba(34, 211, 238, 0.2)"
                 : "rgba(34, 211, 238, 0.04)",
-              color: !query && filterTags.length === 0 && activeFilterCount === 0
+              color: !query && filterTags.length === 0 && !filterTier && activeFilterCount === 0
                 ? "#22d3ee"
                 : "rgba(34, 211, 238, 0.6)",
-              border: `1px solid ${!query && filterTags.length === 0 && activeFilterCount === 0 ? "rgba(34, 211, 238, 0.55)" : "rgba(34, 211, 238, 0.15)"}`,
+              border: `1px solid ${!query && filterTags.length === 0 && !filterTier && activeFilterCount === 0 ? "rgba(34, 211, 238, 0.55)" : "rgba(34, 211, 238, 0.15)"}`,
               borderRadius: 20,
               padding: "4px 14px",
               fontSize: 12,
@@ -347,17 +349,17 @@ export function Search() {
             Recent
           </button>
           {([
-            { tag: "session-fact", label: "Facts", color: "#38bdf8" },
-            { tag: "decision", label: "Decisions", color: "#38bdf8" },
-            { tag: "discovery", label: "Discoveries", color: "#22d3ee" },
-            { tag: "architecture", label: "Architecture", color: "#34d399" },
-            { tag: "learning", label: "Learnings", color: "#fbbf24" },
+            { tier: "episodic", label: "Episodic", color: "#fbbf24" },
+            { tier: "semantic", label: "Semantic", color: "#a78bfa" },
+            { tier: "procedural", label: "Procedural", color: "#34d399" },
+            { tier: "reference", label: "Reference", color: "#38bdf8" },
+            { tier: "working", label: "Working", color: "#8080a0" },
           ] as const).map((f) => {
-            const active = filterTags.includes(f.tag);
+            const active = filterTier === f.tier;
             return (
               <button
-                key={f.tag}
-                onClick={() => handleTagClick(f.tag)}
+                key={f.tier}
+                onClick={() => setFilterParam("tier", active ? "" : f.tier)}
                 style={{
                   background: active ? `${f.color}20` : `${f.color}0a`,
                   color: active ? f.color : `${f.color}99`,
@@ -529,6 +531,7 @@ export function Search() {
         )}
       </div>
 
+      <div style={{ flex: 1, overflowY: "auto", margin: "0 -40px", padding: "0 40px" }}>
       {showFilters && (
         <div
           style={{
@@ -559,6 +562,23 @@ export function Search() {
               <option value="note">Note</option>
               <option value="summary">Summary</option>
               <option value="conversation">Conversation</option>
+            </select>
+          </div>
+          <div style={{ minWidth: 140 }}>
+            <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+              Tier
+            </div>
+            <select
+              value={filterTier}
+              onChange={(e) => setFilterParam("tier", e.target.value)}
+              style={{ padding: "6px 10px", fontSize: 12 }}
+            >
+              <option value="">All</option>
+              <option value="episodic">Episodic</option>
+              <option value="semantic">Semantic</option>
+              <option value="procedural">Procedural</option>
+              <option value="reference">Reference</option>
+              <option value="working">Working</option>
             </select>
           </div>
           {namespacesData && namespacesData.namespaces.length > 0 && (
@@ -629,6 +649,7 @@ export function Search() {
               onClick={() => {
                 const params = new URLSearchParams(searchParams);
                 params.delete("content_type");
+                params.delete("tier");
                 params.delete("after");
                 params.delete("before");
                 params.delete("min_importance");
@@ -974,7 +995,7 @@ export function Search() {
                     gap: 12,
                     marginBottom: 12,
                     position: "sticky",
-                    top: stickyHeight,
+                    top: 0,
                     background: "var(--bg-root, #06060e)",
                     paddingTop: 8,
                     paddingBottom: 8,
@@ -1176,6 +1197,7 @@ export function Search() {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

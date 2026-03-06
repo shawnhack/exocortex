@@ -644,6 +644,68 @@ export function backfillMemoryCanonicalization(
   };
 }
 
+// --- A5b: Tier Promotion ---
+
+export interface TierPromotionResult {
+  episodicToSemantic: number;
+  episodicToProcedural: number;
+  workingToEpisodic: number;
+  dry_run: boolean;
+}
+
+/**
+ * Auto-promote memories between tiers based on usage signals:
+ * - episodic → semantic: useful_count >= 3 (proven valuable knowledge)
+ * - episodic → procedural: tagged technique/learning/how-to/procedure
+ * - working → episodic: accessed or marked useful (survived past session)
+ */
+export function promoteMemoryTiers(
+  db: DatabaseSync,
+  opts?: { dryRun?: boolean }
+): TierPromotionResult {
+  const dryRun = opts?.dryRun ?? false;
+  const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+
+  if (dryRun) {
+    const toSemantic = (db.prepare(
+      "SELECT COUNT(*) as c FROM memories WHERE tier = 'episodic' AND is_active = 1 AND useful_count >= 3"
+    ).get() as { c: number }).c;
+    const toProcedural = (db.prepare(
+      `SELECT COUNT(*) as c FROM memories WHERE tier = 'episodic' AND is_active = 1
+       AND id IN (SELECT memory_id FROM memory_tags WHERE tag IN ('technique', 'learning', 'how-to', 'procedure'))`
+    ).get() as { c: number }).c;
+    const toEpisodic = (db.prepare(
+      "SELECT COUNT(*) as c FROM memories WHERE tier = 'working' AND is_active = 1 AND (access_count > 0 OR useful_count > 0)"
+    ).get() as { c: number }).c;
+    return { episodicToSemantic: toSemantic, episodicToProcedural: toProcedural, workingToEpisodic: toEpisodic, dry_run: true };
+  }
+
+  const r1 = db.prepare(
+    "UPDATE memories SET tier = 'semantic', updated_at = ? WHERE tier = 'episodic' AND is_active = 1 AND useful_count >= 3"
+  ).run(now) as { changes: number };
+
+  const r2 = db.prepare(
+    `UPDATE memories SET tier = 'procedural', updated_at = ?
+     WHERE tier = 'episodic' AND is_active = 1
+       AND id IN (SELECT memory_id FROM memory_tags WHERE tag IN ('technique', 'learning', 'how-to', 'procedure'))`
+  ).run(now) as { changes: number };
+
+  const r3 = db.prepare(
+    "UPDATE memories SET tier = 'episodic', updated_at = ? WHERE tier = 'working' AND is_active = 1 AND (access_count > 0 OR useful_count > 0)"
+  ).run(now) as { changes: number };
+
+  if (r1.changes + r2.changes + r3.changes > 0) {
+    incrementCounter(db, "maintenance.tier_promotions", r1.changes + r2.changes + r3.changes);
+  }
+
+  return {
+    episodicToSemantic: r1.changes,
+    episodicToProcedural: r2.changes,
+    workingToEpisodic: r3.changes,
+    dry_run: false,
+  };
+}
+
 // --- A6: Prune Old Data ---
 
 export interface PruneResult {

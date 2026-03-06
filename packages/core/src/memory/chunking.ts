@@ -1,5 +1,6 @@
 export interface ChunkOptions {
   targetSize?: number;
+  overlap?: number;
 }
 
 /**
@@ -56,6 +57,16 @@ export function splitIntoChunks(
 
   if (current.trim().length > 0) {
     chunks.push(current.trim());
+  }
+
+  // Apply overlap: prepend tail of previous chunk to each subsequent chunk
+  const overlap = opts.overlap ?? 0;
+  if (overlap > 0 && chunks.length > 1) {
+    for (let i = 1; i < chunks.length; i++) {
+      const prev = chunks[i - 1];
+      const tail = prev.slice(-overlap);
+      chunks[i] = tail + "\n" + chunks[i];
+    }
   }
 
   return chunks;

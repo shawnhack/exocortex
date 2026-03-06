@@ -306,31 +306,39 @@ async function main() {
       });
     }
 
-    // 5. Technique memories (priority 4)
-    const techniqueCandidates = db
+    // 5. Permanent knowledge — semantic + procedural tier memories (priority 4)
+    // This catches both tag-based techniques AND tier-based knowledge
+    const knowledgeCandidates = db
       .prepare(
-        `SELECT DISTINCT m.id, m.content, m.importance, m.created_at
+        `SELECT DISTINCT m.id, m.content, m.importance, m.tier, m.created_at
          FROM memories m
-         INNER JOIN memory_tags mt ON m.id = mt.memory_id
-         WHERE mt.tag = 'technique' AND m.is_active = 1
+         WHERE m.is_active = 1
+           AND m.parent_id IS NULL
+           AND (m.tier IN ('semantic', 'procedural') OR EXISTS (
+             SELECT 1 FROM memory_tags mt WHERE mt.memory_id = m.id AND mt.tag = 'technique'
+           ))
            ${QUALITY_FILTER}
-         ORDER BY m.importance DESC, m.created_at DESC
-         LIMIT 10`
+         ORDER BY m.importance DESC, m.access_count DESC, m.created_at DESC
+         LIMIT 20`
       )
       .all();
 
-    if (techniqueCandidates.length > 0) {
-      const scored = techniqueCandidates.map((m) => ({
-        ...m,
-        relevance: scoreRelevance(m.content, contextKeywords),
-      }));
+    if (knowledgeCandidates.length > 0) {
+      const scored = knowledgeCandidates
+        .filter((m) => !surfacedIds.has(m.id)) // deduplicate against earlier sections
+        .filter((m) => !m.content.startsWith("[Consolidated summary")) // consolidated summaries aren't actionable knowledge
+        .map((m) => ({
+          ...m,
+          relevance: scoreRelevance(m.content, contextKeywords),
+        }));
       scored.sort((a, b) => {
         const aRelevant = a.relevance > 0 ? 1 : 0;
         const bRelevant = b.relevance > 0 ? 1 : 0;
         if (bRelevant !== aRelevant) return bRelevant - aRelevant;
-        return b.importance - a.importance;
+        if (b.importance !== a.importance) return b.importance - a.importance;
+        return b.created_at > a.created_at ? 1 : -1;
       });
-      const top = scored.filter((m) => m.relevance > 0).slice(0, 3);
+      const top = scored.filter((m) => m.relevance > 0).slice(0, 4);
       if (top.length > 0) {
         for (const m of top) surfacedIds.add(m.id);
         const rawEntries = top.map((m) => ({ content: m.content }));

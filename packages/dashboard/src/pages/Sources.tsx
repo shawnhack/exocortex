@@ -60,6 +60,22 @@ export function Dashboard() {
         />
       </div>
 
+      {/* By Knowledge Tier */}
+      {stats.by_tier && Object.keys(stats.by_tier).length > 0 && (
+        <div
+          style={{
+            background: "#0c0c1d",
+            border: "1px solid #16163a",
+            borderRadius: 12,
+            padding: 20,
+            marginBottom: 16,
+          }}
+        >
+          <h2 style={{ marginBottom: 16 }}>By Knowledge Tier</h2>
+          <TierChart data={stats.by_tier} />
+        </div>
+      )}
+
       {/* By Content Type */}
       <div
         style={{
@@ -194,6 +210,67 @@ function BarChart({ data }: { data: Record<string, number> }) {
             />
           </div>
           <span className="bar-value">{count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const TIER_COLORS: Record<string, string> = {
+  working: "#8080a0",
+  episodic: "#fbbf24",
+  semantic: "#a78bfa",
+  procedural: "#34d399",
+  reference: "#38bdf8",
+};
+
+const TIER_DESCRIPTIONS: Record<string, string> = {
+  working: "Scratch — expires 24h",
+  episodic: "Conversations & events",
+  semantic: "Permanent facts",
+  procedural: "Techniques & how-to",
+  reference: "Documents & library",
+};
+
+const TIER_ORDER = ["episodic", "semantic", "procedural", "reference", "working"];
+
+function TierChart({ data }: { data: Record<string, number> }) {
+  const entries = TIER_ORDER
+    .filter((t) => data[t] != null)
+    .map((t) => [t, data[t]] as [string, number]);
+  if (entries.length === 0)
+    return <p style={{ color: "#8080a0", fontSize: 13 }}>None yet.</p>;
+
+  const max = Math.max(...entries.map(([, v]) => v));
+
+  return (
+    <div>
+      {entries.map(([tier, count]) => (
+        <div key={tier} className="bar-row">
+          <span className="bar-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: TIER_COLORS[tier] ?? "#8080a0",
+                flexShrink: 0,
+              }}
+            />
+            {tier}
+          </span>
+          <div className="bar-track">
+            <div
+              className="bar-fill"
+              style={{
+                width: `${(count / max) * 100}%`,
+                background: `linear-gradient(90deg, ${TIER_COLORS[tier] ?? "#22d3ee"}, transparent)`,
+              }}
+            />
+          </div>
+          <span className="bar-value" title={TIER_DESCRIPTIONS[tier]}>
+            {count}
+          </span>
         </div>
       ))}
     </div>

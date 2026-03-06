@@ -7,6 +7,12 @@ export type MemorySource =
   | "browser"
   | "import"
   | "consolidation";
+export type MemoryTier =
+  | "working"
+  | "episodic"
+  | "semantic"
+  | "procedural"
+  | "reference";
 
 export interface Memory {
   id: string;
@@ -33,6 +39,7 @@ export interface Memory {
   keywords?: string;
   metadata?: Record<string, unknown>;
   quality_score: number | null;
+  tier: MemoryTier;
   expires_at: string | null;
   namespace: string | null;
   created_at: string;
@@ -57,6 +64,7 @@ export interface CreateMemoryInput {
   tags?: string[];
   metadata?: Record<string, unknown>;
   is_metadata?: boolean;
+  tier?: MemoryTier;
   expires_at?: string;
   namespace?: string;
   /**
@@ -89,6 +97,7 @@ export interface UpdateMemoryInput {
   tags?: string[];
   metadata?: Record<string, unknown>;
   is_metadata?: boolean;
+  tier?: MemoryTier;
   expires_at?: string | null;
   namespace?: string | null;
 }
@@ -118,6 +127,8 @@ export interface SearchQuery {
    */
   include_metadata?: boolean;
   namespace?: string;
+  tier?: MemoryTier;
+  session_id?: string;
 }
 
 export interface SearchResult {
@@ -141,6 +152,7 @@ export interface MemoryStats {
   active_memories: number;
   by_content_type: Record<string, number>;
   by_source: Record<string, number>;
+  by_tier: Record<string, number>;
   total_entities: number;
   total_tags: number;
   oldest_memory: string | null;
@@ -182,6 +194,7 @@ export interface MemoryRow {
   keywords: string | null;
   metadata: string | null;
   quality_score: number | null;
+  tier: string;
   expires_at: string | null;
   namespace: string | null;
   created_at: string;

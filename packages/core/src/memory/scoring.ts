@@ -183,6 +183,20 @@ export function computeHybridScore(
     weights.frequency * frequency
   );
 }
+/**
+ * Tier-based retrieval boost. Higher-tier knowledge gets a scoring advantage.
+ * Working memories are penalized in general search to avoid session noise.
+ */
+export function tierBoost(tier: string): number {
+  switch (tier) {
+    case "semantic": return 0.15;
+    case "procedural": return 0.10;
+    case "reference": return 0.05;
+    case "working": return -0.10;
+    default: return 0; // episodic = neutral
+  }
+}
+
 // --- SCORING SYSTEM END ---
 
 // --- Reciprocal Rank Fusion ---

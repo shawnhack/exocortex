@@ -81,8 +81,8 @@ export function Entities() {
   const allTags = tagsData?.tags ?? [];
 
   return (
-    <div>
-      <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--bg-root, #06060e)", margin: "-32px -40px 0", padding: "32px 40px 4px" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 64px)", minHeight: 0 }}>
+      <div style={{ flexShrink: 0, zIndex: 10, background: "var(--bg-root, #06060e)", margin: "-32px -40px 0", padding: "32px 40px 4px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
           <div>
             <h1>Entities</h1>
@@ -131,6 +131,7 @@ export function Entities() {
         )}
       </div>
 
+      <div style={{ flex: 1, overflowY: "auto", margin: "0 -40px", padding: "0 40px" }}>
       {selectMode && (
         <p style={{ color: "#8080a0", fontSize: 12, marginBottom: 12, fontFamily: "var(--font-mono)" }}>
           Click to select. Shift+click for range. Esc to cancel.
@@ -332,6 +333,7 @@ export function Entities() {
           </button>
         </div>
       )}
+      </div>
     </div>
   );
 }
