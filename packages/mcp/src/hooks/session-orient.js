@@ -117,12 +117,53 @@ async function main() {
   }
 
   // candidateSections: { name, priority, content }
-  // Priority order: goals → stalled-goals → decisions → threads → recent → techniques → entities → contradictions → facts → skills → self-model
+  // Priority order: soul/identity → goals → stalled-goals → decisions → threads → recent → techniques → entities → contradictions → facts → skills → self-model
   const candidateSections = [];
   const surfacedIds = new Set();
 
   try {
     const contextKeywords = buildContextKeywords(cwd);
+
+    // 0. Soul + Identity (priority 0 — always included, never filtered by relevance)
+    try {
+      // Get one soul + one identity (separate queries to guarantee both)
+      const soulIdentity = [];
+      for (const tag of ["soul", "identity"]) {
+        const row = db
+          .prepare(
+            `SELECT DISTINCT m.id, m.content
+             FROM memories m
+             INNER JOIN memory_tags mt ON m.id = mt.memory_id
+             WHERE mt.tag = ?
+               AND m.is_active = 1
+               AND m.parent_id IS NULL
+             ORDER BY m.importance DESC, m.created_at DESC
+             LIMIT 1`
+          )
+          .get(tag);
+        if (row) soulIdentity.push(row);
+      }
+
+      if (soulIdentity.length > 0) {
+        for (const m of soulIdentity) surfacedIds.add(m.id);
+        // Extract bullet lines — skip headers, blank lines, and sub-headers
+        const summaryLines = [];
+        for (const m of soulIdentity) {
+          const lines = m.content.split("\n").filter((l) => {
+            const t = l.trim();
+            return t && !t.startsWith("#") && t.length > 10;
+          });
+          summaryLines.push(...lines.slice(0, 5));
+        }
+        if (summaryLines.length > 0) {
+          candidateSections.push({
+            name: "soul-identity",
+            priority: 0,
+            content: `**Soul & Identity:**\n${summaryLines.map((l) => l.startsWith("-") ? l : `- ${l}`).join("\n")}`,
+          });
+        }
+      }
+    } catch {}
 
     // 1. Active goals (priority 0 — always included)
     const goals = db
