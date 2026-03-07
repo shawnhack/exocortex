@@ -232,6 +232,43 @@ async function main() {
       }
     } catch {}
 
+    // 1c. Unresolved alerts from self-audit (priority 1 — surface immediately)
+    try {
+      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0];
+
+      const auditReports = db
+        .prepare(
+          `SELECT m.content, m.created_at
+           FROM memories m
+           INNER JOIN memory_tags mt ON m.id = mt.memory_id
+           WHERE mt.tag = 'self-audit' AND m.is_active = 1 AND m.created_at >= ?
+           ORDER BY m.created_at DESC
+           LIMIT 1`
+        )
+        .all(threeDaysAgo);
+
+      if (auditReports.length > 0) {
+        const report = auditReports[0].content;
+        // Extract ALERT lines and "Issues requiring attention" section
+        const alertLines = report.split("\n").filter((l) => l.includes("ALERT:"));
+        const issuesMatch = report.match(/Issues requiring attention:\n([\s\S]*?)(?:\n\n|\s*$)/);
+        const issues = issuesMatch ? issuesMatch[1].trim().split("\n").filter((l) => l.trim().startsWith("-")) : [];
+
+        if (alertLines.length > 0 || issues.length > 0) {
+          const lines = [];
+          for (const a of alertLines) lines.push(a.trim());
+          for (const i of issues) lines.push(i.trim());
+          candidateSections.push({
+            name: "alerts",
+            priority: 1,
+            content: `**Sentinel alerts (from self-audit):**\n${lines.join("\n")}`,
+          });
+        }
+      }
+    } catch {}
+
     // 2. Recent decisions (priority 2 — shifted for stalled goals)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
       .toISOString()
