@@ -20,7 +20,7 @@ import path from "node:path";
 import fs from "node:fs";
 
 const DB_PATH = path.join(os.homedir(), ".exocortex", "exocortex.db");
-const TOKEN_BUDGET = 1500;
+const TOKEN_BUDGET = 3000;
 const TRUNCATE_LEN = 120;
 
 // Quality filter clause — NULL check ensures pre-migration memories aren't excluded
@@ -137,6 +137,7 @@ async function main() {
              WHERE mt.tag = ?
                AND m.is_active = 1
                AND m.parent_id IS NULL
+               AND m.content NOT LIKE '%Consolidated summary of%'
              ORDER BY m.importance DESC, m.created_at DESC
              LIMIT 1`
           )
@@ -146,22 +147,13 @@ async function main() {
 
       if (soulIdentity.length > 0) {
         for (const m of soulIdentity) surfacedIds.add(m.id);
-        // Extract bullet lines — skip headers, blank lines, and sub-headers
-        const summaryLines = [];
-        for (const m of soulIdentity) {
-          const lines = m.content.split("\n").filter((l) => {
-            const t = l.trim();
-            return t && !t.startsWith("#") && t.length > 10;
-          });
-          summaryLines.push(...lines.slice(0, 5));
-        }
-        if (summaryLines.length > 0) {
-          candidateSections.push({
-            name: "soul-identity",
-            priority: 0,
-            content: `**Soul & Identity:**\n${summaryLines.map((l) => l.startsWith("-") ? l : `- ${l}`).join("\n")}`,
-          });
-        }
+        // Include full soul and identity content — these are foundational documents
+        const fullContent = soulIdentity.map((m) => m.content).join("\n\n");
+        candidateSections.push({
+          name: "soul-identity",
+          priority: 0,
+          content: `**Soul & Identity:**\n${fullContent}`,
+        });
       }
     } catch {}
 
