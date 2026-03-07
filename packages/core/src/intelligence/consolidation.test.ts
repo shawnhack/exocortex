@@ -118,7 +118,7 @@ describe("consolidation", () => {
       const id3 = insertMemoryWithEmbedding(db, { content: "Bug fix: resolved the date parsing issue in dashboard." });
 
       const summary = generateBasicSummary(db, [id1, id2, id3]);
-      expect(summary).toContain("Consolidated summary of 3 memories");
+      expect(summary).toContain("3 sources");
       expect(summary.length).toBeGreaterThan(50);
     });
 

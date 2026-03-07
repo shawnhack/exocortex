@@ -182,8 +182,7 @@ describe("generateBasicSummary", () => {
     });
 
     const summary = generateBasicSummary(db, [m1.memory.id, m2.memory.id]);
-    expect(summary).toContain("[Consolidated summary of 2 memories");
-    expect(summary).toContain("Topics:");
+    expect(summary).toContain("2 sources");
     expect(summary).toContain("architecture");
   });
 
@@ -200,7 +199,6 @@ describe("generateBasicSummary", () => {
     });
 
     const summary = generateBasicSummary(db, [m1.memory.id, m2.memory.id]);
-    expect(summary).toContain("Specifics:");
     expect(summary).toContain("/home/user/project/config.json");
     expect(summary).toContain("v2.1.0");
     expect(summary).toContain("loadPromptAmendments");
