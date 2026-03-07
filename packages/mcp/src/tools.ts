@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, PredictionStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, ingestUrl, researchTopic, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, autoConsolidate, applyCommunityAwareFiltering, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getCommunitySummaries, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, autoDismissContradictions, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent, recomputeQualityScores, promoteMemoryTiers } from "@exocortex/core";
+import { getDb, closeDb, initializeSchema, MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, GoalStore, PredictionStore, getEmbeddingProvider, cosineSimilarity, getArchiveCandidates, archiveStaleMemories, archiveExpired, adjustImportance, ingestFiles, ingestUrl, researchTopic, getRRFConfig, digestTranscript, findClusters, consolidateCluster, generateBasicSummary, validateSummary, autoConsolidate, applyCommunityAwareFiltering, runHealthChecks, computeGraphStats, computeCentrality, getTopBridgeEntities, detectCommunities, getCommunitySummaries, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, getContradictions, updateContradiction, autoDismissContradictions, getCachedProfiles, recomputeEntityProfiles, searchFacts, validateStorageGate, stripPrivateContent, recomputeQualityScores, promoteMemoryTiers } from "@exocortex/core";
 import type { LinkType } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "./utils.js";
@@ -1212,13 +1212,15 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
   // memory_consolidate
   server.tool(
     "memory_consolidate",
-    "Find clusters of similar memories and consolidate them into summaries. Reduces redundancy.",
+    "Find clusters of similar memories and consolidate them into summaries. When consolidating (dry_run: false), provide a 'summary' you wrote — otherwise a basic auto-summary is used as fallback.",
     {
       dry_run: z.boolean().optional().describe("Preview clusters without consolidating (default true — safe preview mode)"),
       min_similarity: z.number().min(0).max(1).optional().describe("Minimum cosine similarity for clustering (default 0.75)"),
       min_cluster_size: z.number().min(2).optional().describe("Minimum cluster size (default 3)"),
       time_bucket: z.enum(["week", "month"]).optional().describe("Constrain clustering to same time window (week or month)"),
       community_aware: z.boolean().optional().describe("Use entity graph communities to split clusters at community boundaries and protect bridge memories (default false)"),
+      cluster_index: z.number().min(0).optional().describe("When consolidating, only process this cluster (0-indexed from dry_run results). Required when providing a summary."),
+      summary: z.string().optional().describe("Your synthesized summary for the cluster. Must preserve dates, versions, proper nouns, and file paths from originals. If omitted, a basic auto-summary is generated."),
     },
     async (args) => {
       try {
@@ -1248,12 +1250,12 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           }
 
           const lines = clusters.map((c, i) => {
-            return `${i + 1}. "${c.topic}" — ${c.memberIds.length} memories, avg similarity: ${c.avgSimilarity.toFixed(2)}`;
+            return `${i + 1}. [${i}] "${c.topic}" — ${c.memberIds.length} memories (${c.memberIds.join(", ")}), avg similarity: ${c.avgSimilarity.toFixed(2)}`;
           });
           return {
             content: [{
               type: "text",
-              text: `Found ${clusters.length} clusters (dry run):\n\n${lines.join("\n")}${bridgeInfo}\n\nRun with dry_run: false to consolidate.`,
+              text: `Found ${clusters.length} clusters (dry run):\n\n${lines.join("\n")}${bridgeInfo}\n\nTo consolidate: call with dry_run: false, cluster_index: N, and summary: "your synthesis". Or omit summary for auto-generated fallback.`,
             }],
           };
         }
@@ -1265,19 +1267,54 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           // Proceed without embedding
         }
 
+        // Determine which clusters to process
+        const toProcess = args.cluster_index !== undefined
+          ? [clusters[args.cluster_index]].filter(Boolean)
+          : clusters;
+
+        if (toProcess.length === 0) {
+          return { content: [{ type: "text", text: `Invalid cluster_index: ${args.cluster_index} (${clusters.length} clusters available)` }], isError: true };
+        }
+
         const results: string[] = [];
-        for (const cluster of clusters) {
-          const summary = generateBasicSummary(db, cluster.memberIds);
-          const summaryId = await consolidateCluster(db, cluster, summary, embeddingProvider);
+        const skipped: string[] = [];
+        for (let i = 0; i < toProcess.length; i++) {
+          const cluster = toProcess[i];
+
+          // Use agent-provided summary for targeted consolidation, auto-generate for batch
+          const summaryContent = (args.summary && toProcess.length === 1)
+            ? args.summary
+            : generateBasicSummary(db, cluster.memberIds);
+
+          if (!summaryContent) {
+            skipped.push(`Cluster "${cluster.topic}": empty summary`);
+            continue;
+          }
+
+          // Validate summary quality
+          const sourceContents = db
+            .prepare(
+              `SELECT content FROM memories WHERE id IN (${cluster.memberIds.map(() => "?").join(",")})`
+            )
+            .all(...cluster.memberIds) as Array<{ content: string }>;
+          const validation = validateSummary(summaryContent, sourceContents.map((r) => r.content));
+          if (!validation.valid) {
+            skipped.push(`Cluster "${cluster.topic}": ${validation.reasons.join("; ")}`);
+            continue;
+          }
+
+          const summaryId = await consolidateCluster(db, cluster, summaryContent, embeddingProvider);
           results.push(`Consolidated ${cluster.memberIds.length} memories → ${summaryId} ("${cluster.topic}")`);
         }
 
-        return {
-          content: [{
-            type: "text",
-            text: `Consolidated ${clusters.length} clusters:\n\n${results.join("\n")}`,
-          }],
-        };
+        let text = results.length > 0
+          ? `Consolidated ${results.length} cluster(s):\n\n${results.join("\n")}`
+          : "No clusters consolidated.";
+        if (skipped.length > 0) {
+          text += `\n\nSkipped ${skipped.length} cluster(s) (failed quality validation):\n${skipped.join("\n")}`;
+        }
+
+        return { content: [{ type: "text", text }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
       }

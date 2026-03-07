@@ -525,17 +525,17 @@ export function generateBasicSummary(
   const WORD_BUDGET = 500;
   let wordCount = 0;
 
-  const topicHeader = tagSet.size > 0
-    ? ` — Topics: ${Array.from(tagSet).slice(0, 5).join(", ")}`
-    : "";
+  const tags = Array.from(tagSet).slice(0, 5);
+  const dateRange = earliest === latest ? earliest.split(' ')[0] : `${earliest.split(' ')[0]} to ${latest.split(' ')[0]}`;
 
-  // 1. Topic sentence
-  let summary = `[Consolidated summary of ${rows.length} memories from ${earliest} to ${latest}${topicHeader}]`;
+  // 1. Topic header — readable prose, not mechanical metadata
+  const topicLabel = tags.length > 0 ? tags.join(', ') : 'various topics';
+  let summary = `${topicLabel} (${rows.length} sources, ${dateRange})`;
   wordCount += summary.split(/\s+/).length;
 
-  // 2. Key facts section
+  // 2. Key facts — the most valuable content
   if (keyFacts.size > 0) {
-    summary += "\n\nKey facts:\n";
+    summary += "\n\n";
     for (const fact of keyFacts) {
       const factWords = fact.split(/\s+/).length;
       if (wordCount + factWords > WORD_BUDGET) break;
@@ -544,17 +544,9 @@ export function generateBasicSummary(
     }
   }
 
-  // 3. Specifics section (file paths, versions, code)
-  if (allSpecifics.size > 0 && wordCount < WORD_BUDGET) {
-    const specificsArr = Array.from(allSpecifics).slice(0, 10);
-    summary += "\nSpecifics:\n";
-    summary += `- ${specificsArr.join(", ")}\n`;
-    wordCount += specificsArr.length;
-  }
-
-  // 4. Context section (fill remaining budget)
+  // 3. Context — fill remaining budget with non-key-fact sentences
   if (contextPoints.size > 0 && wordCount < WORD_BUDGET) {
-    summary += "\nContext:\n";
+    if (keyFacts.size > 0) summary += "\n";
     for (const ctx of contextPoints) {
       const ctxWords = ctx.split(/\s+/).length;
       if (wordCount + ctxWords > WORD_BUDGET) break;
@@ -586,7 +578,8 @@ function extractProperNouns(text: string): Set<string> {
 
 /**
  * Validate that a consolidation summary preserves enough detail from sources.
- * Used to gate auto-consolidation — rejects summaries that lose too much.
+ * Used to gate both agent-driven and auto-consolidation — rejects summaries
+ * that lose too much information or exhibit known garbage patterns.
  */
 export function validateSummary(
   summaryContent: string,
@@ -598,6 +591,24 @@ export function validateSummary(
   const minLength = sourceContents.length <= 2 ? 80 : 100;
   if (summaryContent.length < minLength) {
     reasons.push(`Summary too short (${summaryContent.length} chars, min ${minLength})`);
+  }
+
+  // Reject known garbage patterns
+  if (/^\[Consolidated summary of \d+ memories/i.test(summaryContent)) {
+    reasons.push('Mechanical header detected — summary must be prose, not "[Consolidated summary of...]"');
+  }
+
+  // Reject summaries that are mostly extracted specifics / bullet lists with no prose
+  const lines = summaryContent.split('\n').filter(l => l.trim().length > 0);
+  const bulletLines = lines.filter(l => /^\s*[-*•]/.test(l));
+  if (lines.length >= 5 && bulletLines.length / lines.length > 0.85) {
+    reasons.push(`Summary is ${Math.round(bulletLines.length / lines.length * 100)}% bullet points — needs more synthesis`);
+  }
+
+  // Reject summaries shorter than 20% of source material (too much lost)
+  const sourceLength = sourceContents.reduce((sum, s) => sum + s.length, 0);
+  if (sourceLength > 500 && summaryContent.length < sourceLength * 0.1) {
+    reasons.push(`Summary is only ${Math.round(summaryContent.length / sourceLength * 100)}% of source length — too much information lost`);
   }
 
   // Check proper noun preservation (>= 50%)
