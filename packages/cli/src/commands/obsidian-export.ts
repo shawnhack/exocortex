@@ -8,9 +8,9 @@ import {
 export function registerObsidianExport(program: Command): void {
   program
     .command("obsidian-export")
-    .description("Export memories, entities, and goals as an Obsidian vault")
+    .description("Export curated knowledge as an Obsidian vault")
     .requiredOption("--vault <path>", "Path to Obsidian vault directory")
-    .option("--full", "Full export (ignore incremental state)")
+    .option("--clean", "Wipe vault contents before exporting (preserves .obsidian config)")
     .action(async (opts) => {
       const chalk = (await import("chalk")).default;
 
@@ -21,14 +21,14 @@ export function registerObsidianExport(program: Command): void {
 
       const result = await exportToObsidian(db, {
         vaultPath: opts.vault,
-        fullExport: opts.full ?? false,
+        clean: opts.clean ?? false,
       });
 
-      console.log(`  Memories:       ${chalk.cyan(String(result.memoriesExported))}`);
-      console.log(`  Entities:       ${chalk.cyan(String(result.entitiesExported))}`);
-      console.log(`  Goals:          ${chalk.cyan(String(result.goalsExported))}`);
-      console.log(`  Contradictions: ${chalk.cyan(String(result.contradictionsExported))}`);
-      console.log(`  Dashboard:      ${chalk.cyan(result.dashboardUpdated ? "updated" : "skipped")}`);
+      for (const [section, count] of Object.entries(result.sections)) {
+        const label = section.charAt(0).toUpperCase() + section.slice(1);
+        console.log(`  ${label.padEnd(16)} ${chalk.cyan(String(count))}`);
+      }
+      console.log(`  ${"Total files".padEnd(16)} ${chalk.cyan(String(result.files))}`);
       console.log(chalk.green(`\n  Vault: ${chalk.bold(opts.vault)}\n`));
     });
 }

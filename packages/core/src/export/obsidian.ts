@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { exportData, type BackupData } from "../backup.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -9,49 +8,35 @@ import { exportData, type BackupData } from "../backup.js";
 
 export interface ObsidianExportOptions {
   vaultPath: string;
-  fullExport?: boolean;
+  clean?: boolean;
 }
 
 export interface ObsidianExportResult {
-  memoriesExported: number;
-  entitiesExported: number;
-  goalsExported: number;
-  contradictionsExported: number;
-  dashboardUpdated: boolean;
+  files: number;
+  sections: Record<string, number>;
 }
 
-interface SyncState {
-  last_sync: string;
+interface MemoryRow {
+  id: string;
+  content: string;
+  created_at: string;
+  importance: number;
 }
 
-interface MilestoneRecord {
+interface GoalRow {
   id: string;
   title: string;
-  status: "pending" | "in_progress" | "completed";
-  order: number;
+  description: string | null;
+  status: string;
+  priority: string;
   deadline: string | null;
-  completed_at: string | null;
+  metadata: string | null;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function slugify(text: string, maxLen = 60): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, maxLen);
-}
-
-function shortId(id: string): string {
-  return id.slice(0, 8);
-}
-
-function dateOnly(iso: string): string {
-  return iso.slice(0, 10);
-}
 
 function ensureDir(dirPath: string): void {
   if (!fs.existsSync(dirPath)) {
@@ -59,328 +44,393 @@ function ensureDir(dirPath: string): void {
   }
 }
 
-function yamlEscape(val: string): string {
-  if (/[:\[\]{}&*?|>!%#@`,]/.test(val) || val.includes('"') || val.includes("'")) {
-    return `"${val.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-  }
-  return `"${val}"`;
+function slugify(text: string, maxLen = 80): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, maxLen);
 }
 
-function yamlList(items: string[]): string {
-  return `[${items.map(yamlEscape).join(", ")}]`;
-}
-
-/** Build a filename for a memory: `<short-id>-<slug>.md` */
-function memoryFilename(id: string, content: string): string {
-  const preview = content.replace(/^#+\s*/, "").slice(0, 80);
-  return `${shortId(id)}-${slugify(preview)}.md`;
-}
-
-/** Build a wikilink path for a memory */
-function memoryWikilink(id: string, content: string): string {
-  const name = memoryFilename(id, content).replace(/\.md$/, "");
-  return `[[Memories/${name}]]`;
-}
-
-/** Build a wikilink path for an entity */
-function entityWikilink(type: string, name: string): string {
-  const folder = capitalize(type);
-  return `[[Entities/${folder}/${name}]]`;
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-// ---------------------------------------------------------------------------
-// State management
-// ---------------------------------------------------------------------------
-
-function readState(vaultPath: string): SyncState | null {
-  const statePath = path.join(vaultPath, ".obsidian-sync-state.json");
-  if (!fs.existsSync(statePath)) return null;
+function urlToTitle(url: string): string {
   try {
-    return JSON.parse(fs.readFileSync(statePath, "utf-8"));
+    const u = new URL(url);
+    const pathParts = u.pathname.split("/").filter(Boolean);
+    if (pathParts.length > 0) {
+      const last = pathParts[pathParts.length - 1];
+      return `${u.hostname} - ${last.replace(/[-_]/g, " ")}`;
+    }
+    return u.hostname;
   } catch {
-    return null;
+    return url.slice(0, 60);
   }
 }
 
-function writeState(vaultPath: string): void {
-  const statePath = path.join(vaultPath, ".obsidian-sync-state.json");
-  const state: SyncState = {
-    last_sync: new Date().toISOString(),
-  };
-  fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
+function cleanVault(vaultPath: string): void {
+  if (!fs.existsSync(vaultPath)) return;
+
+  const entries = fs.readdirSync(vaultPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(vaultPath, entry.name);
+    // Preserve Obsidian config
+    if (entry.name === ".obsidian") continue;
+
+    if (entry.isDirectory()) {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+    } else if (entry.name.endsWith(".md") || entry.name.endsWith(".json")) {
+      fs.unlinkSync(fullPath);
+    }
+  }
+}
+
+function writeFile(filePath: string, content: string): void {
+  ensureDir(path.dirname(filePath));
+  fs.writeFileSync(filePath, content, "utf-8");
 }
 
 // ---------------------------------------------------------------------------
-// Exporters
+// Section exporters
 // ---------------------------------------------------------------------------
 
-function exportMemories(
-  data: BackupData,
-  valenceMap: Map<string, number>,
-  entityLookup: Map<string, { type: string; name: string }>,
-  memoryEntityMap: Map<string, string[]>,
-  memoryLinkMap: Map<string, string[]>,
-  memoryContentMap: Map<string, string>,
+function exportSoulIdentity(
+  db: DatabaseSync,
   vaultPath: string,
-  since: string | null,
-): number {
-  const dir = path.join(vaultPath, "Memories");
-  let count = 0;
+  sections: Record<string, number>,
+): void {
+  for (const tag of ["soul", "identity"]) {
+    const row = db
+      .prepare(
+        `SELECT m.content
+         FROM memories m
+         JOIN memory_tags mt ON m.id = mt.memory_id
+         WHERE mt.tag = ? AND m.is_active = 1 AND m.parent_id IS NULL
+         ORDER BY m.importance DESC, m.created_at DESC
+         LIMIT 1`,
+      )
+      .get(tag) as { content: string } | undefined;
 
-  for (const mem of data.memories) {
-    // Skip metadata and archived memories
-    if (mem.is_metadata) continue;
-    if (!mem.is_active) continue;
-
-    // Incremental: skip if not updated since last sync
-    if (since && mem.updated_at <= since) continue;
-
-    ensureDir(dir);
-
-    const filename = memoryFilename(mem.id, mem.content);
-    const entityIds = memoryEntityMap.get(mem.id) ?? [];
-    const entityLinks = entityIds
-      .map((eid) => entityLookup.get(eid))
-      .filter(Boolean)
-      .map((e) => entityWikilink(e!.type, e!.name));
-
-    const linkedMemIds = memoryLinkMap.get(mem.id) ?? [];
-    const linkedMemLinks = linkedMemIds
-      .map((mid) => {
-        const content = memoryContentMap.get(mid);
-        if (!content) return null;
-        return memoryWikilink(mid, content);
-      })
-      .filter(Boolean) as string[];
-
-    const valence = valenceMap.get(mem.id) ?? 0;
-
-    // Build frontmatter
-    const fm: string[] = ["---"];
-    fm.push(`id: ${yamlEscape(mem.id)}`);
-    fm.push(`type: ${mem.content_type}`);
-    fm.push(`importance: ${mem.importance}`);
-    fm.push(`valence: ${valence}`);
-    if (mem.tags.length > 0) fm.push(`tags: ${yamlList(mem.tags)}`);
-    fm.push(`created: ${dateOnly(mem.created_at)}`);
-    fm.push(`updated: ${dateOnly(mem.updated_at)}`);
-    if (entityLinks.length > 0) {
-      fm.push(`entities: ${yamlList(entityLinks)}`);
+    if (row) {
+      const filename = tag === "soul" ? "Soul.md" : "Identity.md";
+      const title = tag === "soul" ? "Soul" : "Identity";
+      const content = row.content.startsWith("#")
+        ? row.content
+        : `# ${title}\n\n${row.content}`;
+      writeFile(path.join(vaultPath, filename), content);
+      sections[tag] = 1;
     }
-    if (linkedMemLinks.length > 0) {
-      fm.push(`linked_memories: ${yamlList(linkedMemLinks)}`);
-    }
-    fm.push("---");
-    fm.push("");
-    fm.push(mem.content);
-
-    fs.writeFileSync(path.join(dir, filename), fm.join("\n"), "utf-8");
-    count++;
   }
-
-  return count;
-}
-
-function exportEntities(
-  data: BackupData,
-  entityMemoryMap: Map<string, string[]>,
-  memoryContentMap: Map<string, string>,
-  entityRelMap: Map<string, Array<{ relationship: string; targetId: string }>>,
-  entityLookup: Map<string, { type: string; name: string }>,
-  vaultPath: string,
-  since: string | null,
-): number {
-  let count = 0;
-
-  for (const entity of data.entities) {
-    if (since && entity.updated_at <= since) continue;
-
-    const folder = capitalize(entity.type);
-    const dir = path.join(vaultPath, "Entities", folder);
-    ensureDir(dir);
-
-    const fm: string[] = ["---"];
-    fm.push(`id: ${yamlEscape(entity.id)}`);
-    fm.push(`type: ${entity.type}`);
-    if (entity.aliases && entity.aliases.length > 0) {
-      fm.push(`aliases: ${yamlList(entity.aliases)}`);
-    }
-    if (entity.tags && entity.tags.length > 0) {
-      fm.push(`tags: ${yamlList(entity.tags)}`);
-    }
-    fm.push(`created: ${dateOnly(entity.created_at)}`);
-    fm.push("---");
-    fm.push("");
-
-    // Relationships
-    const rels = entityRelMap.get(entity.id) ?? [];
-    if (rels.length > 0) {
-      fm.push("## Relationships");
-      for (const rel of rels) {
-        const target = entityLookup.get(rel.targetId);
-        if (target) {
-          fm.push(`- ${rel.relationship} → ${entityWikilink(target.type, target.name)}`);
-        }
-      }
-      fm.push("");
-    }
-
-    // Linked Memories
-    const memIds = entityMemoryMap.get(entity.id) ?? [];
-    if (memIds.length > 0) {
-      fm.push("## Linked Memories");
-      for (const mid of memIds) {
-        const content = memoryContentMap.get(mid);
-        if (content) {
-          fm.push(`- ${memoryWikilink(mid, content)}`);
-        }
-      }
-      fm.push("");
-    }
-
-    // Sanitize entity name for filename (some names have / or other chars)
-    const safeName = entity.name.replace(/[<>:"/\\|?*]/g, "_");
-    fs.writeFileSync(path.join(dir, `${safeName}.md`), fm.join("\n"), "utf-8");
-    count++;
-  }
-
-  return count;
 }
 
 function exportGoals(
-  data: BackupData,
+  db: DatabaseSync,
   vaultPath: string,
-  since: string | null,
-): number {
-  if (!data.goals || data.goals.length === 0) return 0;
+  sections: Record<string, number>,
+): void {
+  const goals = db
+    .prepare(
+      `SELECT id, title, description, status, priority, deadline, metadata, created_at
+       FROM goals
+       WHERE status IN ('active', 'paused')
+       ORDER BY
+         CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+         created_at DESC`,
+    )
+    .all() as unknown as GoalRow[];
 
-  const dir = path.join(vaultPath, "Goals");
-  let count = 0;
+  if (goals.length === 0) return;
 
-  for (const goal of data.goals) {
-    if (since && goal.updated_at <= since) continue;
+  const lines: string[] = ["# Goals\n"];
 
-    ensureDir(dir);
-
-    const milestones: MilestoneRecord[] =
-      (goal.metadata?.milestones as MilestoneRecord[]) ?? [];
-
-    const fm: string[] = ["---"];
-    fm.push(`id: ${yamlEscape(goal.id)}`);
-    fm.push(`status: ${goal.status}`);
-    fm.push(`priority: ${goal.priority}`);
-    if (goal.deadline) fm.push(`deadline: ${dateOnly(goal.deadline)}`);
-    fm.push(`created: ${dateOnly(goal.created_at)}`);
-    fm.push("---");
-    fm.push("");
-
-    if (milestones.length > 0) {
-      fm.push("## Milestones");
-      const sorted = [...milestones].sort((a, b) => a.order - b.order);
-      for (const ms of sorted) {
-        const check = ms.status === "completed" ? "x" : " ";
-        fm.push(`- [${check}] ${ms.title}`);
-      }
-      fm.push("");
-    }
+  for (const goal of goals) {
+    lines.push(`## ${goal.title}`);
+    lines.push(
+      `**Status:** ${goal.status} | **Priority:** ${goal.priority}${goal.deadline ? ` | **Deadline:** ${goal.deadline.slice(0, 10)}` : ""}`,
+    );
+    lines.push("");
 
     if (goal.description) {
-      fm.push("## Description");
-      fm.push(goal.description);
-      fm.push("");
+      lines.push(goal.description);
+      lines.push("");
     }
 
-    const slug = slugify(goal.title);
-    fs.writeFileSync(path.join(dir, `${slug}.md`), fm.join("\n"), "utf-8");
-    count++;
+    if (goal.metadata) {
+      try {
+        const meta = JSON.parse(goal.metadata);
+        const milestones = meta.milestones as
+          | Array<{ title: string; status: string; order: number }>
+          | undefined;
+        if (milestones && milestones.length > 0) {
+          lines.push("### Milestones");
+          const sorted = [...milestones].sort((a, b) => a.order - b.order);
+          for (const ms of sorted) {
+            const check = ms.status === "completed" ? "x" : " ";
+            lines.push(`- [${check}] ${ms.title}`);
+          }
+          lines.push("");
+        }
+      } catch {
+        // ignore malformed metadata
+      }
+    }
+
+    lines.push("---\n");
   }
 
-  return count;
+  writeFile(path.join(vaultPath, "Goals.md"), lines.join("\n"));
+  sections.goals = goals.length;
 }
 
-function exportContradictions(
-  data: BackupData,
-  memoryContentMap: Map<string, string>,
+function exportDecisions(
+  db: DatabaseSync,
   vaultPath: string,
-  since: string | null,
-): number {
-  if (!data.contradictions || data.contradictions.length === 0) return 0;
+  sections: Record<string, number>,
+): void {
+  const decisions = db
+    .prepare(
+      `SELECT DISTINCT m.id, m.content, m.created_at, m.importance
+       FROM memories m
+       JOIN memory_tags mt ON m.id = mt.memory_id
+       WHERE mt.tag = 'decision' AND m.is_active = 1
+       ORDER BY m.created_at DESC`,
+    )
+    .all() as unknown as MemoryRow[];
 
-  const dir = path.join(vaultPath, "Contradictions");
-  let count = 0;
+  if (decisions.length === 0) return;
 
-  for (const c of data.contradictions) {
-    if (since && c.updated_at <= since) continue;
+  const dir = path.join(vaultPath, "Decisions");
 
-    ensureDir(dir);
-
-    const fm: string[] = ["---"];
-    fm.push(`id: ${yamlEscape(c.id)}`);
-    fm.push(`status: ${c.status}`);
-    const memAContent = memoryContentMap.get(c.memory_a_id);
-    const memBContent = memoryContentMap.get(c.memory_b_id);
-    if (memAContent) {
-      fm.push(`memory_a: ${yamlEscape(memoryWikilink(c.memory_a_id, memAContent))}`);
-    }
-    if (memBContent) {
-      fm.push(`memory_b: ${yamlEscape(memoryWikilink(c.memory_b_id, memBContent))}`);
-    }
-    fm.push(`created: ${dateOnly(c.created_at)}`);
-    fm.push("---");
-    fm.push("");
-    fm.push(c.description);
-    if (c.resolution) {
-      fm.push("");
-      fm.push("## Resolution");
-      fm.push(c.resolution);
-    }
-    fm.push("");
-
-    fs.writeFileSync(path.join(dir, `${shortId(c.id)}.md`), fm.join("\n"), "utf-8");
-    count++;
+  // Group by month
+  const byMonth = new Map<string, MemoryRow[]>();
+  for (const d of decisions) {
+    const month = d.created_at.slice(0, 7);
+    const arr = byMonth.get(month) ?? [];
+    arr.push(d);
+    byMonth.set(month, arr);
   }
 
-  return count;
+  let fileCount = 0;
+  for (const [month, decs] of byMonth) {
+    const lines: string[] = [`# Decisions - ${month}\n`];
+    for (const d of decs) {
+      const date = d.created_at.slice(0, 10);
+      if (d.content.startsWith("#")) {
+        lines.push(d.content);
+      } else {
+        lines.push(`## ${date}`);
+        lines.push("");
+        lines.push(d.content);
+      }
+      lines.push("\n---\n");
+    }
+    writeFile(path.join(dir, `${month}.md`), lines.join("\n"));
+    fileCount++;
+  }
+
+  sections.decisions = fileCount;
+}
+
+function exportTechniques(
+  db: DatabaseSync,
+  vaultPath: string,
+  sections: Record<string, number>,
+): void {
+  const techniques = db
+    .prepare(
+      `SELECT DISTINCT m.id, m.content, m.created_at, m.importance
+       FROM memories m
+       LEFT JOIN memory_tags mt ON m.id = mt.memory_id
+       WHERE m.is_active = 1
+         AND (m.tier = 'procedural' OR mt.tag IN ('technique', 'learning'))
+       ORDER BY m.importance DESC, m.created_at DESC`,
+    )
+    .all() as unknown as MemoryRow[];
+
+  if (techniques.length === 0) return;
+
+  const lines: string[] = ["# Techniques & Learnings\n"];
+  for (const t of techniques) {
+    if (t.content.startsWith("#")) {
+      lines.push(t.content);
+    } else {
+      const date = t.created_at.slice(0, 10);
+      lines.push(`## ${date}`);
+      lines.push("");
+      lines.push(t.content);
+    }
+    lines.push("\n---\n");
+  }
+
+  writeFile(path.join(vaultPath, "Techniques.md"), lines.join("\n"));
+  sections.techniques = techniques.length;
+}
+
+function exportKnowledge(
+  db: DatabaseSync,
+  vaultPath: string,
+  sections: Record<string, number>,
+): void {
+  const semantics = db
+    .prepare(
+      `SELECT m.id, m.content, m.created_at, m.importance
+       FROM memories m
+       WHERE m.is_active = 1
+         AND m.tier = 'semantic'
+         AND m.parent_id IS NULL
+       ORDER BY m.created_at DESC`,
+    )
+    .all() as unknown as MemoryRow[];
+
+  if (semantics.length === 0) return;
+
+  const dir = path.join(vaultPath, "Knowledge");
+
+  // Group by topic extracted from consolidated summary header
+  const byTopic = new Map<string, MemoryRow[]>();
+  for (const m of semantics) {
+    let topic = "general";
+    const topicMatch = m.content.match(/Topics:\s*([^\]]+)\]/);
+    if (topicMatch) {
+      const topics = topicMatch[1].split(",").map((t) => t.trim());
+      topic = topics[0] || "general";
+    }
+    const arr = byTopic.get(topic) ?? [];
+    arr.push(m);
+    byTopic.set(topic, arr);
+  }
+
+  let fileCount = 0;
+  for (const [topic, memories] of byTopic) {
+    const title = topic.charAt(0).toUpperCase() + topic.slice(1);
+    const lines: string[] = [`# ${title}\n`];
+    for (const m of memories) {
+      lines.push(m.content);
+      lines.push("\n---\n");
+    }
+    writeFile(path.join(dir, `${slugify(topic)}.md`), lines.join("\n"));
+    fileCount++;
+  }
+
+  sections.knowledge = fileCount;
+}
+
+function exportReference(
+  db: DatabaseSync,
+  vaultPath: string,
+  sections: Record<string, number>,
+): void {
+  const uris = db
+    .prepare(
+      `SELECT source_uri, COUNT(*) as chunk_count
+       FROM memories
+       WHERE is_active = 1 AND tier = 'reference' AND source_uri IS NOT NULL
+       GROUP BY source_uri
+       ORDER BY chunk_count DESC`,
+    )
+    .all() as unknown as Array<{ source_uri: string; chunk_count: number }>;
+
+  if (uris.length === 0) return;
+
+  const dir = path.join(vaultPath, "Reference");
+
+  let fileCount = 0;
+  for (const { source_uri } of uris) {
+    const chunks = db
+      .prepare(
+        `SELECT content
+         FROM memories
+         WHERE is_active = 1 AND tier = 'reference' AND source_uri = ?
+         ORDER BY created_at ASC`,
+      )
+      .all(source_uri) as unknown as Array<{ content: string }>;
+
+    const title = urlToTitle(source_uri);
+    const content = [`# ${title}\n`, `> Source: ${source_uri}\n`];
+
+    for (const chunk of chunks) {
+      content.push(chunk.content);
+      content.push("");
+    }
+
+    writeFile(path.join(dir, `${slugify(title)}.md`), content.join("\n"));
+    fileCount++;
+  }
+
+  sections.reference = fileCount;
+}
+
+function exportProjects(
+  db: DatabaseSync,
+  vaultPath: string,
+  sections: Record<string, number>,
+): void {
+  const namespaces = db
+    .prepare(
+      `SELECT namespace, COUNT(*) as c
+       FROM memories
+       WHERE is_active = 1 AND namespace IS NOT NULL AND tier NOT IN ('reference', 'working')
+       GROUP BY namespace
+       ORDER BY c DESC`,
+    )
+    .all() as unknown as Array<{ namespace: string; c: number }>;
+
+  if (namespaces.length === 0) return;
+
+  const dir = path.join(vaultPath, "Projects");
+
+  let fileCount = 0;
+  for (const { namespace } of namespaces) {
+    const memories = db
+      .prepare(
+        `SELECT content, created_at, importance
+         FROM memories
+         WHERE is_active = 1 AND namespace = ? AND tier NOT IN ('reference', 'working')
+         ORDER BY importance DESC, created_at DESC
+         LIMIT 100`,
+      )
+      .all(namespace) as unknown as Array<{
+      content: string;
+      created_at: string;
+      importance: number;
+    }>;
+
+    const title = namespace.charAt(0).toUpperCase() + namespace.slice(1);
+    const lines: string[] = [`# ${title}\n`];
+    for (const m of memories) {
+      if (m.content.startsWith("#")) {
+        lines.push(m.content);
+      } else {
+        const date = m.created_at.slice(0, 10);
+        lines.push(`## ${date}`);
+        lines.push("");
+        lines.push(m.content);
+      }
+      lines.push("\n---\n");
+    }
+
+    writeFile(path.join(dir, `${slugify(namespace)}.md`), lines.join("\n"));
+    fileCount++;
+  }
+
+  sections.projects = fileCount;
 }
 
 function writeDashboard(vaultPath: string): void {
-  const content = `# Exocortex Dashboard
+  const content = `# Exocortex
 
-## Recent Memories
-\`\`\`dataview
-TABLE importance, type, tags
-FROM "Memories"
-SORT updated DESC
-LIMIT 20
-\`\`\`
+Personal knowledge base exported from [Exocortex](https://github.com/exocortex).
 
-## Active Goals
-\`\`\`dataview
-TABLE status, priority, deadline
-FROM "Goals"
-WHERE status = "active"
-\`\`\`
+## Structure
 
-## Entities by Type
-\`\`\`dataview
-TABLE type, aliases
-FROM "Entities"
-SORT type, file.name
-\`\`\`
-
-## Open Contradictions
-\`\`\`dataview
-TABLE status, memory_a, memory_b
-FROM "Contradictions"
-WHERE status = "pending"
-SORT created DESC
-\`\`\`
+- **Soul.md** - AI personality and behavioral directives
+- **Identity.md** - User background and preferences
+- **Goals.md** - Active goals with milestone tracking
+- **Decisions/** - Architectural and strategic decisions by month
+- **Techniques.md** - Procedural knowledge, techniques, and learnings
+- **Knowledge/** - Consolidated semantic knowledge by topic
+- **Reference/** - Ingested reference documents
+- **Projects/** - Project-specific memories by namespace
 `;
-  fs.writeFileSync(path.join(vaultPath, "_Dashboard.md"), content, "utf-8");
+  writeFile(path.join(vaultPath, "_Index.md"), content);
 }
 
 // ---------------------------------------------------------------------------
@@ -391,104 +441,25 @@ export async function exportToObsidian(
   db: DatabaseSync,
   opts: ObsidianExportOptions,
 ): Promise<ObsidianExportResult> {
-  const { vaultPath, fullExport } = opts;
+  const { vaultPath, clean } = opts;
 
-  // Read sync state
-  const state = fullExport ? null : readState(vaultPath);
-  const since = state?.last_sync ?? null;
+  if (clean) {
+    cleanVault(vaultPath);
+  }
 
-  // Ensure vault root exists
   ensureDir(vaultPath);
 
-  // Get all data from backup module
-  const data = exportData(db);
+  const sections: Record<string, number> = {};
 
-  // Query valence separately (not in BackupData)
-  const valenceRows = db
-    .prepare("SELECT id, valence FROM memories")
-    .all() as Array<{ id: string; valence: number }>;
-  const valenceMap = new Map(valenceRows.map((r) => [r.id, r.valence]));
-
-  // Build lookup maps
-  const entityLookup = new Map<string, { type: string; name: string }>();
-  for (const e of data.entities) {
-    entityLookup.set(e.id, { type: e.type, name: e.name });
-  }
-
-  // Memory content map (for wikilink resolution)
-  const memoryContentMap = new Map<string, string>();
-  for (const m of data.memories) {
-    memoryContentMap.set(m.id, m.content);
-  }
-
-  // Memory → entity IDs
-  const memoryEntityMap = new Map<string, string[]>();
-  for (const me of data.memory_entities) {
-    const arr = memoryEntityMap.get(me.memory_id) ?? [];
-    arr.push(me.entity_id);
-    memoryEntityMap.set(me.memory_id, arr);
-  }
-
-  // Entity → memory IDs (reverse)
-  const entityMemoryMap = new Map<string, string[]>();
-  for (const me of data.memory_entities) {
-    const arr = entityMemoryMap.get(me.entity_id) ?? [];
-    arr.push(me.memory_id);
-    entityMemoryMap.set(me.entity_id, arr);
-  }
-
-  // Memory → linked memory IDs (bidirectional)
-  const memoryLinkMap = new Map<string, string[]>();
-  if (data.memory_links) {
-    for (const link of data.memory_links) {
-      const fwd = memoryLinkMap.get(link.source_id) ?? [];
-      fwd.push(link.target_id);
-      memoryLinkMap.set(link.source_id, fwd);
-
-      const rev = memoryLinkMap.get(link.target_id) ?? [];
-      rev.push(link.source_id);
-      memoryLinkMap.set(link.target_id, rev);
-    }
-  }
-
-  // Entity → outgoing relationships
-  const entityRelMap = new Map<string, Array<{ relationship: string; targetId: string }>>();
-  if (data.entity_relationships) {
-    for (const rel of data.entity_relationships) {
-      const arr = entityRelMap.get(rel.source_entity_id) ?? [];
-      arr.push({ relationship: rel.relationship, targetId: rel.target_entity_id });
-      entityRelMap.set(rel.source_entity_id, arr);
-    }
-  }
-
-  // Export each section
-  const memoriesExported = exportMemories(
-    data, valenceMap, entityLookup, memoryEntityMap, memoryLinkMap,
-    memoryContentMap, vaultPath, since,
-  );
-
-  const entitiesExported = exportEntities(
-    data, entityMemoryMap, memoryContentMap, entityRelMap,
-    entityLookup, vaultPath, since,
-  );
-
-  const goalsExported = exportGoals(data, vaultPath, since);
-
-  const contradictionsExported = exportContradictions(
-    data, memoryContentMap, vaultPath, since,
-  );
-
-  // Always regenerate dashboard
+  exportSoulIdentity(db, vaultPath, sections);
+  exportGoals(db, vaultPath, sections);
+  exportDecisions(db, vaultPath, sections);
+  exportTechniques(db, vaultPath, sections);
+  exportKnowledge(db, vaultPath, sections);
+  exportReference(db, vaultPath, sections);
+  exportProjects(db, vaultPath, sections);
   writeDashboard(vaultPath);
 
-  // Write sync state
-  writeState(vaultPath);
-
-  return {
-    memoriesExported,
-    entitiesExported,
-    goalsExported,
-    contradictionsExported,
-    dashboardUpdated: true,
-  };
+  const files = Object.values(sections).reduce((a, b) => a + b, 0) + 1; // +1 for _Index.md
+  return { files, sections };
 }
