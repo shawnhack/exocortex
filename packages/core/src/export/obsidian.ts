@@ -660,7 +660,14 @@ function exportSoulIdentity(
   sections: Record<string, number>,
   exported: Set<string>,
 ): void {
-  for (const tag of ["soul", "identity"]) {
+  const tagMap: Record<string, { filename: string; title: string }> = {
+    soul: { filename: "Soul.md", title: "Soul" },
+    identity: { filename: "Identity.md", title: "Identity" },
+    "technical-principles": { filename: "Technical Principles.md", title: "Technical Principles" },
+    "project-map": { filename: "Project Map.md", title: "Project Map" },
+  };
+
+  for (const [tag, meta] of Object.entries(tagMap)) {
     const row = db
       .prepare(
         `SELECT m.id, m.content FROM memories m
@@ -672,14 +679,12 @@ function exportSoulIdentity(
 
     if (row) {
       exported.add(row.id);
-      const filename = tag === "soul" ? "Soul.md" : "Identity.md";
-      const title = tag === "soul" ? "Soul" : "Identity";
       const fm = frontmatter({ type: tag });
       const content = row.content.startsWith("#")
         ? row.content
-        : `# ${title}\n\n${row.content}`;
-      writeFile(path.join(vaultPath, filename), fm + content);
-      sections[tag] = 1;
+        : `# ${meta.title}\n\n${row.content}`;
+      writeFile(path.join(vaultPath, meta.filename), fm + content);
+      sections[meta.title] = 1;
     }
   }
 }
