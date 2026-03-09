@@ -25,8 +25,8 @@ pnpm build
 # Copy root files
 cp package.json pnpm-workspace.yaml pnpm-lock.yaml LICENSE README.md ARCHITECTURE.md "$RELEASE_DIR/"
 
-# Copy QUICKSTART for buyers
-cp QUICKSTART.md "$RELEASE_DIR/"
+# Copy QUICKSTART for buyers (if exists)
+[ -f QUICKSTART.md ] && cp QUICKSTART.md "$RELEASE_DIR/"
 
 # Copy each package (source + dist, no tests/dev files)
 for pkg in core mcp server cli dashboard; do
