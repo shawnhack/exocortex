@@ -185,6 +185,15 @@ export type { DensifyOptions, DensifyResult } from "./intelligence/graph-densify
 export { buildCoRetrievalLinks } from "./intelligence/co-retrieval.js";
 export type { CoRetrievalLinkOptions, CoRetrievalLinkResult } from "./intelligence/co-retrieval.js";
 export {
+  optimizeRetrieval,
+  mineBenchmarkQueries,
+} from "./intelligence/retrieval-optimizer.js";
+export type {
+  OptimizationConfig,
+  OptimizationResult,
+  BenchmarkQuery,
+} from "./intelligence/retrieval-optimizer.js";
+export {
   getGoldenQueries,
   setGoldenQueries,
   getLatestRetrievalRegressionRunId,

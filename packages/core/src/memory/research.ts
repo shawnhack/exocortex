@@ -186,7 +186,8 @@ export async function researchTopic(
   const allHits: SearchHit[] = [];
   const seenUrls = new Set<string>();
 
-  for (const query of uniqueQueries) {
+  for (let i = 0; i < uniqueQueries.length; i++) {
+    const query = uniqueQueries[i];
     try {
       const hits = await searchWeb(query, max_results_per_query);
       for (const hit of hits) {
@@ -198,6 +199,10 @@ export async function researchTopic(
       }
     } catch {
       // Search failure for one query shouldn't abort the whole research
+    }
+    // Pace requests to avoid rate limits from DuckDuckGo
+    if (i < uniqueQueries.length - 1) {
+      await new Promise((r) => setTimeout(r, 1_000));
     }
   }
 
@@ -301,6 +306,10 @@ export async function researchTopic(
         error: err instanceof Error ? err.message : String(err),
       });
       failed++;
+    }
+    // Pace URL ingestion to be polite to source servers
+    if (ingested < max_sources) {
+      await new Promise((r) => setTimeout(r, 1_500));
     }
   }
 
