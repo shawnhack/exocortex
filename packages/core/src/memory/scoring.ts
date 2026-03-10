@@ -176,11 +176,20 @@ export function computeHybridScore(
   frequency: number,
   weights: ScoringWeights
 ): number {
+  // Freshness and popularity should strengthen relevant matches, not create them.
+  // Gate secondary boosts by the stronger retrieval signal so weak semantic/FTS
+  // matches do not outrank better evidence just because they are newer or popular.
+  const relevanceGate = Math.max(0, Math.max(vectorScore, ftsScore));
+  const secondaryBoostWeight =
+    relevanceGate === 0 ? 0 : Math.min(1, 0.25 + relevanceGate * 0.75);
+
   return (
     weights.vector * vectorScore +
     weights.fts * ftsScore +
-    weights.recency * recency +
-    weights.frequency * frequency
+    secondaryBoostWeight * (
+      weights.recency * recency +
+      weights.frequency * frequency
+    )
   );
 }
 /**
