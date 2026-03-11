@@ -28,7 +28,7 @@ export function getDb(dbPath?: string): DatabaseSync {
 
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
-  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA busy_timeout = 10000");  // 10s — generous for concurrent scheduler writes
   db.exec("PRAGMA synchronous = NORMAL");  // safe with WAL, reduces fsync overhead
   db.exec("PRAGMA cache_size = -64000");   // 64MB page cache (default 2MB)
   db.exec("PRAGMA mmap_size = 268435456"); // 256MB mmap — avoids read() syscalls for DB < 256MB
