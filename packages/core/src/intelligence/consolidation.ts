@@ -5,6 +5,7 @@ import type { EmbeddingProvider } from "../embedding/types.js";
 import type { MemoryRow } from "../memory/types.js";
 import { detectCommunities } from "../entities/graph.js";
 import type { Community } from "../entities/graph.js";
+import { getSetting, setSetting } from "../db/schema.js";
 
 export interface ConsolidationCluster {
   centroidId: string;
@@ -641,35 +642,51 @@ export function validateSummary(
 // --- Auto-consolidation (no LLM needed) ---
 
 /**
- * In-memory cooldown for clusters that fail quality validation.
- * Key: sorted member IDs joined with ",", Value: next eligible timestamp.
- * Prevents the same cluster from being retried every maintenance cycle.
- * Uses exponential backoff: 1h → 2h → 4h → 8h (capped).
+ * Persistent cooldown for clusters that fail quality validation.
+ * Stored in DB settings as JSON to survive process restarts.
+ * Uses exponential backoff: 1h → 2h → 4h → ... → 7d (capped).
  */
-const failedClusterCooldowns = new Map<string, { until: number; attempts: number }>();
-const MAX_COOLDOWN_MS = 8 * 60 * 60 * 1000; // 8 hours
+const SETTINGS_KEY = "consolidation.failed_cooldowns";
+const MAX_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+interface CooldownEntry { until: number; attempts: number }
 
 function clusterKey(memberIds: string[]): string {
   return [...memberIds].sort().join(",");
 }
 
-function isClusterOnCooldown(memberIds: string[]): boolean {
-  const key = clusterKey(memberIds);
-  const entry = failedClusterCooldowns.get(key);
-  if (!entry) return false;
-  if (Date.now() >= entry.until) {
-    // Cooldown expired — eligible for retry (keep attempts for backoff)
-    return false;
-  }
-  return true;
+function loadCooldowns(db: DatabaseSync): Record<string, CooldownEntry> {
+  const raw = getSetting(db, SETTINGS_KEY);
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
 }
 
-function recordClusterFailure(memberIds: string[]): void {
+function saveCooldowns(db: DatabaseSync, cooldowns: Record<string, CooldownEntry>): void {
+  // Prune expired entries before saving
+  const now = Date.now();
+  const pruned: Record<string, CooldownEntry> = {};
+  for (const [k, v] of Object.entries(cooldowns)) {
+    if (v.until > now) pruned[k] = v;
+  }
+  setSetting(db, SETTINGS_KEY, JSON.stringify(pruned));
+}
+
+function isClusterOnCooldown(db: DatabaseSync, memberIds: string[]): boolean {
   const key = clusterKey(memberIds);
-  const entry = failedClusterCooldowns.get(key);
+  const cooldowns = loadCooldowns(db);
+  const entry = cooldowns[key];
+  if (!entry) return false;
+  return Date.now() < entry.until;
+}
+
+function recordClusterFailure(db: DatabaseSync, memberIds: string[]): void {
+  const key = clusterKey(memberIds);
+  const cooldowns = loadCooldowns(db);
+  const entry = cooldowns[key];
   const attempts = (entry?.attempts ?? 0) + 1;
   const cooldownMs = Math.min(60 * 60 * 1000 * Math.pow(2, attempts - 1), MAX_COOLDOWN_MS);
-  failedClusterCooldowns.set(key, { until: Date.now() + cooldownMs, attempts });
+  cooldowns[key] = { until: Date.now() + cooldownMs, attempts };
+  saveCooldowns(db, cooldowns);
 }
 
 export interface AutoConsolidateResult {
@@ -705,7 +722,7 @@ export async function autoConsolidate(
 
   for (const cluster of toProcess) {
     // Skip clusters on cooldown from previous validation failures
-    if (isClusterOnCooldown(cluster.memberIds)) continue;
+    if (isClusterOnCooldown(db, cluster.memberIds)) continue;
 
     const summary = generateBasicSummary(db, cluster.memberIds);
     if (!summary) continue;
@@ -718,7 +735,7 @@ export async function autoConsolidate(
       .all(...cluster.memberIds) as Array<{ content: string }>;
     const validation = validateSummary(summary, sourceContents.map((r) => r.content));
     if (!validation.valid) {
-      recordClusterFailure(cluster.memberIds);
+      recordClusterFailure(db, cluster.memberIds);
       console.warn(
         `[consolidation] Skipping cluster (${cluster.memberIds.length} members): ${validation.reasons.join("; ")}`
       );
