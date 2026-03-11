@@ -334,17 +334,25 @@ export function autoDismissContradictions(
   const reasons: Record<string, number> = {};
   let dismissed = 0;
 
+  // Batch-fetch all referenced memories to avoid N+1 queries
+  type MemInfo = { id: string; content: string; is_active: number; quality_score: number | null };
+  const memoryCache = new Map<string, MemInfo>();
+  const allMemIds = [...new Set(pending.flatMap((c) => [c.memory_a_id, c.memory_b_id]))];
+  const batchSize = 500;
+  for (let i = 0; i < allMemIds.length; i += batchSize) {
+    const batch = allMemIds.slice(i, i + batchSize);
+    const placeholders = batch.map(() => "?").join(",");
+    const rows = db
+      .prepare(`SELECT id, content, is_active, quality_score FROM memories WHERE id IN (${placeholders})`)
+      .all(...batch) as MemInfo[];
+    for (const row of rows) {
+      memoryCache.set(row.id, row);
+    }
+  }
+
   for (const c of pending) {
-    const memA = db
-      .prepare("SELECT id, content, is_active, quality_score FROM memories WHERE id = ?")
-      .get(c.memory_a_id) as
-      | { id: string; content: string; is_active: number; quality_score: number | null }
-      | undefined;
-    const memB = db
-      .prepare("SELECT id, content, is_active, quality_score FROM memories WHERE id = ?")
-      .get(c.memory_b_id) as
-      | { id: string; content: string; is_active: number; quality_score: number | null }
-      | undefined;
+    const memA = memoryCache.get(c.memory_a_id);
+    const memB = memoryCache.get(c.memory_b_id);
 
     let reason: string | null = null;
 
