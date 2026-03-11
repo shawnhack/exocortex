@@ -32,10 +32,39 @@ class CachedEmbeddingProvider implements EmbeddingProvider {
   }
 
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
-    const results: Float32Array[] = [];
-    for (const text of texts) {
-      results.push(await this.embed(text));
+    if (texts.length === 0) return [];
+
+    // Separate cache hits from misses to batch-embed only uncached texts
+    const results = new Array<Float32Array>(texts.length);
+    const missIndices: number[] = [];
+    const missTexts: string[] = [];
+
+    for (let i = 0; i < texts.length; i++) {
+      const cached = this.cache.get(texts[i]);
+      if (cached) {
+        this.cache.delete(texts[i]);
+        this.cache.set(texts[i], cached);
+        results[i] = cached;
+      } else {
+        missIndices.push(i);
+        missTexts.push(texts[i]);
+      }
     }
+
+    if (missTexts.length > 0) {
+      const embedded = await this.inner.embedBatch(missTexts);
+      for (let j = 0; j < missIndices.length; j++) {
+        const text = missTexts[j];
+        const vec = embedded[j];
+        results[missIndices[j]] = vec;
+        this.cache.set(text, vec);
+        if (this.cache.size > CACHE_MAX) {
+          const oldest = this.cache.keys().next().value!;
+          this.cache.delete(oldest);
+        }
+      }
+    }
+
     return results;
   }
 

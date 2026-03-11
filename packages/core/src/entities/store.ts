@@ -23,7 +23,20 @@ function rowToEntity(row: EntityRow, tags: string[] = []): Entity {
 }
 
 export class EntityStore {
-  constructor(private db: DatabaseSync) {}
+  // Cached prepared statements for hot-path queries
+  private stmtGetById: ReturnType<DatabaseSync["prepare"]>;
+  private stmtGetByName: ReturnType<DatabaseSync["prepare"]>;
+  private stmtGetTags: ReturnType<DatabaseSync["prepare"]>;
+  private stmtGetMemories: ReturnType<DatabaseSync["prepare"]>;
+  private stmtLinkMemory: ReturnType<DatabaseSync["prepare"]>;
+
+  constructor(private db: DatabaseSync) {
+    this.stmtGetById = db.prepare("SELECT * FROM entities WHERE id = ?");
+    this.stmtGetByName = db.prepare("SELECT * FROM entities WHERE name = ? COLLATE NOCASE");
+    this.stmtGetTags = db.prepare("SELECT tag FROM entity_tags WHERE entity_id = ?");
+    this.stmtGetMemories = db.prepare("SELECT memory_id FROM memory_entities WHERE entity_id = ? ORDER BY relevance DESC");
+    this.stmtLinkMemory = db.prepare("INSERT OR REPLACE INTO memory_entities (memory_id, entity_id, relevance) VALUES (?, ?, ?)");
+  }
 
   create(input: CreateEntityInput): Entity {
     const id = ulid();
@@ -67,20 +80,16 @@ export class EntityStore {
   }
 
   getById(id: string): Entity | null {
-    const row = this.db
-      .prepare("SELECT * FROM entities WHERE id = ?")
-      .get(id) as unknown as EntityRow | undefined;
+    const row = this.stmtGetById.get(id) as unknown as EntityRow | undefined;
     if (!row) return null;
-    const tags = (this.db.prepare("SELECT tag FROM entity_tags WHERE entity_id = ?").all(id) as Array<{ tag: string }>).map((t) => t.tag);
+    const tags = (this.stmtGetTags.all(id) as Array<{ tag: string }>).map((t) => t.tag);
     return rowToEntity(row, tags);
   }
 
   getByName(name: string): Entity | null {
-    const row = this.db
-      .prepare("SELECT * FROM entities WHERE name = ? COLLATE NOCASE")
-      .get(name) as unknown as EntityRow | undefined;
+    const row = this.stmtGetByName.get(name) as unknown as EntityRow | undefined;
     if (!row) return null;
-    const tags = (this.db.prepare("SELECT tag FROM entity_tags WHERE entity_id = ?").all(row.id) as Array<{ tag: string }>).map((t) => t.tag);
+    const tags = (this.stmtGetTags.all(row.id) as Array<{ tag: string }>).map((t) => t.tag);
     return rowToEntity(row, tags);
   }
 
@@ -107,10 +116,9 @@ export class EntityStore {
     sql += " ORDER BY e.name ASC";
     const rows = this.db.prepare(sql).all(...params) as unknown as EntityRow[];
 
-    // Batch-fetch tags for all results
-    const tagStmt = this.db.prepare("SELECT tag FROM entity_tags WHERE entity_id = ?");
+    // Batch-fetch tags for all results (reuse cached statement)
     return rows.map((row) => {
-      const tags = (tagStmt.all(row.id) as Array<{ tag: string }>).map((t) => t.tag);
+      const tags = (this.stmtGetTags.all(row.id) as Array<{ tag: string }>).map((t) => t.tag);
       return rowToEntity(row, tags);
     });
   }
@@ -169,20 +177,12 @@ export class EntityStore {
   }
 
   getMemoriesForEntity(entityId: string): string[] {
-    const rows = this.db
-      .prepare(
-        "SELECT memory_id FROM memory_entities WHERE entity_id = ? ORDER BY relevance DESC"
-      )
-      .all(entityId) as unknown as Array<{ memory_id: string }>;
+    const rows = this.stmtGetMemories.all(entityId) as unknown as Array<{ memory_id: string }>;
     return rows.map((r) => r.memory_id);
   }
 
   linkMemory(entityId: string, memoryId: string, relevance = 1.0): void {
-    this.db
-      .prepare(
-        "INSERT OR REPLACE INTO memory_entities (entity_id, memory_id, relevance) VALUES (?, ?, ?)"
-      )
-      .run(entityId, memoryId, relevance);
+    this.stmtLinkMemory.run(memoryId, entityId, relevance);
   }
 
   addRelationship(

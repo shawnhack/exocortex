@@ -810,24 +810,39 @@ export function safeJsonParse<T>(json: string | null | undefined, fallback: T): 
   try { return JSON.parse(json); } catch { return fallback; }
 }
 
+// Cached prepared statements per db instance (avoids recompiling SQL on every call)
+const getSettingStmtCache = new WeakMap<DatabaseSync, ReturnType<DatabaseSync["prepare"]>>();
+const setSettingStmtCache = new WeakMap<DatabaseSync, ReturnType<DatabaseSync["prepare"]>>();
+const getAllSettingsStmtCache = new WeakMap<DatabaseSync, ReturnType<DatabaseSync["prepare"]>>();
+
 export function getSetting(db: DatabaseSync, key: string): string | undefined {
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
-    | { value: string }
-    | undefined;
+  let stmt = getSettingStmtCache.get(db);
+  if (!stmt) {
+    stmt = db.prepare("SELECT value FROM settings WHERE key = ?");
+    getSettingStmtCache.set(db, stmt);
+  }
+  const row = stmt.get(key) as { value: string } | undefined;
   return row?.value;
 }
 
 export function setSetting(db: DatabaseSync, key: string, value: string): void {
-  db.prepare(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  ).run(key, value);
+  let stmt = setSettingStmtCache.get(db);
+  if (!stmt) {
+    stmt = db.prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    );
+    setSettingStmtCache.set(db, stmt);
+  }
+  stmt.run(key, value);
 }
 
 export function getAllSettings(db: DatabaseSync): Record<string, string> {
-  const rows = db.prepare("SELECT key, value FROM settings").all() as Array<{
-    key: string;
-    value: string;
-  }>;
+  let stmt = getAllSettingsStmtCache.get(db);
+  if (!stmt) {
+    stmt = db.prepare("SELECT key, value FROM settings");
+    getAllSettingsStmtCache.set(db, stmt);
+  }
+  const rows = stmt.all() as Array<{ key: string; value: string }>;
   const settings: Record<string, string> = {};
   for (const row of rows) {
     settings[row.key] = row.value;

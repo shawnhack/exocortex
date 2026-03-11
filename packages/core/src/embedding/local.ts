@@ -42,9 +42,18 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   }
 
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
+    if (texts.length === 0) return [];
+    if (texts.length === 1) return [await this.embed(texts[0])];
+
+    // Native batch embedding — pipeline accepts string[] for parallel processing
+    const pipe = await getPipeline(this.model);
+    const output = await pipe(texts, { pooling: "mean", normalize: true });
+
+    // Output.data contains all embeddings concatenated; split by dimension count
+    const dims = this.dims;
     const results: Float32Array[] = [];
-    for (const text of texts) {
-      results.push(await this.embed(text));
+    for (let i = 0; i < texts.length; i++) {
+      results.push(new Float32Array(output.data.slice(i * dims, (i + 1) * dims)));
     }
     return results;
   }
