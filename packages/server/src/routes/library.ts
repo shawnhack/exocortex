@@ -8,8 +8,8 @@ const library = new Hono();
 // GET /api/library/documents — list all parent documents (source=import, has metadata.document_url)
 library.get("/api/library/documents", (c) => {
   const db = getDb();
-  const limit = parseInt(c.req.query("limit") ?? "50", 10);
-  const offset = parseInt(c.req.query("offset") ?? "0", 10);
+  const limit = parseInt(c.req.query("limit") ?? "50", 10) || 50;
+  const offset = parseInt(c.req.query("offset") ?? "0", 10) || 0;
   const search = c.req.query("search")?.trim() ?? "";
 
   const searchClause = search
@@ -72,7 +72,8 @@ library.get("/api/library/documents", (c) => {
   }
 
   const documents = rows.map((r) => {
-    const meta = r.metadata ? JSON.parse(r.metadata) : {};
+    let meta: Record<string, unknown> = {};
+    try { if (r.metadata) meta = JSON.parse(r.metadata); } catch { /* malformed metadata */ }
     return {
       id: r.id,
       title: meta.document_title ?? r.source_uri,
@@ -117,7 +118,8 @@ library.get("/api/library/documents/:id", (c) => {
 
   if (!row) return c.json({ error: "Document not found" }, 404);
 
-  const meta = row.metadata ? JSON.parse(row.metadata) : {};
+  let meta: Record<string, unknown> = {};
+  try { if (row.metadata) meta = JSON.parse(row.metadata); } catch { /* malformed metadata */ }
   const tags = (
     db
       .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
@@ -175,7 +177,8 @@ const ingestUrlSchema = z.object({
 
 // POST /api/library/ingest — ingest a URL
 library.post("/api/library/ingest", async (c) => {
-  const body = await c.req.json();
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
   const parsed = ingestUrlSchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ error: parsed.error.flatten() }, 400);
@@ -210,7 +213,8 @@ const researchSchema = z.object({
 
 // POST /api/library/research — research a topic and ingest sources
 library.post("/api/library/research", async (c) => {
-  const body = await c.req.json();
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
   const parsed = researchSchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ error: parsed.error.flatten() }, 400);

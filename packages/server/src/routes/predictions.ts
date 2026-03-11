@@ -42,7 +42,7 @@ predictions.get("/api/predictions", (c) => {
   const domain = c.req.query("domain") as "technical" | "product" | "market" | "personal" | "political" | "scientific" | "general" | undefined;
   const source = c.req.query("source") as "user" | "sentinel" | "agent" | "mcp" | undefined;
   const overdue = c.req.query("overdue") === "true";
-  const limit = c.req.query("limit") ? parseInt(c.req.query("limit")!, 10) : undefined;
+  const limit = c.req.query("limit") ? (parseInt(c.req.query("limit")!, 10) || 50) : undefined;
 
   const list = store.list({ status, domain, source, overdue, limit });
 

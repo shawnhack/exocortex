@@ -33,7 +33,7 @@ entities.get("/api/entities/graph", (c) => {
   const allEntities = store.list();
 
   // Single query for all relationships with safety limit
-  const limit = Math.min(parseInt(c.req.query("limit") || "10000", 10), 50000);
+  const limit = Math.min(parseInt(c.req.query("limit") || "10000", 10) || 10000, 50000);
   const rows = db
     .prepare(
       "SELECT source_entity_id, target_entity_id, relationship FROM entity_relationships ORDER BY created_at DESC LIMIT ?"
@@ -61,7 +61,7 @@ entities.get("/api/entities/graph/analysis", (c) => {
 // GET /api/entities/graph/communities — community summaries with top memories
 entities.get("/api/entities/graph/communities", (c) => {
   const db = getDb();
-  const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 50);
+  const limit = Math.min(parseInt(c.req.query("limit") || "20", 10) || 20, 50);
   const summaries = getCommunitySummaries(db, limit);
   return c.json({ communities: summaries, count: summaries.length });
 });
