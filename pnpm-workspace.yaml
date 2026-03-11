@@ -1,2 +1,5 @@
 packages:
   - "packages/*"
+
+# Security: block packages published less than 3 days ago
+minimumReleaseAge: 4320
