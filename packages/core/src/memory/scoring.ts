@@ -58,7 +58,8 @@ export function recencyScore(
   quality?: number
 ): number {
   const now = Date.now();
-  const created = new Date(createdAt + "Z").getTime();
+  const created = new Date(createdAt + (createdAt.includes("Z") ? "" : "Z")).getTime();
+  if (!Number.isFinite(created)) return 0;
   const daysSince = (now - created) / (1000 * 60 * 60 * 24);
 
   // Use quality as the dampening signal when available; fall back to importance.

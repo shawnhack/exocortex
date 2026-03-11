@@ -822,7 +822,8 @@ export function recomputeQualityScores(
   db.exec("BEGIN");
   try {
     for (const row of rows) {
-      const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
+      const createdTs = new Date(row.created_at + (row.created_at.includes("Z") ? "" : "Z")).getTime();
+      const ageDays = Number.isFinite(createdTs) ? (now - createdTs) / (1000 * 60 * 60 * 24) : 0;
       const score = Math.round(
         qualityScore(
           row.importance,
