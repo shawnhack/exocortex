@@ -12,17 +12,17 @@ function formatChars(chars: number): string {
 }
 
 const STATUS_ICONS: Record<string, { color: string; label: string }> = {
-  ingested: { color: "#34d399", label: "OK" },
-  failed: { color: "#ef4444", label: "FAIL" },
-  skipped: { color: "#fbbf24", label: "SKIP" },
+  ingested: { color: "var(--emerald)", label: "OK" },
+  failed: { color: "var(--red-strong)", label: "FAIL" },
+  skipped: { color: "var(--amber)", label: "SKIP" },
 };
 
 const inputStyle: React.CSSProperties = {
-  background: "rgba(22, 22, 58, 0.5)",
-  border: "1px solid #16163a",
+  background: "var(--bg-panel)",
+  border: "1px solid var(--border-subtle)",
   borderRadius: 8,
   padding: "10px 14px",
-  color: "#e8e8f4",
+  color: "var(--text-primary-alt)",
   fontSize: 14,
   outline: "none",
 };
@@ -113,8 +113,8 @@ export function Library() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <div>
-          <h1 style={{ color: "#e8e8f4", fontSize: 22, fontWeight: 600, margin: 0 }}>Library</h1>
-          <p style={{ color: "#8080a0", fontSize: 13, margin: "4px 0 0" }}>
+          <h1 style={{ color: "var(--text-primary-alt)", fontSize: 22, fontWeight: 600, margin: 0 }}>Library</h1>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "4px 0 0" }}>
             {documents.length} documents, {formatChars(totalChars)} chars, {totalChunks} chunks
           </p>
         </div>
@@ -123,12 +123,12 @@ export function Library() {
             onClick={() => setActivePanel(activePanel === "research" ? "none" : "research")}
             style={{
               background: activePanel === "research"
-                ? "linear-gradient(135deg, rgba(167, 139, 250, 0.2), rgba(167, 139, 250, 0.1))"
-                : "linear-gradient(135deg, rgba(167, 139, 250, 0.12), rgba(167, 139, 250, 0.06))",
+                ? "linear-gradient(135deg, var(--purple-bg-active), var(--purple-border-faint))"
+                : "linear-gradient(135deg, var(--purple-bg), var(--purple-bg-subtle))",
               border: activePanel === "research"
-                ? "1px solid rgba(167, 139, 250, 0.4)"
-                : "1px solid rgba(167, 139, 250, 0.2)",
-              color: "#a78bfa",
+                ? "1px solid var(--purple-border-strong)"
+                : "1px solid var(--purple-border)",
+              color: "var(--purple)",
               padding: "8px 16px",
               borderRadius: 8,
               cursor: "pointer",
@@ -149,12 +149,12 @@ export function Library() {
             onClick={() => setActivePanel(activePanel === "ingest" ? "none" : "ingest")}
             style={{
               background: activePanel === "ingest"
-                ? "linear-gradient(135deg, rgba(34, 211, 238, 0.2), rgba(34, 211, 238, 0.1))"
-                : "linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(34, 211, 238, 0.06))",
+                ? "linear-gradient(135deg, var(--cyan-border-dim), var(--cyan-bg-active))"
+                : "linear-gradient(135deg, var(--violet-dim), var(--cyan-bg-subtle))",
               border: activePanel === "ingest"
-                ? "1px solid rgba(34, 211, 238, 0.4)"
-                : "1px solid rgba(34, 211, 238, 0.2)",
-              color: "#22d3ee",
+                ? "1px solid var(--cyan-border-strong)"
+                : "1px solid var(--cyan-border-dim)",
+              color: "var(--cyan)",
               padding: "8px 16px",
               borderRadius: 8,
               cursor: "pointer",
@@ -177,7 +177,7 @@ export function Library() {
       {/* Search */}
       <div style={{ position: "relative", marginBottom: 20 }}>
         <svg
-          width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8080a0" strokeWidth="2"
+          width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"
           style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }}
         >
           <circle cx="11" cy="11" r="8" />
@@ -193,8 +193,8 @@ export function Library() {
             width: "100%",
             paddingLeft: 40,
           }}
-          onFocus={(e) => (e.target.style.borderColor = "rgba(34, 211, 238, 0.4)")}
-          onBlur={(e) => (e.target.style.borderColor = "#16163a")}
+          onFocus={(e) => (e.target.style.borderColor = "var(--cyan-border-strong)")}
+          onBlur={(e) => (e.target.style.borderColor = "var(--border-subtle)")}
         />
         {search && (
           <button
@@ -206,7 +206,7 @@ export function Library() {
               transform: "translateY(-50%)",
               background: "none",
               border: "none",
-              color: "#8080a0",
+              color: "var(--text-muted)",
               cursor: "pointer",
               fontSize: 16,
               padding: 4,
@@ -221,23 +221,23 @@ export function Library() {
       {activePanel === "research" && (
         <div
           style={{
-            background: "rgba(8, 8, 26, 0.8)",
-            border: "1px solid rgba(167, 139, 250, 0.2)",
+            background: "var(--bg-overlay-medium)",
+            border: "1px solid var(--purple-border)",
             borderRadius: 12,
             padding: 20,
             marginBottom: 20,
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ color: "#e8e8f4", fontSize: 15, fontWeight: 600, margin: 0 }}>Research a Topic</h3>
+            <h3 style={{ color: "var(--text-primary-alt)", fontSize: 15, fontWeight: 600, margin: 0 }}>Research a Topic</h3>
             <button
               onClick={() => { setActivePanel("none"); setLastResearch(null); }}
-              style={{ background: "none", border: "none", color: "#8080a0", cursor: "pointer", fontSize: 18 }}
+              style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}
             >
               x
             </button>
           </div>
-          <p style={{ color: "#8080a0", fontSize: 12, margin: "0 0 14px", lineHeight: 1.5 }}>
+          <p style={{ color: "var(--text-muted)", fontSize: 12, margin: "0 0 14px", lineHeight: 1.5 }}>
             Searches the web, finds relevant sources, and ingests the best results into your library.
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -252,8 +252,8 @@ export function Library() {
                   researchMutation.mutate();
                 }
               }}
-              onFocus={(e) => (e.target.style.borderColor = "rgba(167, 139, 250, 0.4)")}
-              onBlur={(e) => (e.target.style.borderColor = "#16163a")}
+              onFocus={(e) => (e.target.style.borderColor = "var(--purple-border-strong)")}
+              onBlur={(e) => (e.target.style.borderColor = "var(--border-subtle)")}
             />
             <div style={{ display: "flex", gap: 12 }}>
               <input
@@ -262,8 +262,8 @@ export function Library() {
                 value={researchTags}
                 onChange={(e) => setResearchTags(e.target.value)}
                 style={{ ...inputStyle, flex: 1 }}
-                onFocus={(e) => (e.target.style.borderColor = "rgba(167, 139, 250, 0.4)")}
-                onBlur={(e) => (e.target.style.borderColor = "#16163a")}
+                onFocus={(e) => (e.target.style.borderColor = "var(--purple-border-strong)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--border-subtle)")}
               />
               <select
                 value={researchMaxSources}
@@ -287,10 +287,10 @@ export function Library() {
               disabled={!researchTopic.trim() || researchMutation.isPending}
               style={{
                 background: !researchTopic.trim()
-                  ? "rgba(22, 22, 58, 0.3)"
-                  : "linear-gradient(135deg, #a78bfa, #8b5cf6)",
+                  ? "var(--bg-panel-dim)"
+                  : "linear-gradient(135deg, var(--purple), var(--purple-dark))",
                 border: "none",
-                color: !researchTopic.trim() ? "#8080a0" : "#fff",
+                color: !researchTopic.trim() ? "var(--text-muted)" : "white",
                 padding: "10px 20px",
                 borderRadius: 8,
                 cursor: !researchTopic.trim() ? "not-allowed" : "pointer",
@@ -305,8 +305,8 @@ export function Library() {
 
           {/* Research Results */}
           {researchMutation.isPending && (
-            <div style={{ marginTop: 16, padding: 16, background: "rgba(167, 139, 250, 0.05)", borderRadius: 8, border: "1px solid rgba(167, 139, 250, 0.1)" }}>
-              <p style={{ color: "#a78bfa", fontSize: 13, margin: 0 }}>
+            <div style={{ marginTop: 16, padding: 16, background: "var(--purple-bg-faint)", borderRadius: 8, border: "1px solid var(--purple-border-faint)" }}>
+              <p style={{ color: "var(--purple)", fontSize: 13, margin: 0 }}>
                 Searching the web and ingesting sources... This may take a minute.
               </p>
             </div>
@@ -316,13 +316,13 @@ export function Library() {
             <div style={{ marginTop: 16 }}>
               <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
                 <Stat label="Found" value={lastResearch.sources_found} />
-                <Stat label="Ingested" value={lastResearch.sources_ingested} color="#34d399" />
-                <Stat label="Failed" value={lastResearch.sources_failed} color="#ef4444" />
-                <Stat label="Skipped" value={lastResearch.sources_skipped} color="#fbbf24" />
+                <Stat label="Ingested" value={lastResearch.sources_ingested} color="var(--emerald)" />
+                <Stat label="Failed" value={lastResearch.sources_failed} color="var(--red-strong)" />
+                <Stat label="Skipped" value={lastResearch.sources_skipped} color="var(--amber)" />
                 <Stat label="Chunks" value={lastResearch.total_chunks} />
                 <Stat label="Chars" value={formatChars(lastResearch.total_chars)} />
               </div>
-              <div style={{ fontSize: 11, color: "#6060a0", marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--text-dim-alt)", marginBottom: 10 }}>
                 Queries: {lastResearch.queries_run.join(" | ")}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -336,7 +336,7 @@ export function Library() {
                         alignItems: "center",
                         gap: 8,
                         padding: "6px 10px",
-                        background: "rgba(8, 8, 26, 0.5)",
+                        background: "var(--bg-overlay-faint)",
                         borderRadius: 6,
                         fontSize: 12,
                       }}
@@ -344,16 +344,16 @@ export function Library() {
                       <span style={{ color: st.color, fontWeight: 600, fontSize: 10, width: 32 }}>
                         [{st.label}]
                       </span>
-                      <span style={{ color: "#e8e8f4", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ color: "var(--text-primary-alt)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {s.title}
                       </span>
                       {s.chunks_stored != null && (
-                        <span style={{ color: "#8080a0", fontSize: 11 }}>
+                        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
                           {s.chunks_stored} chunks
                         </span>
                       )}
                       {s.error && s.status !== "skipped" && (
-                        <span style={{ color: "#ef4444", fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ color: "var(--red-strong)", fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {s.error}
                         </span>
                       )}
@@ -370,18 +370,18 @@ export function Library() {
       {activePanel === "ingest" && (
         <div
           style={{
-            background: "rgba(8, 8, 26, 0.8)",
-            border: "1px solid #16163a",
+            background: "var(--bg-overlay-medium)",
+            border: "1px solid var(--border-subtle)",
             borderRadius: 12,
             padding: 20,
             marginBottom: 20,
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ color: "#e8e8f4", fontSize: 15, fontWeight: 600, margin: 0 }}>Ingest from URL</h3>
+            <h3 style={{ color: "var(--text-primary-alt)", fontSize: 15, fontWeight: 600, margin: 0 }}>Ingest from URL</h3>
             <button
               onClick={() => setActivePanel("none")}
-              style={{ background: "none", border: "none", color: "#8080a0", cursor: "pointer", fontSize: 18 }}
+              style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}
             >
               x
             </button>
@@ -393,8 +393,8 @@ export function Library() {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               style={inputStyle}
-              onFocus={(e) => (e.target.style.borderColor = "rgba(34, 211, 238, 0.4)")}
-              onBlur={(e) => (e.target.style.borderColor = "#16163a")}
+              onFocus={(e) => (e.target.style.borderColor = "var(--cyan-border-strong)")}
+              onBlur={(e) => (e.target.style.borderColor = "var(--border-subtle)")}
             />
             <div style={{ display: "flex", gap: 12 }}>
               <input
@@ -403,8 +403,8 @@ export function Library() {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 style={{ ...inputStyle, flex: 1 }}
-                onFocus={(e) => (e.target.style.borderColor = "rgba(34, 211, 238, 0.4)")}
-                onBlur={(e) => (e.target.style.borderColor = "#16163a")}
+                onFocus={(e) => (e.target.style.borderColor = "var(--cyan-border-strong)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--border-subtle)")}
               />
               <input
                 type="text"
@@ -412,17 +412,17 @@ export function Library() {
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
                 style={{ ...inputStyle, flex: 1 }}
-                onFocus={(e) => (e.target.style.borderColor = "rgba(34, 211, 238, 0.4)")}
-                onBlur={(e) => (e.target.style.borderColor = "#16163a")}
+                onFocus={(e) => (e.target.style.borderColor = "var(--cyan-border-strong)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--border-subtle)")}
               />
             </div>
             <button
               onClick={() => ingestMutation.mutate()}
               disabled={!url.trim() || ingestMutation.isPending}
               style={{
-                background: !url.trim() ? "rgba(22, 22, 58, 0.3)" : "linear-gradient(135deg, #22d3ee, #06b6d4)",
+                background: !url.trim() ? "var(--bg-panel-dim)" : "linear-gradient(135deg, var(--cyan), var(--cyan-dark))",
                 border: "none",
-                color: !url.trim() ? "#8080a0" : "#08081a",
+                color: !url.trim() ? "var(--text-muted)" : "var(--bg-deep-alt)",
                 padding: "10px 20px",
                 borderRadius: 8,
                 cursor: !url.trim() ? "not-allowed" : "pointer",
@@ -439,13 +439,13 @@ export function Library() {
 
       {/* Document List */}
       {isLoading ? (
-        <p style={{ color: "#8080a0" }}>Loading...</p>
+        <p style={{ color: "var(--text-muted)" }}>Loading...</p>
       ) : documents.length === 0 ? (
         <div
           style={{
             textAlign: "center",
             padding: "60px 20px",
-            color: "#8080a0",
+            color: "var(--text-muted)",
           }}
         >
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.4, marginBottom: 16 }}>
@@ -454,7 +454,7 @@ export function Library() {
           </svg>
           <p style={{ fontSize: 15, margin: "0 0 8px" }}>No documents yet</p>
           <p style={{ fontSize: 13 }}>
-            Use <strong style={{ color: "#a78bfa" }}>Research Topic</strong> to auto-discover sources, or <strong style={{ color: "#22d3ee" }}>Ingest URL</strong> for specific pages.
+            Use <strong style={{ color: "var(--purple)" }}>Research Topic</strong> to auto-discover sources, or <strong style={{ color: "var(--cyan)" }}>Ingest URL</strong> for specific pages.
           </p>
         </div>
       ) : (
@@ -484,8 +484,8 @@ export function Library() {
 function Stat({ label, value, color }: { label: string; value: string | number; color?: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-      <span style={{ color: color ?? "#e8e8f4", fontSize: 16, fontWeight: 600 }}>{value}</span>
-      <span style={{ color: "#6060a0", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
+      <span style={{ color: color ?? "var(--text-primary-alt)", fontSize: 16, fontWeight: 600 }}>{value}</span>
+      <span style={{ color: "var(--text-dim-alt)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
     </div>
   );
 }
@@ -510,8 +510,8 @@ function DocumentCard({
   return (
     <div
       style={{
-        background: isExpanded ? "rgba(22, 22, 58, 0.4)" : "rgba(8, 8, 26, 0.5)",
-        border: isExpanded ? "1px solid rgba(34, 211, 238, 0.2)" : "1px solid #16163a",
+        background: isExpanded ? "var(--bg-panel-active)" : "var(--bg-overlay-faint)",
+        border: isExpanded ? "1px solid var(--cyan-border-dim)" : "1px solid var(--border-subtle)",
         borderRadius: 10,
         overflow: "hidden",
         transition: "all 0.2s",
@@ -529,7 +529,7 @@ function DocumentCard({
         }}
       >
         {/* Icon */}
-        <div style={{ flexShrink: 0, color: "#8080a0" }}>
+        <div style={{ flexShrink: 0, color: "var(--text-muted)" }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
@@ -540,10 +540,10 @@ function DocumentCard({
 
         {/* Title + URL */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ color: "#e8e8f4", fontSize: 14, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ color: "var(--text-primary-alt)", fontSize: 14, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {doc.title}
           </div>
-          <div style={{ color: "#6060a0", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
+          <div style={{ color: "var(--text-dim-alt)", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
             {doc.url}
           </div>
         </div>
@@ -556,8 +556,8 @@ function DocumentCard({
                 <span
                   key={tag}
                   style={{
-                    background: "rgba(34, 211, 238, 0.08)",
-                    color: "#67e8f9",
+                    background: "var(--cyan-bg-tag)",
+                    color: "var(--cyan-light)",
                     fontSize: 11,
                     padding: "2px 8px",
                     borderRadius: 4,
@@ -580,13 +580,13 @@ function DocumentCard({
           >
             {doc.tier}
           </span>
-          <span style={{ color: "#8080a0", fontSize: 12, whiteSpace: "nowrap" }}>
+          <span style={{ color: "var(--text-muted)", fontSize: 12, whiteSpace: "nowrap" }}>
             {doc.chunk_count} chunks
           </span>
-          <span style={{ color: "#6060a0", fontSize: 12, whiteSpace: "nowrap" }}>
+          <span style={{ color: "var(--text-dim-alt)", fontSize: 12, whiteSpace: "nowrap" }}>
             {formatChars(doc.total_chars)}
           </span>
-          <span style={{ color: "#6060a0", fontSize: 12, whiteSpace: "nowrap" }}>
+          <span style={{ color: "var(--text-dim-alt)", fontSize: 12, whiteSpace: "nowrap" }}>
             {timeAgo(doc.ingested_at)}
           </span>
           <svg
@@ -594,7 +594,7 @@ function DocumentCard({
             height="14"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="#8080a0"
+            stroke="var(--text-muted)"
             strokeWidth="2"
             style={{ transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}
           >
@@ -605,13 +605,13 @@ function DocumentCard({
 
       {/* Expanded Detail */}
       {isExpanded && (
-        <div style={{ borderTop: "1px solid #16163a", padding: "16px 18px" }}>
+        <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "16px 18px" }}>
           {detailLoading ? (
-            <p style={{ color: "#8080a0", margin: 0 }}>Loading chunks...</p>
+            <p style={{ color: "var(--text-muted)", margin: 0 }}>Loading chunks...</p>
           ) : detail ? (
             <div>
               {doc.description && (
-                <p style={{ color: "#a0a0be", fontSize: 13, margin: "0 0 12px", lineHeight: 1.5 }}>
+                <p style={{ color: "var(--text-secondary-alt)", fontSize: 13, margin: "0 0 12px", lineHeight: 1.5 }}>
                   {doc.description}
                 </p>
               )}
@@ -623,9 +623,9 @@ function DocumentCard({
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
-                    background: "rgba(34, 211, 238, 0.08)",
-                    border: "1px solid rgba(34, 211, 238, 0.2)",
-                    color: "#22d3ee",
+                    background: "var(--cyan-bg-tag)",
+                    border: "1px solid var(--cyan-border-dim)",
+                    color: "var(--cyan)",
                     padding: "6px 12px",
                     borderRadius: 6,
                     fontSize: 12,
@@ -647,7 +647,7 @@ function DocumentCard({
                   style={{
                     background: "rgba(239, 68, 68, 0.08)",
                     border: "1px solid rgba(239, 68, 68, 0.2)",
-                    color: "#ef4444",
+                    color: "var(--red-strong)",
                     padding: "6px 12px",
                     borderRadius: 6,
                     fontSize: 12,
@@ -659,7 +659,7 @@ function DocumentCard({
               </div>
 
               {/* Chunks */}
-              <div style={{ fontSize: 12, color: "#8080a0", marginBottom: 8, fontWeight: 500 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8, fontWeight: 500 }}>
                 {detail.chunks.length} chunks ({formatChars(detail.total_chars)} chars total)
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 400, overflowY: "auto" }}>
@@ -667,23 +667,23 @@ function DocumentCard({
                   <div
                     key={chunk.id}
                     style={{
-                      background: "rgba(8, 8, 26, 0.6)",
+                      background: "var(--bg-overlay-light)",
                       border: "1px solid rgba(22, 22, 58, 0.5)",
                       borderRadius: 6,
                       padding: "10px 14px",
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ color: "#6060a0", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                      <span style={{ color: "var(--text-dim-alt)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
                         Chunk {chunk.index + 1}
                       </span>
-                      <span style={{ color: "#6060a0", fontSize: 11 }}>
+                      <span style={{ color: "var(--text-dim-alt)", fontSize: 11 }}>
                         {chunk.chars} chars
                       </span>
                     </div>
                     <div
                       style={{
-                        color: "#a0a0be",
+                        color: "var(--text-secondary-alt)",
                         fontSize: 13,
                         lineHeight: 1.5,
                         whiteSpace: "pre-wrap",

@@ -73,9 +73,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 }
 
 const TYPE_STYLES: Record<ToastType, { border: string; accent: string; icon: string }> = {
-  success: { border: "rgba(74, 222, 128, 0.3)", accent: "#4ade80", icon: "M20 6L9 17l-5-5" },
-  error: { border: "rgba(248, 113, 113, 0.3)", accent: "#f87171", icon: "M18 6L6 18M6 6l12 12" },
-  info: { border: "rgba(34, 211, 238, 0.3)", accent: "#22d3ee", icon: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 14v-4m0-4h.01" },
+  success: { border: "var(--green-border)", accent: "var(--green)", icon: "M20 6L9 17l-5-5" },
+  error: { border: "var(--red-border)", accent: "var(--red)", icon: "M18 6L6 18M6 6l12 12" },
+  info: { border: "var(--cyan-border)", accent: "var(--cyan)", icon: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 14v-4m0-4h.01" },
 };
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
@@ -84,13 +84,13 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   return (
     <div
       style={{
-        background: "#0c0c1d",
+        background: "var(--bg-surface)",
         border: `1px solid ${style.border}`,
         borderRadius: 10,
         padding: "12px 16px",
         minWidth: 280,
         maxWidth: 400,
-        boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
+        boxShadow: "var(--shadow-heavy)",
         animation: "toastSlideIn 0.25s ease-out",
         pointerEvents: "auto",
         display: "flex",
@@ -112,7 +112,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
         <path d={style.icon} />
       </svg>
       <div style={{ flex: 1 }}>
-        <div style={{ color: "#e8e8f4", fontSize: 13, lineHeight: 1.5 }}>
+        <div style={{ color: "var(--text-primary-alt)", fontSize: 13, lineHeight: 1.5 }}>
           {toast.message}
         </div>
         {toast.confirm && (
@@ -141,7 +141,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
           style={{
             background: "none",
             border: "none",
-            color: "#8080a0",
+            color: "var(--text-muted)",
             cursor: "pointer",
             padding: 0,
             fontSize: 16,

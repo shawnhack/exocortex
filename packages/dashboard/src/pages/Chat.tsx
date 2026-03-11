@@ -62,22 +62,22 @@ export function Chat() {
     return (
       <div>
         <h1>Chat</h1>
-        <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
+        <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24 }}>
           Ask questions about your memories using RAG
         </p>
         <div
           style={{
-            background: "#0c0c1d",
-            border: "1px solid rgba(251, 191, 36, 0.3)",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--amber-border)",
             borderRadius: 12,
             padding: 24,
             textAlign: "center",
           }}
         >
-          <div style={{ fontSize: 13, color: "#fbbf24", marginBottom: 12, fontWeight: 600 }}>
+          <div style={{ fontSize: 13, color: "var(--amber)", marginBottom: 12, fontWeight: 600 }}>
             API Key Required
           </div>
-          <p style={{ color: "#a0a0be", fontSize: 13, marginBottom: 16 }}>
+          <p style={{ color: "var(--text-secondary-alt)", fontSize: 13, marginBottom: 16 }}>
             Chat requires an AI API key. Configure it in Settings under the "ai" section.
           </p>
           <Link
@@ -86,9 +86,9 @@ export function Chat() {
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
-              background: "rgba(34, 211, 238, 0.15)",
-              color: "#22d3ee",
-              border: "1px solid rgba(34, 211, 238, 0.3)",
+              background: "var(--cyan-bg)",
+              color: "var(--cyan)",
+              border: "1px solid var(--cyan-border)",
               borderRadius: 8,
               padding: "8px 16px",
               fontSize: 13,
@@ -107,7 +107,7 @@ export function Chat() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 64px)" }}>
       <h1>Chat</h1>
-      <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 16 }}>
+      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
         Ask questions about your memories
       </p>
 
@@ -123,7 +123,7 @@ export function Chat() {
         }}
       >
         {messages.length === 0 && (
-          <div style={{ textAlign: "center", padding: "60px 20px", color: "#8080a0" }}>
+          <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--text-muted)" }}>
             <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.3 }}>
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline-block" }}>
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -151,10 +151,10 @@ export function Chat() {
                   lineHeight: 1.6,
                   whiteSpace: "pre-wrap",
                   background: msg.role === "user"
-                    ? "linear-gradient(135deg, rgba(34, 211, 238, 0.2), rgba(34, 211, 238, 0.1))"
-                    : "#0c0c1d",
-                  border: `1px solid ${msg.role === "user" ? "rgba(34, 211, 238, 0.3)" : "#16163a"}`,
-                  color: "#e8e8f4",
+                    ? "linear-gradient(135deg, var(--cyan-border-dim), var(--cyan-bg-active))"
+                    : "var(--bg-surface)",
+                  border: `1px solid ${msg.role === "user" ? "var(--cyan-border)" : "var(--border-subtle)"}`,
+                  color: "var(--text-primary-alt)",
                 }}
               >
                 {msg.content}
@@ -164,7 +164,7 @@ export function Chat() {
             {/* Sources */}
             {msg.sources && msg.sources.length > 0 && (
               <div style={{ marginTop: 8, paddingLeft: 4 }}>
-                <div style={{ fontSize: 10, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
                   Sources ({msg.sources.length})
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -173,12 +173,12 @@ export function Chat() {
                       key={source.id}
                       to={`/memory/${source.id}`}
                       style={{
-                        background: "rgba(34, 211, 238, 0.05)",
-                        border: "1px solid rgba(34, 211, 238, 0.15)",
+                        background: "var(--cyan-bg-selected)",
+                        border: "1px solid var(--cyan-border-faint)",
                         borderRadius: 8,
                         padding: "6px 10px",
                         fontSize: 11,
-                        color: "#d0d0e0",
+                        color: "var(--text-body)",
                         textDecoration: "none",
                         display: "block",
                         overflow: "hidden",
@@ -187,7 +187,7 @@ export function Chat() {
                         transition: "border-color 0.15s",
                       }}
                     >
-                      <span style={{ color: "#22d3ee", fontFamily: "var(--font-mono)", marginRight: 8 }}>
+                      <span style={{ color: "var(--cyan)", fontFamily: "var(--font-mono)", marginRight: 8 }}>
                         {source.id.slice(0, 10)}
                       </span>
                       {source.content.slice(0, 80)}{source.content.length > 80 ? "..." : ""}
@@ -202,7 +202,7 @@ export function Chat() {
         {loading && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0" }}>
             <div className="spinner" />
-            <span style={{ color: "#8080a0", fontSize: 12 }}>Thinking...</span>
+            <span style={{ color: "var(--text-muted)", fontSize: 12 }}>Thinking...</span>
           </div>
         )}
 
@@ -229,14 +229,14 @@ export function Chat() {
             padding: "12px 16px",
             borderRadius: 10,
             border: "1px solid #16163a",
-            background: "#0c0c1d",
-            color: "#e8e8f4",
+            background: "var(--bg-surface)",
+            color: "var(--text-primary-alt)",
             fontSize: 14,
             outline: "none",
             transition: "border-color 0.2s",
           }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(34, 211, 238, 0.4)"; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = "var(--cyan-border-strong)"; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
           disabled={loading}
         />
         <button

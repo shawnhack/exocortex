@@ -17,10 +17,10 @@ const tabStyle = (active: boolean): React.CSSProperties => ({
   padding: "8px 16px",
   fontSize: 13,
   fontWeight: active ? 600 : 400,
-  color: active ? "#e8e8f4" : "#8080a0",
-  background: active ? "rgba(34, 211, 238, 0.12)" : "transparent",
+  color: active ? "var(--text-primary-alt)" : "var(--text-muted)",
+  background: active ? "var(--violet-dim)" : "transparent",
   border: "1px solid",
-  borderColor: active ? "rgba(34, 211, 238, 0.3)" : "transparent",
+  borderColor: active ? "var(--cyan-border)" : "transparent",
   borderRadius: 8,
   cursor: "pointer",
   transition: "all 0.15s",
@@ -31,9 +31,9 @@ const toggleTrackStyle = (on: boolean): React.CSSProperties => ({
   width: 40,
   height: 22,
   borderRadius: 11,
-  background: on ? "#22d3ee" : "#2a2a4a",
+  background: on ? "var(--cyan)" : "var(--bg-toggle-off)",
   border: "1px solid",
-  borderColor: on ? "#22d3ee" : "#3a3a5a",
+  borderColor: on ? "var(--cyan)" : "var(--border-toggle-off)",
   cursor: "pointer",
   position: "relative",
   transition: "background 0.2s, border-color 0.2s",
@@ -44,12 +44,12 @@ const toggleKnobStyle = (on: boolean): React.CSSProperties => ({
   width: 16,
   height: 16,
   borderRadius: "50%",
-  background: "#e8e8f4",
+  background: "var(--text-primary-alt)",
   position: "absolute",
   top: 2,
   left: on ? 20 : 2,
   transition: "left 0.2s",
-  boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+  boxShadow: "var(--shadow-light)",
 });
 
 export function Settings() {
@@ -238,7 +238,7 @@ export function Settings() {
             style={{
               width: 220,
               fontSize: 12,
-              color: "#8080a0",
+              color: "var(--text-muted)",
               flexShrink: 0,
               fontFamily: "var(--font-mono)",
             }}
@@ -264,28 +264,28 @@ export function Settings() {
                   width: 70,
                   padding: "8px 12px",
                   borderRadius: 8,
-                  border: "1px solid #16163a",
-                  background: "#0e0e22",
-                  color: "#e8e8f4",
+                  border: "1px solid var(--border-subtle)",
+                  background: "var(--bg-surface-hover)",
+                  color: "var(--text-primary-alt)",
                   fontFamily: "var(--font-mono)",
                   fontSize: 13,
                   outline: "none",
                   transition: "border-color 0.2s, box-shadow 0.2s",
                 }}
                 onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#22d3ee";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(34, 211, 238, 0.15)";
+                  e.currentTarget.style.borderColor = "var(--cyan)";
+                  e.currentTarget.style.boxShadow = "var(--glow-cyan-focus-strong)";
                 }}
                 onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "#16163a";
+                  e.currentTarget.style.borderColor = "var(--border-subtle)";
                   e.currentTarget.style.boxShadow = "none";
                 }}
               />
-              <span style={{ fontSize: 12, color: "#8080a0" }}>days</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>days</span>
             </div>
           )}
           {!enabled && (
-            <span style={{ fontSize: 12, color: "#606080" }}>Disabled</span>
+            <span style={{ fontSize: 12, color: "var(--text-disabled)" }}>Disabled</span>
           )}
         </div>
       );
@@ -307,7 +307,7 @@ export function Settings() {
             style={{
               width: 220,
               fontSize: 12,
-              color: "#8080a0",
+              color: "var(--text-muted)",
               flexShrink: 0,
               fontFamily: "var(--font-mono)",
             }}
@@ -315,7 +315,7 @@ export function Settings() {
             {key}
           </label>
           {renderToggle(on, () => toggleBool(key))}
-          <span style={{ fontSize: 12, color: on ? "#4ade80" : "#606080" }}>
+          <span style={{ fontSize: 12, color: on ? "var(--green)" : "var(--text-disabled)" }}>
             {on ? "Enabled" : "Disabled"}
           </span>
         </div>
@@ -337,7 +337,7 @@ export function Settings() {
           style={{
             width: 220,
             fontSize: 12,
-            color: "#8080a0",
+            color: "var(--text-muted)",
             flexShrink: 0,
             fontFamily: "var(--font-mono)",
           }}
@@ -355,20 +355,20 @@ export function Settings() {
             flex: 1,
             padding: "8px 12px",
             borderRadius: 8,
-            border: "1px solid #16163a",
-            background: "#0e0e22",
-            color: "#e8e8f4",
+            border: "1px solid var(--border-subtle)",
+            background: "var(--bg-surface-hover)",
+            color: "var(--text-primary-alt)",
             fontFamily: "var(--font-mono)",
             fontSize: 13,
             outline: "none",
             transition: "border-color 0.2s, box-shadow 0.2s",
           }}
           onFocus={(e) => {
-            e.currentTarget.style.borderColor = "#22d3ee";
-            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(34, 211, 238, 0.15)";
+            e.currentTarget.style.borderColor = "var(--cyan)";
+            e.currentTarget.style.boxShadow = "var(--glow-cyan-focus-strong)";
           }}
           onBlur={(e) => {
-            e.currentTarget.style.borderColor = "#16163a";
+            e.currentTarget.style.borderColor = "var(--border-subtle)";
             e.currentTarget.style.boxShadow = "none";
           }}
         />
@@ -379,7 +379,7 @@ export function Settings() {
   return (
     <div>
       <h1>Settings</h1>
-      <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 20 }}>
+      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 20 }}>
         System configuration
       </p>
 
@@ -400,8 +400,8 @@ export function Settings() {
           {embeddingHealth && (
             <div
               style={{
-                background: "#0c0c1d",
-                border: "1px solid #16163a",
+                background: "var(--bg-surface)",
+                border: "1px solid var(--border-subtle)",
                 borderRadius: 12,
                 padding: 20,
                 marginBottom: 16,
@@ -411,7 +411,7 @@ export function Settings() {
                 style={{
                   fontSize: 13,
                   fontWeight: 600,
-                  color: "#22d3ee",
+                  color: "var(--cyan)",
                   textTransform: "uppercase",
                   letterSpacing: "0.06em",
                   marginBottom: 16,
@@ -421,27 +421,27 @@ export function Settings() {
                 Embedding Status
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-                <div style={{ background: "rgba(8, 8, 26, 0.6)", border: "1px solid #16163a", borderRadius: 10, padding: "12px 16px" }}>
-                  <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4 }}>Model</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#e8e8f4", fontFamily: "var(--font-mono)" }}>
+                <div style={{ background: "var(--bg-overlay-light)", border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "12px 16px" }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Model</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary-alt)", fontFamily: "var(--font-mono)" }}>
                     {embeddingHealth.currentModel}
                   </div>
                 </div>
-                <div style={{ background: "rgba(8, 8, 26, 0.6)", border: "1px solid #16163a", borderRadius: 10, padding: "12px 16px" }}>
-                  <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4 }}>Embedded</div>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: "#34d399", fontFamily: "var(--font-mono)" }}>
+                <div style={{ background: "var(--bg-overlay-light)", border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "12px 16px" }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Embedded</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: "var(--emerald)", fontFamily: "var(--font-mono)" }}>
                     {embeddingHealth.totalEmbedded}
                   </div>
                 </div>
-                <div style={{ background: "rgba(8, 8, 26, 0.6)", border: "1px solid #16163a", borderRadius: 10, padding: "12px 16px" }}>
-                  <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4 }}>Mismatched Model</div>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: embeddingHealth.mismatchedModel > 0 ? "#f59e0b" : "#34d399", fontFamily: "var(--font-mono)" }}>
+                <div style={{ background: "var(--bg-overlay-light)", border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "12px 16px" }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Mismatched Model</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: embeddingHealth.mismatchedModel > 0 ? "var(--warning)" : "var(--emerald)", fontFamily: "var(--font-mono)" }}>
                     {embeddingHealth.mismatchedModel}
                   </div>
                 </div>
               </div>
               {embeddingHealth.missingEmbedding > 0 && (
-                <div style={{ marginTop: 12, padding: "8px 12px", background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.2)", borderRadius: 8, fontSize: 12, color: "#f59e0b", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--warning-bg-subtle)", border: "1px solid var(--warning-border)", borderRadius: 8, fontSize: 12, color: "var(--warning)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <span>{embeddingHealth.missingEmbedding} memories missing embeddings</span>
                   <button
                     onClick={() => reembedMutation.mutate()}
@@ -450,11 +450,11 @@ export function Settings() {
                       padding: "4px 12px",
                       fontSize: 11,
                       fontWeight: 600,
-                      border: "1px solid rgba(245, 158, 11, 0.4)",
+                      border: "1px solid var(--warning-border-strong)",
                       borderRadius: 6,
                       cursor: reembedMutation.isPending ? "wait" : "pointer",
-                      background: "rgba(245, 158, 11, 0.15)",
-                      color: "#f59e0b",
+                      background: "var(--warning-bg)",
+                      color: "var(--warning)",
                       fontFamily: "var(--font-mono)",
                       display: "inline-flex",
                       alignItems: "center",
@@ -474,8 +474,8 @@ export function Settings() {
             <div
               key={group}
               style={{
-                background: "#0c0c1d",
-                border: "1px solid #16163a",
+                background: "var(--bg-surface)",
+                border: "1px solid var(--border-subtle)",
                 borderRadius: 12,
                 padding: 20,
                 marginBottom: 16,
@@ -485,7 +485,7 @@ export function Settings() {
                 style={{
                   fontSize: 13,
                   fontWeight: 600,
-                  color: "#22d3ee",
+                  color: "var(--cyan)",
                   textTransform: "uppercase",
                   letterSpacing: "0.06em",
                   marginBottom: 16,
@@ -510,10 +510,10 @@ export function Settings() {
               {mutation.isPending ? "Saving..." : "Save"}
             </button>
             {mutation.isSuccess && (
-              <span style={{ color: "#4ade80", fontSize: 13 }}>Saved</span>
+              <span style={{ color: "var(--green)", fontSize: 13 }}>Saved</span>
             )}
             {mutation.isError && (
-              <span style={{ color: "#f87171", fontSize: 13 }}>
+              <span style={{ color: "var(--red)", fontSize: 13 }}>
                 Error: {(mutation.error as Error).message}
               </span>
             )}
@@ -527,8 +527,8 @@ export function Settings() {
           {/* Export Section */}
           <div
             style={{
-              background: "#0c0c1d",
-              border: "1px solid #16163a",
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-subtle)",
               borderRadius: 12,
               padding: 24,
             }}
@@ -537,7 +537,7 @@ export function Settings() {
               style={{
                 fontSize: 13,
                 fontWeight: 600,
-                color: "#22d3ee",
+                color: "var(--cyan)",
                 textTransform: "uppercase",
                 letterSpacing: "0.06em",
                 marginBottom: 12,
@@ -546,7 +546,7 @@ export function Settings() {
             >
               Export
             </div>
-            <p style={{ color: "#a0a0be", fontSize: 13, marginBottom: 16 }}>
+            <p style={{ color: "var(--text-secondary-alt)", fontSize: 13, marginBottom: 16 }}>
               Download a full JSON backup of all memories, entities, and settings.
             </p>
             <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
@@ -560,7 +560,7 @@ export function Settings() {
                 {exporting ? "Exporting..." : "Export Data"}
               </button>
               {exportError && (
-                <span style={{ color: "#f87171", fontSize: 13 }}>
+                <span style={{ color: "var(--red)", fontSize: 13 }}>
                   Error: {exportError}
                 </span>
               )}
@@ -579,8 +579,8 @@ export function Settings() {
           {/* Import Section */}
           <div
             style={{
-              background: "#0c0c1d",
-              border: "1px solid #16163a",
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-subtle)",
               borderRadius: 12,
               padding: 24,
             }}
@@ -589,7 +589,7 @@ export function Settings() {
               style={{
                 fontSize: 13,
                 fontWeight: 600,
-                color: "#22d3ee",
+                color: "var(--cyan)",
                 textTransform: "uppercase",
                 letterSpacing: "0.06em",
                 marginBottom: 12,
@@ -598,7 +598,7 @@ export function Settings() {
             >
               Import
             </div>
-            <p style={{ color: "#a0a0be", fontSize: 13, marginBottom: 16 }}>
+            <p style={{ color: "var(--text-secondary-alt)", fontSize: 13, marginBottom: 16 }}>
               Bulk import memories from text.
             </p>
 
@@ -630,9 +630,9 @@ export function Settings() {
                 width: "100%",
                 padding: 16,
                 borderRadius: 12,
-                border: "1px solid #16163a",
-                background: "#0e0e22",
-                color: "#e8e8f4",
+                border: "1px solid var(--border-subtle)",
+                background: "var(--bg-surface-hover)",
+                color: "var(--text-primary-alt)",
                 fontFamily: "var(--font-mono)",
                 fontSize: 13,
                 resize: "vertical",
@@ -641,11 +641,11 @@ export function Settings() {
                 transition: "border-color 0.2s, box-shadow 0.2s",
               }}
               onFocus={(e) => {
-                e.currentTarget.style.borderColor = "#22d3ee";
-                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(34, 211, 238, 0.15)";
+                e.currentTarget.style.borderColor = "var(--cyan)";
+                e.currentTarget.style.boxShadow = "var(--glow-cyan-focus-strong)";
               }}
               onBlur={(e) => {
-                e.currentTarget.style.borderColor = "#16163a";
+                e.currentTarget.style.borderColor = "var(--border-subtle)";
                 e.currentTarget.style.boxShadow = "none";
               }}
             />
@@ -662,14 +662,14 @@ export function Settings() {
               </button>
 
               {importMutation.isSuccess && (
-                <span style={{ color: "#4ade80", fontSize: 13 }}>
+                <span style={{ color: "var(--green)", fontSize: 13 }}>
                   Imported {importMutation.data.imported} memories
                   {importMutation.data.failed > 0 && ` (${importMutation.data.failed} failed)`}
                 </span>
               )}
 
               {importMutation.isError && (
-                <span style={{ color: "#f87171", fontSize: 13 }}>
+                <span style={{ color: "var(--red)", fontSize: 13 }}>
                   Error: {(importMutation.error as Error).message}
                 </span>
               )}

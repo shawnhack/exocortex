@@ -45,7 +45,7 @@ export function MemoryCard({
           style={{
             fontFamily: "var(--font-mono)",
             fontSize: 11,
-            color: "#22d3ee",
+            color: "var(--cyan)",
             letterSpacing: "0.02em",
             opacity: 0.8,
           }}
@@ -55,7 +55,7 @@ export function MemoryCard({
         <span
           style={{
             fontSize: 11,
-            color: "#8080a0",
+            color: "var(--text-muted)",
             fontFamily: "var(--font-mono)",
           }}
         >
@@ -67,7 +67,7 @@ export function MemoryCard({
       <div
         data-testid="memory-card-content"
         style={{
-          color: "#d0d0e0",
+          color: "var(--text-body)",
           lineHeight: 1.65,
           whiteSpace: "pre-wrap",
           overflowWrap: "anywhere",
@@ -88,7 +88,7 @@ export function MemoryCard({
           style={{
             height: 2,
             borderRadius: 1,
-            background: "#16163a",
+            background: "var(--border-subtle)",
             overflow: "hidden",
             marginTop: 12,
           }}
@@ -103,7 +103,7 @@ export function MemoryCard({
               height: "100%",
               width: `${Math.min(score * 100, 100)}%`,
               borderRadius: 1,
-              background: "linear-gradient(90deg, #06b6d4, #22d3ee)",
+              background: "linear-gradient(90deg, var(--cyan-dark), var(--cyan))",
               transition: "width 0.4s ease-out",
               boxShadow: "0 0 6px rgba(34, 211, 238, 0.2)",
             }}
@@ -128,9 +128,9 @@ export function MemoryCard({
               key={tag}
               onClick={onTagClick ? (e) => { e.preventDefault(); e.stopPropagation(); onTagClick(tag); } : undefined}
               style={{
-                background: factColor?.bg ?? "rgba(34, 211, 238, 0.08)",
-                color: factColor?.color ?? "#22d3ee",
-                border: `1px solid ${factColor?.border ?? "rgba(34, 211, 238, 0.12)"}`,
+                background: factColor?.bg ?? "var(--cyan-bg-tag)",
+                color: factColor?.color ?? "var(--cyan)",
+                border: `1px solid ${factColor?.border ?? "var(--violet-dim)"}`,
                 padding: "1px 9px",
                 borderRadius: 20,
                 fontSize: 10,
@@ -164,7 +164,7 @@ export function MemoryCard({
         <span
           style={{
             fontSize: 10,
-            color: "#8080a0",
+            color: "var(--text-muted)",
             marginLeft: memory.tier ? 0 : "auto",
             fontFamily: "var(--font-mono)",
             letterSpacing: "0.02em",
@@ -181,8 +181,8 @@ export function MemoryCard({
   const cardStyle = {
     flex: 1,
     minWidth: 0,
-    background: selected ? "rgba(34, 211, 238, 0.05)" : "#0c0c1d",
-    border: `1px solid ${selected ? "rgba(34, 211, 238, 0.35)" : "#16163a"}`,
+    background: selected ? "var(--cyan-bg-selected)" : "var(--bg-surface)",
+    border: `1px solid ${selected ? "var(--cyan-selected-border)" : "var(--border-subtle)"}`,
     borderRadius: 10,
     padding: 16,
     marginBottom: 8,
@@ -197,17 +197,17 @@ export function MemoryCard({
 
   const handleMouseEnter = (e: React.MouseEvent<HTMLElement>) => {
     if (!selected) {
-      e.currentTarget.style.borderColor = "rgba(34, 211, 238, 0.35)";
-      e.currentTarget.style.boxShadow = "0 0 20px rgba(34, 211, 238, 0.06), 0 0 60px rgba(34, 211, 238, 0.02)";
-      e.currentTarget.style.background = "#0e0e22";
+      e.currentTarget.style.borderColor = "var(--cyan-selected-border)";
+      e.currentTarget.style.boxShadow = "var(--glow-cyan-hover)";
+      e.currentTarget.style.background = "var(--bg-surface-hover)";
     }
   };
 
   const handleMouseLeave = (e: React.MouseEvent<HTMLElement>) => {
     if (!selected) {
-      e.currentTarget.style.borderColor = "#16163a";
+      e.currentTarget.style.borderColor = "var(--border-subtle)";
       e.currentTarget.style.boxShadow = "none";
-      e.currentTarget.style.background = "#0c0c1d";
+      e.currentTarget.style.background = "var(--bg-surface)";
     }
   };
 
@@ -256,8 +256,8 @@ export function MemoryCard({
             width: 20,
             height: 20,
             borderRadius: 6,
-            border: `2px solid ${selected ? "#22d3ee" : "#16163a"}`,
-            background: selected ? "#22d3ee" : "transparent",
+            border: `2px solid ${selected ? "var(--cyan)" : "var(--border-subtle)"}`,
+            background: selected ? "var(--cyan)" : "transparent",
             transition: "all 0.2s",
             display: "flex",
             alignItems: "center",
@@ -265,7 +265,7 @@ export function MemoryCard({
           }}
         >
           {selected && (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--black)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
             </svg>
           )}

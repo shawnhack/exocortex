@@ -45,7 +45,7 @@ export function Trash() {
   return (
     <div>
       <h1>Trash</h1>
-      <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
+      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24 }}>
         Archived and superseded memories
       </p>
 
@@ -57,7 +57,7 @@ export function Trash() {
       )}
 
       {error && (
-        <p style={{ color: "#f87171", fontSize: 14 }}>
+        <p style={{ color: "var(--red)", fontSize: 14 }}>
           Error: {(error as Error).message}
         </p>
       )}
@@ -71,7 +71,7 @@ export function Trash() {
 
       {data && data.results.length > 0 && (
         <div>
-          <p style={{ color: "#8080a0", fontSize: 13, fontFamily: "var(--font-mono)", marginBottom: 12 }}>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, fontFamily: "var(--font-mono)", marginBottom: 12 }}>
             {data.count} item{data.count !== 1 ? "s" : ""}
           </p>
 
@@ -79,8 +79,8 @@ export function Trash() {
             <div
               key={memory.id}
               style={{
-                background: "#0c0c1d",
-                border: "1px solid #16163a",
+                background: "var(--bg-surface)",
+                border: "1px solid var(--border-subtle)",
                 borderRadius: 10,
                 padding: 16,
                 marginBottom: 8,
@@ -96,21 +96,21 @@ export function Trash() {
                   style={{
                     fontFamily: "var(--font-mono)",
                     fontSize: 11,
-                    color: "#22d3ee",
+                    color: "var(--cyan)",
                     letterSpacing: "0.02em",
                     opacity: 0.8,
                   }}
                 >
                   {memory.id.slice(0, 13)}
                 </Link>
-                <span style={{ fontSize: 11, color: "#8080a0", fontFamily: "var(--font-mono)" }}>
+                <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
                   {timeAgo(memory.updated_at)}
                 </span>
               </div>
 
               <div
                 style={{
-                  color: "#d0d0e0",
+                  color: "var(--text-body)",
                   lineHeight: 1.65,
                   whiteSpace: "pre-wrap",
                   display: "-webkit-box",
@@ -157,7 +157,7 @@ export function Trash() {
             <button className="btn-ghost" disabled={data.results.length < limit} onClick={() => setPage((p) => p + 1)}>
               Next
             </button>
-            <span style={{ color: "#8080a0", fontSize: 12, fontFamily: "var(--font-mono)" }}>
+            <span style={{ color: "var(--text-muted)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
               Page {page + 1}
             </span>
           </div>

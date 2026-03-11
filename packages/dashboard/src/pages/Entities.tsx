@@ -86,7 +86,7 @@ export function Entities() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
           <div>
             <h1>Entities</h1>
-            <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 20 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 20 }}>
               Extracted knowledge graph nodes
             </p>
           </div>
@@ -133,7 +133,7 @@ export function Entities() {
 
       <div style={{ flex: 1, overflowY: "auto", margin: "0 -40px", padding: "0 40px" }}>
       {selectMode && (
-        <p style={{ color: "#8080a0", fontSize: 12, marginBottom: 12, fontFamily: "var(--font-mono)" }}>
+        <p style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 12, fontFamily: "var(--font-mono)" }}>
           Click to select. Shift+click for range. Esc to cancel.
         </p>
       )}
@@ -146,7 +146,7 @@ export function Entities() {
       )}
 
       {error && (
-        <p style={{ color: "#f87171", fontSize: 14 }}>
+        <p style={{ color: "var(--red)", fontSize: 14 }}>
           Error: {(error as Error).message}
         </p>
       )}
@@ -162,7 +162,7 @@ export function Entities() {
       <div style={{ display: "grid", gap: 10, marginBottom: selectMode ? 80 : 0 }}>
         {data?.results.map((entity, idx) => {
           const entityTags = entity.tags ?? [];
-          const borderColor = entityTags.length > 0 ? tagColor(entityTags[0]) : "#16163a";
+          const borderColor = entityTags.length > 0 ? tagColor(entityTags[0]) : "var(--border-subtle)";
           const selected = selectedIds.has(entity.id);
           const CardWrapper = selectMode ? "div" : Link;
           const cardProps = selectMode
@@ -175,9 +175,9 @@ export function Entities() {
             >
               <div
                 style={{
-                  background: selected ? "rgba(34, 211, 238, 0.05)" : "#0c0c1d",
-                  border: `1px solid ${selected ? "rgba(34, 211, 238, 0.35)" : "#16163a"}`,
-                  borderLeft: `3px solid ${selected ? "#22d3ee" : borderColor}`,
+                  background: selected ? "var(--cyan-bg-selected)" : "var(--bg-surface)",
+                  border: `1px solid ${selected ? "var(--cyan-selected-border)" : "var(--border-subtle)"}`,
+                  borderLeft: `3px solid ${selected ? "var(--cyan)" : borderColor}`,
                   borderRadius: 10,
                   padding: "14px 16px",
                   display: "flex",
@@ -195,8 +195,8 @@ export function Entities() {
                         width: 20,
                         height: 20,
                         borderRadius: 6,
-                        border: `2px solid ${selected ? "#22d3ee" : "#16163a"}`,
-                        background: selected ? "#22d3ee" : "transparent",
+                        border: `2px solid ${selected ? "var(--cyan)" : "var(--border-subtle)"}`,
+                        background: selected ? "var(--cyan)" : "transparent",
                         transition: "all 0.2s",
                         display: "flex",
                         alignItems: "center",
@@ -205,20 +205,20 @@ export function Entities() {
                       }}
                     >
                       {selected && (
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--black)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
                         </svg>
                       )}
                     </div>
                   )}
                   <div>
-                    <span style={{ fontWeight: 600, color: "#e8e8f4", fontSize: 14 }}>
+                    <span style={{ fontWeight: 600, color: "var(--text-primary-alt)", fontSize: 14 }}>
                       {entity.name}
                     </span>
                     {entity.aliases.length > 0 && (
                       <span
                         style={{
-                          color: "#8080a0",
+                          color: "var(--text-muted)",
                           fontSize: 12,
                           marginLeft: 8,
                           fontFamily: "var(--font-mono)",
@@ -250,7 +250,7 @@ export function Entities() {
                       );
                     })
                   ) : (
-                    <span style={{ color: "#5a5a78", fontSize: 11, fontStyle: "italic" }}>
+                    <span style={{ color: "var(--text-faint)", fontSize: 11, fontStyle: "italic" }}>
                       no tags
                     </span>
                   )}
@@ -269,14 +269,14 @@ export function Entities() {
             bottom: 24,
             left: "50%",
             transform: "translateX(-50%)",
-            background: "#0c0c1d",
-            border: "1px solid rgba(34, 211, 238, 0.3)",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--cyan-border)",
             borderRadius: 14,
             padding: "10px 20px",
             display: "flex",
             alignItems: "center",
             gap: 16,
-            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(34, 211, 238, 0.08)",
+            boxShadow: "var(--shadow-heavy), var(--glow-cyan-subtle)",
             zIndex: 100,
             animation: "fadeIn 0.2s ease-out",
           }}
@@ -285,7 +285,7 @@ export function Entities() {
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 13,
-              color: selectedIds.size > 0 ? "#67e8f9" : "#8080a0",
+              color: selectedIds.size > 0 ? "var(--cyan-light)" : "var(--text-muted)",
               fontWeight: 600,
               minWidth: 90,
             }}
@@ -293,7 +293,7 @@ export function Entities() {
             {selectedIds.size} selected
           </span>
 
-          <div style={{ width: 1, height: 20, background: "#16163a" }} />
+          <div style={{ width: 1, height: 20, background: "var(--border-subtle)" }} />
 
           <button
             className="btn-ghost btn-sm"
@@ -318,7 +318,7 @@ export function Entities() {
             {deleting ? "Deleting..." : "Delete"}
           </button>
 
-          <div style={{ width: 1, height: 20, background: "#16163a" }} />
+          <div style={{ width: 1, height: 20, background: "var(--border-subtle)" }} />
 
           <button
             className="btn-ghost btn-sm"
@@ -327,7 +327,7 @@ export function Entities() {
               setSelectedIds(new Set());
               lastClickedIdx.current = null;
             }}
-            style={{ color: "#8080a0" }}
+            style={{ color: "var(--text-muted)" }}
           >
             Cancel
           </button>

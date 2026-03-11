@@ -325,7 +325,7 @@ export function Search() {
       {/* Sticky header — negative margin extends into <main> padding so it sticks flush at top */}
       <div ref={stickyRef} style={{ flexShrink: 0, zIndex: 10, background: "var(--bg-root, #06060e)", margin: "-32px -40px 0", padding: "32px 40px 4px" }}>
         <h1>Memories</h1>
-        <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
+        <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24 }}>
           Search, browse, and manage your second brain
         </p>
 
@@ -340,12 +340,12 @@ export function Search() {
             }}
             style={{
               background: !query && filterTags.length === 0 && !filterTier && activeFilterCount === 0
-                ? "rgba(34, 211, 238, 0.2)"
-                : "rgba(34, 211, 238, 0.04)",
+                ? "var(--cyan-border-dim)"
+                : "var(--cyan-bg-faint)",
               color: !query && filterTags.length === 0 && !filterTier && activeFilterCount === 0
-                ? "#22d3ee"
+                ? "var(--cyan)"
                 : "rgba(34, 211, 238, 0.6)",
-              border: `1px solid ${!query && filterTags.length === 0 && !filterTier && activeFilterCount === 0 ? "rgba(34, 211, 238, 0.55)" : "rgba(34, 211, 238, 0.15)"}`,
+              border: `1px solid ${!query && filterTags.length === 0 && !filterTier && activeFilterCount === 0 ? "var(--cyan-glow-subtle)" : "var(--cyan-bg)"}`,
               borderRadius: 20,
               padding: "4px 14px",
               fontSize: 12,
@@ -360,11 +360,11 @@ export function Search() {
             Recent
           </button>
           {([
-            { tier: "episodic", label: "Episodic", color: "#fbbf24" },
-            { tier: "semantic", label: "Semantic", color: "#a78bfa" },
-            { tier: "procedural", label: "Procedural", color: "#34d399" },
-            { tier: "reference", label: "Reference", color: "#38bdf8" },
-            { tier: "working", label: "Working", color: "#8080a0" },
+            { tier: "episodic", label: "Episodic", color: "var(--amber)" },
+            { tier: "semantic", label: "Semantic", color: "var(--purple)" },
+            { tier: "procedural", label: "Procedural", color: "var(--emerald)" },
+            { tier: "reference", label: "Reference", color: "var(--sky)" },
+            { tier: "working", label: "Working", color: "var(--text-muted)" },
           ] as const).map((f) => {
             const active = filterTier === f.tier;
             return (
@@ -397,13 +397,13 @@ export function Search() {
         {/* Active tag filters */}
         {filterTags.length > 0 && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
-            <span style={{ fontSize: 12, color: "#8080a0", marginRight: 4 }}>Filtered by:</span>
+            <span style={{ fontSize: 12, color: "var(--text-muted)", marginRight: 4 }}>Filtered by:</span>
             {filterTags.map((tag) => (
               <span
                 key={tag}
                 style={{
-                  background: "rgba(34, 211, 238, 0.25)",
-                  color: "#a5f3fc",
+                  background: "var(--cyan-bg-hover)",
+                  color: "var(--cyan-lighter)",
                   padding: "3px 10px",
                   borderRadius: 20,
                   fontSize: 12,
@@ -499,8 +499,8 @@ export function Search() {
             Filters
             {activeFilterCount > 0 && (
               <span style={{
-                background: "#22d3ee",
-                color: "#000",
+                background: "var(--cyan)",
+                color: "var(--black)",
                 borderRadius: 10,
                 padding: "1px 6px",
                 fontSize: 10,
@@ -517,7 +517,7 @@ export function Search() {
         {/* Result count bar */}
         {hasData && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingBottom: 4 }}>
-            <p style={{ color: "#8080a0", fontSize: 13, fontFamily: "var(--font-mono)", margin: 0 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, fontFamily: "var(--font-mono)", margin: 0 }}>
               {totalCount} result{totalCount !== 1 ? "s" : ""}{hasNext ? "+" : ""}
             </p>
             <div style={{ display: "flex", gap: 6 }}>
@@ -550,8 +550,8 @@ export function Search() {
       {showFilters && (
         <div
           style={{
-            background: "#0c0c1d",
-            border: "1px solid #16163a",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
             borderRadius: 10,
             padding: 16,
             marginBottom: 16,
@@ -563,7 +563,7 @@ export function Search() {
           }}
         >
           <div style={{ minWidth: 140 }}>
-            <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
               Content Type
             </div>
             <select
@@ -580,7 +580,7 @@ export function Search() {
             </select>
           </div>
           <div style={{ minWidth: 140 }}>
-            <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
               Tier
             </div>
             <select
@@ -598,7 +598,7 @@ export function Search() {
           </div>
           {namespacesData && namespacesData.namespaces.length > 0 && (
             <div style={{ minWidth: 140 }}>
-              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
                 Namespace
               </div>
               <select
@@ -614,7 +614,7 @@ export function Search() {
             </div>
           )}
           <div style={{ minWidth: 140 }}>
-            <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
               After
             </div>
             <input
@@ -625,7 +625,7 @@ export function Search() {
             />
           </div>
           <div style={{ minWidth: 140 }}>
-            <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
               Before
             </div>
             <input
@@ -636,8 +636,8 @@ export function Search() {
             />
           </div>
           <div style={{ minWidth: 160 }}>
-            <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
-              Min Importance {filterMinImportance && <span style={{ color: "#22d3ee", fontFamily: "var(--font-mono)" }}>{filterMinImportance}</span>}
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+              Min Importance {filterMinImportance && <span style={{ color: "var(--cyan)", fontFamily: "var(--font-mono)" }}>{filterMinImportance}</span>}
             </div>
             <input
               type="range"
@@ -671,7 +671,7 @@ export function Search() {
                 params.delete("namespace");
                 setSearchParams(params);
               }}
-              style={{ color: "#8080a0" }}
+              style={{ color: "var(--text-muted)" }}
             >
               Clear
             </button>
@@ -683,15 +683,15 @@ export function Search() {
       {showNewForm && (
         <div
           style={{
-            background: "#0c0c1d",
-            border: "1px solid rgba(34, 211, 238, 0.3)",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--cyan-border)",
             borderRadius: 12,
             padding: 20,
             marginBottom: 20,
             animation: "fadeIn 0.2s ease-out",
           }}
         >
-          <div style={{ fontSize: 11, color: "#22d3ee", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ fontSize: 11, color: "var(--cyan)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
@@ -704,10 +704,10 @@ export function Search() {
             rows={4}
             style={{
               width: "100%",
-              background: "#06060e",
-              border: "1px solid #16163a",
+              background: "var(--bg-deep)",
+              border: "1px solid var(--border-subtle)",
               borderRadius: 8,
-              color: "#d0d0e0",
+              color: "var(--text-body)",
               padding: 14,
               fontSize: 14,
               lineHeight: 1.7,
@@ -717,12 +717,12 @@ export function Search() {
               transition: "border-color 0.2s",
               marginBottom: 12,
             }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = "var(--cyan)"; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
           />
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
             <div style={{ minWidth: 120 }}>
-              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>Type</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>Type</div>
               <select value={newContentType} onChange={(e) => setNewContentType(e.target.value)} style={{ padding: "6px 10px", fontSize: 12 }}>
                 <option value="text">Text</option>
                 <option value="note">Note</option>
@@ -731,9 +731,9 @@ export function Search() {
               </select>
             </div>
             <div style={{ minWidth: 160 }}>
-              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, display: "flex", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600, display: "flex", justifyContent: "space-between" }}>
                 <span>Importance</span>
-                <span style={{ color: "#22d3ee", fontFamily: "var(--font-mono)" }}>{newImportance.toFixed(1)}</span>
+                <span style={{ color: "var(--cyan)", fontFamily: "var(--font-mono)" }}>{newImportance.toFixed(1)}</span>
               </div>
               <input
                 type="range"
@@ -757,7 +757,7 @@ export function Search() {
           </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
             <div style={{ minWidth: 280, flex: 1 }}>
-              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>
                 Source URI
               </div>
               <input
@@ -767,10 +767,10 @@ export function Search() {
                 placeholder="Optional source URI..."
                 style={{
                   width: "100%",
-                  background: "#06060e",
-                  border: "1px solid #16163a",
+                  background: "var(--bg-deep)",
+                  border: "1px solid var(--border-subtle)",
                   borderRadius: 6,
-                  color: "#d0d0e0",
+                  color: "var(--text-body)",
                   padding: "6px 10px",
                   fontSize: 12,
                   outline: "none",
@@ -778,7 +778,7 @@ export function Search() {
               />
             </div>
             <div style={{ minWidth: 180, flex: 1 }}>
-              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>
                 Model
               </div>
               <input
@@ -788,10 +788,10 @@ export function Search() {
                 placeholder="gpt-5"
                 style={{
                   width: "100%",
-                  background: "#06060e",
-                  border: "1px solid #16163a",
+                  background: "var(--bg-deep)",
+                  border: "1px solid var(--border-subtle)",
                   borderRadius: 6,
-                  color: "#d0d0e0",
+                  color: "var(--text-body)",
                   padding: "6px 10px",
                   fontSize: 12,
                   outline: "none",
@@ -799,7 +799,7 @@ export function Search() {
               />
             </div>
             <div style={{ minWidth: 180, flex: 1 }}>
-              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>
                 Provider
               </div>
               <input
@@ -809,10 +809,10 @@ export function Search() {
                 placeholder="openai"
                 style={{
                   width: "100%",
-                  background: "#06060e",
-                  border: "1px solid #16163a",
+                  background: "var(--bg-deep)",
+                  border: "1px solid var(--border-subtle)",
                   borderRadius: 6,
-                  color: "#d0d0e0",
+                  color: "var(--text-body)",
                   padding: "6px 10px",
                   fontSize: 12,
                   outline: "none",
@@ -827,8 +827,8 @@ export function Search() {
                 <span
                   key={tag}
                   style={{
-                    background: "rgba(34, 211, 238, 0.15)",
-                    color: "#22d3ee",
+                    background: "var(--cyan-bg)",
+                    color: "var(--cyan)",
                     padding: "3px 10px",
                     borderRadius: 20,
                     fontSize: 12,
@@ -858,10 +858,10 @@ export function Search() {
                 }}
                 placeholder="Add tag..."
                 style={{
-                  background: "#06060e",
-                  border: "1px solid #16163a",
+                  background: "var(--bg-deep)",
+                  border: "1px solid var(--border-subtle)",
                   borderRadius: 6,
-                  color: "#d0d0e0",
+                  color: "var(--text-body)",
                   padding: "5px 12px",
                   fontSize: 12,
                   flex: 1,
@@ -906,7 +906,7 @@ export function Search() {
 
       {/* Error */}
       {error && (
-        <p style={{ color: "#f87171", fontSize: 14 }}>
+        <p style={{ color: "var(--red)", fontSize: 14 }}>
           Error: {(error as Error).message}
         </p>
       )}
@@ -1022,21 +1022,21 @@ export function Search() {
                       width: 3,
                       height: 20,
                       borderRadius: 2,
-                      background: "linear-gradient(180deg, #22d3ee, #06b6d4)",
+                      background: "linear-gradient(180deg, var(--cyan), var(--cyan-dark))",
                     }}
                   />
                   <span
                     style={{
                       fontSize: 13,
                       fontWeight: 600,
-                      color: "#a0a0be",
+                      color: "var(--text-secondary-alt)",
                       fontFamily: "var(--font-mono)",
                     }}
                   >
                     {formatDate(date)}
                   </span>
                 </div>
-                <div style={{ paddingLeft: 15, borderLeft: "1px solid #16163a" }}>
+                <div style={{ paddingLeft: 15, borderLeft: "1px solid var(--border-subtle)" }}>
                   {(memories as any[]).map((memory) => (
                     <MemoryCard
                       key={memory.id}
@@ -1060,7 +1060,7 @@ export function Search() {
             </div>
           )}
           {!hasNext && allResults.length > 0 && allResults.length >= limit && (
-            <p style={{ textAlign: "center", color: "#606080", fontSize: 12, padding: 16, marginBottom: selectMode ? 80 : 0 }}>
+            <p style={{ textAlign: "center", color: "var(--text-disabled)", fontSize: 12, padding: 16, marginBottom: selectMode ? 80 : 0 }}>
               All {totalCount} memories loaded
             </p>
           )}
@@ -1073,14 +1073,14 @@ export function Search() {
                 bottom: 24,
                 left: "50%",
                 transform: "translateX(-50%)",
-                background: "#0c0c1d",
-                border: "1px solid rgba(34, 211, 238, 0.3)",
+                background: "var(--bg-surface)",
+                border: "1px solid var(--cyan-border)",
                 borderRadius: 14,
                 padding: "10px 20px",
                 display: "flex",
                 alignItems: "center",
                 gap: 16,
-                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(34, 211, 238, 0.08)",
+                boxShadow: "var(--shadow-heavy), var(--glow-cyan-subtle)",
                 zIndex: 100,
                 animation: "fadeIn 0.2s ease-out",
               }}
@@ -1089,7 +1089,7 @@ export function Search() {
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontSize: 13,
-                  color: selectedIds.size > 0 ? "#67e8f9" : "#8080a0",
+                  color: selectedIds.size > 0 ? "var(--cyan-light)" : "var(--text-muted)",
                   fontWeight: 600,
                   minWidth: 90,
                 }}
@@ -1097,7 +1097,7 @@ export function Search() {
                 {selectedIds.size} selected
               </span>
 
-              <div style={{ width: 1, height: 20, background: "#16163a" }} />
+              <div style={{ width: 1, height: 20, background: "var(--border-subtle)" }} />
 
               <button
                 className="btn-ghost btn-sm"
@@ -1145,10 +1145,10 @@ export function Search() {
                     placeholder="tag1, tag2"
                     autoFocus
                     style={{
-                      background: "#06060e",
-                      border: "1px solid #16163a",
+                      background: "var(--bg-deep)",
+                      border: "1px solid var(--border-subtle)",
                       borderRadius: 6,
-                      color: "#d0d0e0",
+                      color: "var(--text-body)",
                       padding: "4px 8px",
                       fontSize: 12,
                       width: 120,
@@ -1184,7 +1184,7 @@ export function Search() {
                     onChange={(e) => setBulkImportanceValue(Number(e.target.value))}
                     style={{ width: 80, height: 4, appearance: "none", WebkitAppearance: "none", background: `linear-gradient(90deg, #22d3ee ${bulkImportanceValue * 100}%, #16163a ${bulkImportanceValue * 100}%)`, borderRadius: 2, outline: "none", cursor: "pointer" }}
                   />
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#22d3ee", minWidth: 28 }}>{bulkImportanceValue.toFixed(2)}</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--cyan)", minWidth: 28 }}>{bulkImportanceValue.toFixed(2)}</span>
                   <button className="btn-primary btn-sm" onClick={handleBulkImportance} disabled={bulkingImportance}>
                     {bulkingImportance ? "..." : "Set"}
                   </button>
@@ -1194,7 +1194,7 @@ export function Search() {
                 </div>
               )}
 
-              <div style={{ width: 1, height: 20, background: "#16163a" }} />
+              <div style={{ width: 1, height: 20, background: "var(--border-subtle)" }} />
 
               <button
                 className="btn-ghost btn-sm"
@@ -1204,7 +1204,7 @@ export function Search() {
                   setShowBulkTagInput(false);
                   setShowBulkImportance(false);
                 }}
-                style={{ color: "#8080a0" }}
+                style={{ color: "var(--text-muted)" }}
               >
                 Cancel
               </button>

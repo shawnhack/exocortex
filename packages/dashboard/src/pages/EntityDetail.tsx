@@ -5,7 +5,7 @@ import { api } from "../api/client";
 import { MemoryCard } from "../components/MemoryCard";
 import { tagColor } from "../utils/tagColor";
 
-const DEFAULT_COLOR = "#16163a";
+const DEFAULT_COLOR = "var(--border-subtle)";
 
 function RelationshipGraph({
   entityName,
@@ -22,14 +22,14 @@ function RelationshipGraph({
   const cx = width / 2;
   const cy = height / 2;
   const radius = 155;
-  const centerColor = entityTags.length > 0 ? tagColor(entityTags[0]) : "#22d3ee";
+  const centerColor = entityTags.length > 0 ? tagColor(entityTags[0]) : "var(--cyan)";
 
   // Collect distinct tags for glow filters
   const allColors = new Set<string>();
   allColors.add(centerColor);
   for (const rel of relationships) {
     const relTags = (rel.entity as any).tags ?? [];
-    allColors.add(relTags.length > 0 ? tagColor(relTags[0]) : "#8080a0");
+    allColors.add(relTags.length > 0 ? tagColor(relTags[0]) : "var(--text-muted)");
   }
 
   return (
@@ -50,7 +50,7 @@ function RelationshipGraph({
 
       {/* Subtle grid */}
       <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-        <circle cx="10" cy="10" r="0.5" fill="#16163a" opacity="0.5" />
+        <circle cx="10" cy="10" r="0.5" fill="var(--border-subtle)" opacity="0.5" />
       </pattern>
       <rect width={width} height={height} fill="url(#grid)" rx="8" />
 
@@ -61,12 +61,12 @@ function RelationshipGraph({
         const y = cy + radius * Math.sin(angle);
         const isHovered = hoveredNode === rel.entity.id;
         const relTags = (rel.entity as any).tags ?? [];
-        const nodeColor = relTags.length > 0 ? tagColor(relTags[0]) : "#8080a0";
+        const nodeColor = relTags.length > 0 ? tagColor(relTags[0]) : "var(--text-muted)";
         return (
           <g key={`line-${rel.entity.id}`}>
             <line
               x1={cx} y1={cy} x2={x} y2={y}
-              stroke={isHovered ? nodeColor : "#16163a"}
+              stroke={isHovered ? nodeColor : "var(--border-subtle)"}
               strokeWidth={isHovered ? 2 : 1}
               strokeDasharray={isHovered ? "none" : "4 4"}
               style={{
@@ -83,7 +83,7 @@ function RelationshipGraph({
                   x={mx}
                   y={my - 7}
                   textAnchor="middle"
-                  fill={isHovered ? nodeColor : "#8080a0"}
+                  fill={isHovered ? nodeColor : "var(--text-muted)"}
                   fontSize={9}
                   fontFamily="var(--font-mono)"
                   style={{ transition: "fill 0.2s" }}
@@ -102,7 +102,7 @@ function RelationshipGraph({
         const x = cx + radius * Math.cos(angle);
         const y = cy + radius * Math.sin(angle);
         const relTags = (rel.entity as any).tags ?? [];
-        const nodeColor = relTags.length > 0 ? tagColor(relTags[0]) : "#8080a0";
+        const nodeColor = relTags.length > 0 ? tagColor(relTags[0]) : "var(--text-muted)";
         const isHovered = hoveredNode === rel.entity.id;
         const colorArr = [...allColors];
         const filterIdx = colorArr.indexOf(nodeColor);
@@ -116,7 +116,7 @@ function RelationshipGraph({
               <circle
                 cx={x} cy={y}
                 r={isHovered ? 32 : 28}
-                fill="#08081a"
+                fill="var(--bg-deep-alt)"
                 stroke={nodeColor}
                 strokeWidth={isHovered ? 2 : 1.5}
                 filter={isHovered && filterIdx >= 0 ? `url(#glow-${filterIdx})` : undefined}
@@ -137,7 +137,7 @@ function RelationshipGraph({
                 <text
                   x={x} y={y + 42}
                   textAnchor="middle"
-                  fill="#8080a0"
+                  fill="var(--text-muted)"
                   fontSize={8}
                   fontFamily="var(--font-mono)"
                 >
@@ -152,7 +152,7 @@ function RelationshipGraph({
       {/* Center node — always on top */}
       <circle
         cx={cx} cy={cy} r={40}
-        fill="#08081a"
+        fill="var(--bg-deep-alt)"
         stroke={centerColor}
         strokeWidth={2.5}
         filter={`url(#glow-${[...allColors].indexOf(centerColor)})`}
@@ -185,7 +185,7 @@ function RelationshipRow({
 }) {
   const [hovered, setHovered] = useState(false);
   const relTags = (rel.entity as any).tags ?? [];
-  const nodeColor = relTags.length > 0 ? tagColor(relTags[0]) : "#8080a0";
+  const nodeColor = relTags.length > 0 ? tagColor(relTags[0]) : "var(--text-muted)";
 
   return (
     <div
@@ -198,12 +198,12 @@ function RelationshipRow({
         padding: "8px 10px",
         fontSize: 13,
         borderRadius: 6,
-        background: hovered ? "rgba(34, 211, 238, 0.04)" : "transparent",
+        background: hovered ? "var(--cyan-bg-faint)" : "transparent",
         transition: "background 0.15s",
       }}
     >
       <span style={{
-        color: "#8080a0",
+        color: "var(--text-muted)",
         fontFamily: "var(--font-mono)",
         fontSize: 12,
         minWidth: 90,
@@ -211,7 +211,7 @@ function RelationshipRow({
       }}>
         {rel.direction === "outgoing" ? rel.relationship : ""}
       </span>
-      <span style={{ color: hovered ? nodeColor : "#8080a0", transition: "color 0.15s", fontSize: 11 }}>
+      <span style={{ color: hovered ? nodeColor : "var(--text-muted)", transition: "color 0.15s", fontSize: 11 }}>
         {rel.direction === "outgoing" ? "\u2192" : "\u2190"}
       </span>
       <Link
@@ -249,7 +249,7 @@ function RelationshipRow({
         </div>
       )}
       <span style={{
-        color: "#8080a0",
+        color: "var(--text-muted)",
         fontFamily: "var(--font-mono)",
         fontSize: 12,
         minWidth: 90,
@@ -327,11 +327,11 @@ function TagEditor({ tags, onSave, isPending }: { tags: string[]; onSave: (tags:
           disabled={isPending}
           style={{
             background: "transparent",
-            border: "1px solid #16163a",
+            border: "1px solid var(--border-subtle)",
             borderRadius: 20,
             padding: "4px 12px",
             fontSize: 12,
-            color: "#e8e8f4",
+            color: "var(--text-primary-alt)",
             outline: "none",
             width: 100,
           }}
@@ -380,7 +380,7 @@ export function EntityDetail() {
 
   if (error) {
     return (
-      <p style={{ color: "#f87171", fontSize: 14 }}>
+      <p style={{ color: "var(--red)", fontSize: 14 }}>
         Error: {(error as Error).message}
       </p>
     );
@@ -399,7 +399,7 @@ export function EntityDetail() {
         to="/entities"
         style={{
           fontSize: 13,
-          color: "#8080a0",
+          color: "var(--text-muted)",
           textDecoration: "none",
           display: "inline-flex",
           alignItems: "center",
@@ -407,8 +407,8 @@ export function EntityDetail() {
           marginBottom: 16,
           transition: "color 0.15s",
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = "#22d3ee"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = "#8080a0"; }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--cyan)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -419,8 +419,8 @@ export function EntityDetail() {
       {/* Entity header */}
       <div
         style={{
-          background: "#0c0c1d",
-          border: "1px solid #16163a",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
           borderLeft: `3px solid ${borderColor}`,
           borderRadius: 10,
           padding: 20,
@@ -439,16 +439,16 @@ export function EntityDetail() {
         />
 
         {entity.aliases.length > 0 && (
-          <p style={{ color: "#8080a0", fontSize: 13, fontFamily: "var(--font-mono)", marginTop: 12 }}>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, fontFamily: "var(--font-mono)", marginTop: 12 }}>
             Aliases: {entity.aliases.join(", ")}
           </p>
         )}
 
         <div style={{ display: "flex", gap: 16, marginTop: 12 }}>
-          <span style={{ fontSize: 12, color: "#8080a0", fontFamily: "var(--font-mono)" }}>
+          <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
             ID: {entity.id.slice(0, 13)}
           </span>
-          <span style={{ fontSize: 12, color: "#8080a0", fontFamily: "var(--font-mono)" }}>
+          <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
             Created: {new Date(entity.created_at).toLocaleDateString()}
           </span>
         </div>
@@ -458,21 +458,21 @@ export function EntityDetail() {
       {relationships.length > 0 && (
         <div style={{ marginBottom: 24, animation: "slideUp 0.3s ease-out 0.06s both" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
               <path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98" />
             </svg>
             <h2 style={{ margin: 0 }}>Relationships</h2>
           </div>
-          <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 12, fontFamily: "var(--font-mono)" }}>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 12, fontFamily: "var(--font-mono)" }}>
             {relationships.length} connection{relationships.length !== 1 ? "s" : ""}
           </p>
 
           {/* Relationship list */}
           <div
             style={{
-              background: "#0c0c1d",
-              border: "1px solid #16163a",
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-subtle)",
               borderRadius: 10,
               padding: "8px 10px",
               marginBottom: 16,
@@ -486,8 +486,8 @@ export function EntityDetail() {
           {/* SVG Graph */}
           <div
             style={{
-              background: "#08081a",
-              border: "1px solid #16163a",
+              background: "var(--bg-deep-alt)",
+              border: "1px solid var(--border-subtle)",
               borderRadius: 10,
               padding: 20,
               display: "flex",
@@ -506,13 +506,13 @@ export function EntityDetail() {
       {/* Linked memories */}
       <div style={{ animation: "slideUp 0.3s ease-out 0.12s both" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
           </svg>
           <h2 style={{ margin: 0 }}>Linked Memories</h2>
         </div>
-        <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 16, fontFamily: "var(--font-mono)" }}>
+        <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16, fontFamily: "var(--font-mono)" }}>
           {count} memor{count !== 1 ? "ies" : "y"} linked
         </p>
 

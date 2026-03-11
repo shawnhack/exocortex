@@ -147,10 +147,10 @@ export function Layout() {
       style={{
         width: "100%",
         height: "100%",
-        background: "linear-gradient(180deg, #08081a 0%, #06060e 100%)",
+        background: "linear-gradient(180deg, var(--bg-deep-alt) 0%, var(--bg-deep) 100%)",
         display: "flex",
         flexDirection: "column",
-        borderRight: "1px solid #16163a",
+        borderRight: "1px solid var(--border-subtle)",
         overflow: "hidden",
       }}
     >
@@ -197,7 +197,7 @@ export function Layout() {
                 fontWeight: 600,
                 fontSize: 18,
                 letterSpacing: "0.18em",
-                background: "linear-gradient(135deg, #67e8f9, #22d3ee)",
+                background: "linear-gradient(135deg, var(--cyan-light), var(--cyan))",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",
                 backgroundClip: "text",
@@ -212,7 +212,7 @@ export function Layout() {
                 fontFamily: "var(--font-mono)",
                 fontSize: 8,
                 letterSpacing: "0.18em",
-                color: "#8080a0",
+                color: "var(--text-muted)",
                 textTransform: "uppercase",
                 whiteSpace: "nowrap",
               }}
@@ -238,12 +238,12 @@ export function Layout() {
               padding: isCollapsed ? "10px 0" : "9px 14px",
               justifyContent: isCollapsed ? "center" : "flex-start",
               borderRadius: 8,
-              color: isActive ? "#e8e8f4" : "#a0a0be",
+              color: isActive ? "var(--text-primary-alt)" : "var(--text-secondary-alt)",
               textDecoration: "none",
               fontSize: 14,
               fontWeight: isActive ? 600 : 400,
-              background: isActive ? "rgba(34, 211, 238, 0.1)" : "transparent",
-              borderLeft: isCollapsed ? "none" : isActive ? "2px solid #22d3ee" : "2px solid transparent",
+              background: isActive ? "var(--cyan-bg-active)" : "transparent",
+              borderLeft: isCollapsed ? "none" : isActive ? "2px solid var(--cyan)" : "2px solid transparent",
               transition: "all 0.2s",
               position: "relative",
               whiteSpace: "nowrap",
@@ -260,7 +260,7 @@ export function Layout() {
       <div
         style={{
           padding: isCollapsed ? "12px 8px" : "12px 14px",
-          borderTop: "1px solid #16163a",
+          borderTop: "1px solid var(--border-subtle)",
           display: "flex",
           flexDirection: "column",
           alignItems: isCollapsed ? "center" : "flex-start",
@@ -272,9 +272,9 @@ export function Layout() {
           <button
             onClick={() => setCollapsed(!collapsed)}
             style={{
-              background: "rgba(34, 211, 238, 0.06)",
-              border: "1px solid #16163a",
-              color: "#a0a0be",
+              background: "var(--cyan-bg-subtle)",
+              border: "1px solid var(--border-subtle)",
+              color: "var(--text-secondary-alt)",
               cursor: "pointer",
               padding: collapsed ? "8px" : "7px 10px",
               borderRadius: 6,
@@ -287,12 +287,12 @@ export function Layout() {
               justifyContent: collapsed ? "center" : "flex-start",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "rgba(34, 211, 238, 0.3)";
-              e.currentTarget.style.background = "rgba(34, 211, 238, 0.1)";
+              e.currentTarget.style.borderColor = "var(--cyan-border)";
+              e.currentTarget.style.background = "var(--cyan-bg-active)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = "#16163a";
-              e.currentTarget.style.background = "rgba(34, 211, 238, 0.06)";
+              e.currentTarget.style.borderColor = "var(--border-subtle)";
+              e.currentTarget.style.background = "var(--cyan-bg-subtle)";
             }}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
@@ -323,7 +323,7 @@ export function Layout() {
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 10,
-              color: "#8080a0",
+              color: "var(--text-muted)",
               letterSpacing: "0.08em",
               padding: "0 10px",
             }}
@@ -392,7 +392,7 @@ export function Layout() {
             right: 0,
             width: 1,
             height: "100%",
-            background: "linear-gradient(180deg, #22d3ee, #06b6d4, #22d3ee)",
+            background: "linear-gradient(180deg, var(--cyan), var(--cyan-dark), var(--cyan))",
             backgroundSize: "100% 200%",
             animation: "breathe 6s ease infinite",
             zIndex: 2,

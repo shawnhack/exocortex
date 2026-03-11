@@ -153,13 +153,13 @@ export function MemoryDetail() {
 
   if (error)
     return (
-      <p style={{ color: "#f87171", fontSize: 14 }}>
+      <p style={{ color: "var(--red)", fontSize: 14 }}>
         Error: {(error as Error).message}
       </p>
     );
 
   if (!memory)
-    return <p style={{ color: "#8080a0" }}>Not found.</p>;
+    return <p style={{ color: "var(--text-muted)" }}>Not found.</p>;
 
   const fmtDate = (s: string) => {
     const normalized = s.includes("T") ? s : s.replace(" ", "T") + "Z";
@@ -216,7 +216,7 @@ export function MemoryDetail() {
     ? Object.entries(memory.metadata).filter(([key]) => !metadataHiddenKeys.has(key))
     : [];
 
-  const importanceColor = editImportance >= 0.8 ? "#f472b6" : editImportance >= 0.5 ? "#22d3ee" : editImportance >= 0.3 ? "#22d3ee" : "#8080a0";
+  const importanceColor = editImportance >= 0.8 ? "var(--rose)" : editImportance >= 0.5 ? "var(--cyan)" : editImportance >= 0.3 ? "var(--cyan)" : "var(--text-muted)";
 
   return (
     <div>
@@ -226,7 +226,7 @@ export function MemoryDetail() {
         style={{
           background: "none",
           border: "none",
-          color: "#8080a0",
+          color: "var(--text-muted)",
           cursor: "pointer",
           padding: 0,
           marginBottom: 20,
@@ -236,8 +236,8 @@ export function MemoryDetail() {
           gap: 4,
           transition: "color 0.15s",
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = "#22d3ee"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = "#8080a0"; }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--cyan)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -250,7 +250,7 @@ export function MemoryDetail() {
         style={{
           fontFamily: "var(--font-mono)",
           fontSize: 15,
-          color: "#22d3ee",
+          color: "var(--cyan)",
           fontWeight: 500,
           marginBottom: 20,
           animation: "slideUp 0.3s ease-out both",
@@ -262,8 +262,8 @@ export function MemoryDetail() {
       {/* Content card */}
       <div
         style={{
-          background: "#0c0c1d",
-          border: `1px solid ${isEditing ? "rgba(34, 211, 238, 0.3)" : "#16163a"}`,
+          background: "var(--bg-surface)",
+          border: `1px solid ${isEditing ? "var(--cyan-border)" : "var(--border-subtle)"}`,
           borderRadius: 12,
           padding: 24,
           marginBottom: 24,
@@ -278,9 +278,9 @@ export function MemoryDetail() {
               data-testid="memory-edit-button"
               onClick={startEditing}
               style={{
-                background: "rgba(34, 211, 238, 0.15)",
-                color: "#22d3ee",
-                border: "1px solid rgba(34, 211, 238, 0.3)",
+                background: "var(--cyan-bg)",
+                color: "var(--cyan)",
+                border: "1px solid var(--cyan-border)",
                 borderRadius: 6,
                 padding: "5px 14px",
                 fontSize: 12,
@@ -292,11 +292,11 @@ export function MemoryDetail() {
                 transition: "all 0.15s",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(34, 211, 238, 0.25)";
+                e.currentTarget.style.background = "var(--cyan-bg-hover)";
                 e.currentTarget.style.boxShadow = "0 0 12px rgba(34, 211, 238, 0.15)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(34, 211, 238, 0.15)";
+                e.currentTarget.style.background = "var(--cyan-bg)";
                 e.currentTarget.style.boxShadow = "none";
               }}
             >
@@ -314,7 +314,7 @@ export function MemoryDetail() {
             {/* Edit mode header */}
             <div style={{
               display: "flex", alignItems: "center", gap: 6, marginBottom: 12,
-              fontSize: 11, color: "#22d3ee", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em",
+              fontSize: 11, color: "var(--cyan)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em",
             }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -330,10 +330,10 @@ export function MemoryDetail() {
               style={{
                 width: "100%",
                 minHeight: 200,
-                background: "#06060e",
-                border: "1px solid #16163a",
+                background: "var(--bg-deep)",
+                border: "1px solid var(--border-subtle)",
                 borderRadius: 8,
-                color: "#d0d0e0",
+                color: "var(--text-body)",
                 padding: 14,
                 fontSize: 14,
                 lineHeight: 1.7,
@@ -343,18 +343,18 @@ export function MemoryDetail() {
                 outline: "none",
               }}
               onFocus={(e) => {
-                e.currentTarget.style.borderColor = "#22d3ee";
-                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(34, 211, 238, 0.12)";
+                e.currentTarget.style.borderColor = "var(--cyan)";
+                e.currentTarget.style.boxShadow = "var(--glow-cyan-focus)";
               }}
               onBlur={(e) => {
-                e.currentTarget.style.borderColor = "#16163a";
+                e.currentTarget.style.borderColor = "var(--border-subtle)";
                 e.currentTarget.style.boxShadow = "none";
               }}
             />
 
             <div style={{ marginTop: 16, display: "flex", gap: 12, flexWrap: "wrap" }}>
               <div style={{ minWidth: 260, flex: 1 }}>
-                <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 6, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
                   Source URI
                 </div>
                 <input
@@ -365,21 +365,21 @@ export function MemoryDetail() {
                   placeholder="Optional source URI..."
                   style={{
                     width: "100%",
-                    background: "#06060e",
-                    border: "1px solid #16163a",
+                    background: "var(--bg-deep)",
+                    border: "1px solid var(--border-subtle)",
                     borderRadius: 6,
-                    color: "#d0d0e0",
+                    color: "var(--text-body)",
                     padding: "6px 10px",
                     fontSize: 12,
                     outline: "none",
                     transition: "border-color 0.2s",
                   }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "var(--cyan)"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
                 />
               </div>
               <div style={{ minWidth: 170, flex: 1 }}>
-                <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 6, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
                   Model
                 </div>
                 <input
@@ -390,21 +390,21 @@ export function MemoryDetail() {
                   placeholder="gpt-5"
                   style={{
                     width: "100%",
-                    background: "#06060e",
-                    border: "1px solid #16163a",
+                    background: "var(--bg-deep)",
+                    border: "1px solid var(--border-subtle)",
                     borderRadius: 6,
-                    color: "#d0d0e0",
+                    color: "var(--text-body)",
                     padding: "6px 10px",
                     fontSize: 12,
                     outline: "none",
                     transition: "border-color 0.2s",
                   }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "var(--cyan)"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
                 />
               </div>
               <div style={{ minWidth: 170, flex: 1 }}>
-                <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 6, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
                   Provider
                 </div>
                 <input
@@ -415,24 +415,24 @@ export function MemoryDetail() {
                   placeholder="openai"
                   style={{
                     width: "100%",
-                    background: "#06060e",
-                    border: "1px solid #16163a",
+                    background: "var(--bg-deep)",
+                    border: "1px solid var(--border-subtle)",
                     borderRadius: 6,
-                    color: "#d0d0e0",
+                    color: "var(--text-body)",
                     padding: "6px 10px",
                     fontSize: 12,
                     outline: "none",
                     transition: "border-color 0.2s",
                   }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "var(--cyan)"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
                 />
               </div>
             </div>
 
             {/* Editable tags */}
             <div style={{ marginTop: 20 }}>
-              <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 8, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em" }}>
                 Tags
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
@@ -442,8 +442,8 @@ export function MemoryDetail() {
                     <span
                       key={tag}
                       style={{
-                        background: factColor?.bg ?? "rgba(34, 211, 238, 0.15)",
-                        color: factColor?.color ?? "#22d3ee",
+                        background: factColor?.bg ?? "var(--cyan-bg)",
+                        color: factColor?.color ?? "var(--cyan)",
                         padding: "4px 10px",
                         borderRadius: 20,
                         fontSize: 12,
@@ -481,10 +481,10 @@ export function MemoryDetail() {
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
                   placeholder="Add tag..."
                   style={{
-                    background: "#06060e",
-                    border: "1px solid #16163a",
+                    background: "var(--bg-deep)",
+                    border: "1px solid var(--border-subtle)",
                     borderRadius: 6,
-                    color: "#d0d0e0",
+                    color: "var(--text-body)",
                     padding: "5px 12px",
                     fontSize: 12,
                     flex: 1,
@@ -492,23 +492,23 @@ export function MemoryDetail() {
                     outline: "none",
                     transition: "border-color 0.2s",
                   }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = "#22d3ee"; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "var(--cyan)"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
                 />
                 <button
                   onClick={addTag}
                   style={{
-                    background: "rgba(34, 211, 238, 0.15)",
-                    color: "#22d3ee",
-                    border: "1px solid rgba(34, 211, 238, 0.3)",
+                    background: "var(--cyan-bg)",
+                    color: "var(--cyan)",
+                    border: "1px solid var(--cyan-border)",
                     borderRadius: 6,
                     padding: "5px 12px",
                     fontSize: 12,
                     cursor: "pointer",
                     transition: "all 0.15s",
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(34, 211, 238, 0.25)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(34, 211, 238, 0.15)"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--cyan-bg-hover)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "var(--cyan-bg)"; }}
                 >
                   Add
                 </button>
@@ -518,7 +518,7 @@ export function MemoryDetail() {
             {/* Importance with visual bar */}
             <div style={{ marginTop: 20 }}>
               <div style={{
-                fontSize: 11, color: "#8080a0", marginBottom: 8, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em",
+                fontSize: 11, color: "var(--text-muted)", marginBottom: 8, textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.05em",
                 display: "flex", justifyContent: "space-between", alignItems: "center",
               }}>
                 <span>Importance</span>
@@ -558,8 +558,8 @@ export function MemoryDetail() {
                   value={editImportance}
                   onChange={(e) => setEditImportance(Number(e.target.value))}
                   style={{
-                    background: "#06060e",
-                    border: "1px solid #16163a",
+                    background: "var(--bg-deep)",
+                    border: "1px solid var(--border-subtle)",
                     borderRadius: 6,
                     color: importanceColor,
                     padding: "4px 8px",
@@ -581,8 +581,8 @@ export function MemoryDetail() {
                 onClick={handleSave}
                 disabled={updateMutation.isPending}
                 style={{
-                  background: "#22d3ee",
-                  color: "#000",
+                  background: "var(--cyan)",
+                  color: "var(--black)",
                   border: "none",
                   borderRadius: 8,
                   padding: "8px 20px",
@@ -608,21 +608,21 @@ export function MemoryDetail() {
                 onClick={() => setIsEditing(false)}
                 style={{
                   background: "transparent",
-                  color: "#8080a0",
-                  border: "1px solid #16163a",
+                  color: "var(--text-muted)",
+                  border: "1px solid var(--border-subtle)",
                   borderRadius: 8,
                   padding: "8px 20px",
                   fontSize: 13,
                   cursor: "pointer",
                   transition: "all 0.15s",
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#8080a0"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#16163a"; }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--text-muted)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
               >
                 Cancel
               </button>
               {updateMutation.isError && (
-                <span style={{ color: "#f87171", fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ color: "var(--red)", fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
                   </svg>
@@ -637,7 +637,7 @@ export function MemoryDetail() {
             style={{
               whiteSpace: "pre-wrap",
               lineHeight: 1.7,
-              color: "#d0d0e0",
+              color: "var(--text-body)",
               overflowWrap: "anywhere",
               wordBreak: "break-word",
             }}
@@ -657,8 +657,8 @@ export function MemoryDetail() {
                 key={tag}
                 onClick={() => navigate(`/?tag=${encodeURIComponent(tag)}`)}
                 style={{
-                  background: factColor?.bg ?? "rgba(34, 211, 238, 0.15)",
-                  color: factColor?.color ?? "#22d3ee",
+                  background: factColor?.bg ?? "var(--cyan-bg)",
+                  color: factColor?.color ?? "var(--cyan)",
                   padding: "4px 14px",
                   borderRadius: 20,
                   fontSize: 12,
@@ -679,8 +679,8 @@ export function MemoryDetail() {
       {/* Metadata grid */}
       <div
         style={{
-          background: "#0c0c1d",
-          border: "1px solid #16163a",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
           borderRadius: 12,
           padding: 20,
           marginBottom: 32,
@@ -699,7 +699,7 @@ export function MemoryDetail() {
               <div
                 style={{
                   fontSize: 11,
-                  color: "#8080a0",
+                  color: "var(--text-muted)",
                   marginBottom: 2,
                   textTransform: "uppercase",
                   letterSpacing: "0.05em",
@@ -712,7 +712,7 @@ export function MemoryDetail() {
                 data-testid="memory-metadata-value"
                 style={{
                   fontSize: 13,
-                  color: "#e8e8f4",
+                  color: "var(--text-primary-alt)",
                   fontFamily: "var(--font-mono)",
                   overflowWrap: "anywhere",
                   wordBreak: "break-word",
@@ -729,8 +729,8 @@ export function MemoryDetail() {
       {filteredMetadataEntries.length > 0 && (
         <div
           style={{
-            background: "#0c0c1d",
-            border: "1px solid #16163a",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
             borderRadius: 12,
             padding: 20,
             marginBottom: 24,
@@ -738,7 +738,7 @@ export function MemoryDetail() {
           }}
         >
           <div style={{
-            fontSize: 11, color: "#8080a0", marginBottom: 12, textTransform: "uppercase",
+            fontSize: 11, color: "var(--text-muted)", marginBottom: 12, textTransform: "uppercase",
             fontWeight: 600, letterSpacing: "0.05em",
           }}>
             Metadata
@@ -746,12 +746,12 @@ export function MemoryDetail() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 32px" }}>
             {filteredMetadataEntries.map(([key, value]) => (
               <div key={key}>
-                <div style={{ fontSize: 11, color: "#8080a0", marginBottom: 2 }}>{key}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>{key}</div>
                 <div
                   data-testid="memory-metadata-value"
                   style={{
                     fontSize: 13,
-                    color: "#e8e8f4",
+                    color: "var(--text-primary-alt)",
                     fontFamily: "var(--font-mono)",
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
@@ -774,8 +774,8 @@ export function MemoryDetail() {
       {/* Danger zone */}
       <div
         style={{
-          background: "rgba(248, 113, 113, 0.05)",
-          border: "1px solid rgba(248, 113, 113, 0.15)",
+          background: "var(--red-bg-subtle)",
+          border: "1px solid var(--red-border-faint)",
           borderRadius: 12,
           padding: 20,
           animation: "slideUp 0.3s ease-out 0.16s both",
@@ -785,7 +785,7 @@ export function MemoryDetail() {
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: "#f87171",
+            color: "var(--red)",
             marginBottom: 10,
             textTransform: "uppercase",
             letterSpacing: "0.05em",
@@ -802,7 +802,7 @@ export function MemoryDetail() {
           Delete Memory
         </button>
         {deleteMutation.isError && (
-          <span style={{ marginLeft: 12, color: "#f87171", fontSize: 13 }}>
+          <span style={{ marginLeft: 12, color: "var(--red)", fontSize: 13 }}>
             {(deleteMutation.error as Error).message}
           </span>
         )}
@@ -812,12 +812,12 @@ export function MemoryDetail() {
 }
 
 const LINK_TYPE_COLORS: Record<string, string> = {
-  related: "#38bdf8",
-  elaborates: "#22d3ee",
-  contradicts: "#f87171",
-  supersedes: "#fbbf24",
-  supports: "#34d399",
-  derived_from: "#f472b6",
+  related: "var(--sky)",
+  elaborates: "var(--cyan)",
+  contradicts: "var(--red)",
+  supersedes: "var(--amber)",
+  supports: "var(--emerald)",
+  derived_from: "var(--rose)",
 };
 
 function MiniLinkGraph({ memoryId, links }: { memoryId: string; links: MemoryLinkResult[] }) {
@@ -834,7 +834,7 @@ function MiniLinkGraph({ memoryId, links }: { memoryId: string; links: MemoryLin
     interface GLink { source: string; target: string; color: string; width: number }
 
     const nodes: GNode[] = [
-      { id: memoryId, label: memoryId.slice(-6), color: "#22d3ee", isCenter: true },
+      { id: memoryId, label: memoryId.slice(-6), color: "var(--cyan)", isCenter: true },
     ];
     const nodeIds = new Set([memoryId]);
     const graphLinks: GLink[] = [];
@@ -845,14 +845,14 @@ function MiniLinkGraph({ memoryId, links }: { memoryId: string; links: MemoryLin
         nodes.push({
           id: link.memory_id,
           label: link.memory_id.slice(-6),
-          color: LINK_TYPE_COLORS[link.link_type] ?? "#22d3ee",
+          color: LINK_TYPE_COLORS[link.link_type] ?? "var(--cyan)",
           isCenter: false,
         });
       }
       graphLinks.push({
         source: memoryId,
         target: link.memory_id,
-        color: LINK_TYPE_COLORS[link.link_type] ?? "#22d3ee",
+        color: LINK_TYPE_COLORS[link.link_type] ?? "var(--cyan)",
         width: Math.max(1, link.strength * 3),
       });
     }
@@ -864,7 +864,7 @@ function MiniLinkGraph({ memoryId, links }: { memoryId: string; links: MemoryLin
       const graph = ForceGraph()(el)
         .graphData({ nodes, links: graphLinks })
         .nodeId("id")
-        .backgroundColor("#06060e")
+        .backgroundColor("var(--bg-deep)")
         .width(el.clientWidth)
         .height(250)
         .cooldownTicks(100)
@@ -933,7 +933,7 @@ function MiniLinkGraph({ memoryId, links }: { memoryId: string; links: MemoryLin
         borderRadius: 8,
         overflow: "hidden",
         marginBottom: 14,
-        border: "1px solid #16163a",
+        border: "1px solid var(--border-subtle)",
       }}
     />
   );
@@ -953,8 +953,8 @@ function LinkedMemories({ memoryId }: { memoryId: string }) {
   return (
     <div
       style={{
-        background: "#0c0c1d",
-        border: "1px solid #16163a",
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-subtle)",
         borderRadius: 12,
         padding: 20,
         marginBottom: 24,
@@ -965,7 +965,7 @@ function LinkedMemories({ memoryId }: { memoryId: string }) {
         style={{
           fontSize: 12,
           fontWeight: 600,
-          color: "#22d3ee",
+          color: "var(--cyan)",
           marginBottom: 14,
           textTransform: "uppercase",
           letterSpacing: "0.05em",
@@ -990,20 +990,20 @@ function LinkedMemories({ memoryId }: { memoryId: string }) {
             key={link.memory_id}
             onClick={() => navigate(`/memory/${link.memory_id}`)}
             style={{
-              background: "#06060e",
-              border: "1px solid #16163a",
+              background: "var(--bg-deep)",
+              border: "1px solid var(--border-subtle)",
               borderRadius: 8,
               padding: "10px 14px",
               cursor: "pointer",
               transition: "all 0.15s",
-              borderLeft: `3px solid ${LINK_TYPE_COLORS[link.link_type] ?? "#22d3ee"}`,
+              borderLeft: `3px solid ${LINK_TYPE_COLORS[link.link_type] ?? "var(--cyan)"}`,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#0a0a18";
+              e.currentTarget.style.background = "var(--bg-input)";
               e.currentTarget.style.boxShadow = "0 0 8px rgba(34, 211, 238, 0.1)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#06060e";
+              e.currentTarget.style.background = "var(--bg-deep)";
               e.currentTarget.style.boxShadow = "none";
             }}
           >
@@ -1012,19 +1012,19 @@ function LinkedMemories({ memoryId }: { memoryId: string }) {
                 style={{
                   fontSize: 10,
                   fontWeight: 600,
-                  color: LINK_TYPE_COLORS[link.link_type] ?? "#22d3ee",
+                  color: LINK_TYPE_COLORS[link.link_type] ?? "var(--cyan)",
                   textTransform: "uppercase",
                   letterSpacing: "0.05em",
                 }}
               >
                 {link.link_type}
               </span>
-              <span style={{ fontSize: 10, color: "#8080a0" }}>
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
                 strength: {link.strength.toFixed(2)}
               </span>
             </div>
             {link.preview && (
-              <div style={{ fontSize: 13, color: "#a0a0be", lineHeight: 1.5 }}>
+              <div style={{ fontSize: 13, color: "var(--text-secondary-alt)", lineHeight: 1.5 }}>
                 {link.preview.content}
               </div>
             )}
@@ -1050,8 +1050,8 @@ function SupersessionView({ memory }: { memory: Memory }) {
   if (isLoading) return (
     <div
       style={{
-        background: "#0c0c1d",
-        border: "1px solid #16163a",
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-subtle)",
         borderRadius: 12,
         padding: 20,
         marginBottom: 24,
@@ -1061,7 +1061,7 @@ function SupersessionView({ memory }: { memory: Memory }) {
       }}
     >
       <div className="spinner" />
-      <span style={{ color: "#8080a0", fontSize: 13 }}>Loading supersession data...</span>
+      <span style={{ color: "var(--text-muted)", fontSize: 13 }}>Loading supersession data...</span>
     </div>
   );
   // Memoize expensive LCS word diff (O(m*n) where m,n = word counts)
@@ -1075,8 +1075,8 @@ function SupersessionView({ memory }: { memory: Memory }) {
   return (
     <div
       style={{
-        background: "#0c0c1d",
-        border: "1px solid #16163a",
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-subtle)",
         borderRadius: 12,
         padding: 20,
         marginBottom: 24,
@@ -1085,7 +1085,7 @@ function SupersessionView({ memory }: { memory: Memory }) {
     >
       {supersededBy && (
         <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "#fbbf24", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--amber)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" />
             </svg>
@@ -1093,14 +1093,14 @@ function SupersessionView({ memory }: { memory: Memory }) {
           </div>
           <Link
             to={`/memory/${supersededBy.id}`}
-            style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "#22d3ee", display: "block", marginBottom: 12 }}
+            style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--cyan)", display: "block", marginBottom: 12 }}
           >
             {supersededBy.id}
           </Link>
 
           {/* Word diff */}
           <div style={{
-            background: "#06060e",
+            background: "var(--bg-deep)",
             borderRadius: 8,
             padding: 14,
             fontSize: 13,
@@ -1113,8 +1113,8 @@ function SupersessionView({ memory }: { memory: Memory }) {
               <span
                 key={i}
                 style={{
-                  background: part.type === "added" ? "rgba(74, 222, 128, 0.15)" : part.type === "removed" ? "rgba(248, 113, 113, 0.15)" : "transparent",
-                  color: part.type === "added" ? "#4ade80" : part.type === "removed" ? "#f87171" : "#d0d0e0",
+                  background: part.type === "added" ? "var(--green-bg)" : part.type === "removed" ? "var(--red-bg)" : "transparent",
+                  color: part.type === "added" ? "var(--green)" : part.type === "removed" ? "var(--red)" : "var(--text-body)",
                   textDecoration: part.type === "removed" ? "line-through" : "none",
                 }}
               >

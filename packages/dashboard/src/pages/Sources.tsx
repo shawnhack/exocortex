@@ -26,7 +26,7 @@ export function Dashboard() {
   return (
     <div>
       <h1>Dashboard</h1>
-      <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
+      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24 }}>
         Memory storage overview
       </p>
 
@@ -42,22 +42,22 @@ export function Dashboard() {
         <StatCard
           label="Total Memories"
           value={stats.total_memories}
-          accent="#22d3ee"
+          accent="var(--cyan)"
         />
         <StatCard
           label="Active"
           value={stats.active_memories}
-          accent="#22d3ee"
+          accent="var(--cyan)"
         />
         <StatCard
           label="Entities"
           value={stats.total_entities}
-          accent="#34d399"
+          accent="var(--emerald)"
         />
         <StatCard
           label="Tags"
           value={stats.total_tags}
-          accent="#fbbf24"
+          accent="var(--amber)"
         />
       </div>
 
@@ -65,8 +65,8 @@ export function Dashboard() {
       {stats.by_tier && Object.keys(stats.by_tier).length > 0 && (
         <div
           style={{
-            background: "#0c0c1d",
-            border: "1px solid #16163a",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
             borderRadius: 12,
             padding: 20,
             marginBottom: 16,
@@ -80,8 +80,8 @@ export function Dashboard() {
       {/* By Content Type */}
       <div
         style={{
-          background: "#0c0c1d",
-          border: "1px solid #16163a",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
           borderRadius: 12,
           padding: 20,
           marginBottom: 16,
@@ -94,8 +94,8 @@ export function Dashboard() {
       {/* By Source */}
       <div
         style={{
-          background: "#0c0c1d",
-          border: "1px solid #16163a",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
           borderRadius: 12,
           padding: 20,
           marginBottom: 16,
@@ -109,8 +109,8 @@ export function Dashboard() {
       {temporal && (
         <div
           style={{
-            background: "#0c0c1d",
-            border: "1px solid #16163a",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
             borderRadius: 12,
             padding: 20,
             marginBottom: 16,
@@ -130,7 +130,7 @@ export function Dashboard() {
       {stats.oldest_memory && (
         <p
           style={{
-            color: "#8080a0",
+            color: "var(--text-muted)",
             fontSize: 12,
             fontFamily: "var(--font-mono)",
             marginTop: 16,
@@ -155,8 +155,8 @@ function StatCard({
   return (
     <div
       style={{
-        background: "#0c0c1d",
-        border: "1px solid #16163a",
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-subtle)",
         borderRadius: 12,
         padding: 20,
         position: "relative",
@@ -180,12 +180,12 @@ function StatCard({
           fontSize: 32,
           fontWeight: 700,
           fontFamily: "var(--font-mono)",
-          color: "#e8e8f4",
+          color: "var(--text-primary-alt)",
         }}
       >
         {value.toLocaleString()}
       </div>
-      <div style={{ color: "#8080a0", fontSize: 13, marginTop: 2 }}>
+      <div style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 2 }}>
         {label}
       </div>
     </div>
@@ -195,7 +195,7 @@ function StatCard({
 function BarChart({ data }: { data: Record<string, number> }) {
   const entries = Object.entries(data).sort(([, a], [, b]) => b - a);
   if (entries.length === 0)
-    return <p style={{ color: "#8080a0", fontSize: 13 }}>None yet.</p>;
+    return <p style={{ color: "var(--text-muted)", fontSize: 13 }}>None yet.</p>;
 
   const max = Math.max(...entries.map(([, v]) => v));
 
@@ -232,7 +232,7 @@ function TierChart({ data }: { data: Record<string, number> }) {
     .filter((t) => data[t] != null)
     .map((t) => [t, data[t]] as [string, number]);
   if (entries.length === 0)
-    return <p style={{ color: "#8080a0", fontSize: 13 }}>None yet.</p>;
+    return <p style={{ color: "var(--text-muted)", fontSize: 13 }}>None yet.</p>;
 
   const max = Math.max(...entries.map(([, v]) => v));
 
@@ -246,7 +246,7 @@ function TierChart({ data }: { data: Record<string, number> }) {
                 width: 8,
                 height: 8,
                 borderRadius: "50%",
-                background: TIER_COLORS[tier] ?? "#8080a0",
+                background: TIER_COLORS[tier] ?? "var(--text-muted)",
                 flexShrink: 0,
               }}
             />
@@ -257,7 +257,7 @@ function TierChart({ data }: { data: Record<string, number> }) {
               className="bar-fill"
               style={{
                 width: `${(count / max) * 100}%`,
-                background: `linear-gradient(90deg, ${TIER_COLORS[tier] ?? "#22d3ee"}, transparent)`,
+                background: `linear-gradient(90deg, ${TIER_COLORS[tier] ?? "var(--cyan)"}, transparent)`,
               }}
             />
           </div>
@@ -278,12 +278,12 @@ function TemporalStat({ label, value }: { label: string; value: string }) {
           fontSize: 20,
           fontWeight: 600,
           fontFamily: "var(--font-mono)",
-          color: "#e8e8f4",
+          color: "var(--text-primary-alt)",
         }}
       >
         {value}
       </div>
-      <div style={{ fontSize: 12, color: "#8080a0" }}>{label}</div>
+      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{label}</div>
     </div>
   );
 }

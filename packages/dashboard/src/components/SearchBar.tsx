@@ -46,7 +46,7 @@ export function SearchBar({
         height="18"
         viewBox="0 0 24 24"
         fill="none"
-        stroke={focused ? "#22d3ee" : "#8080a0"}
+        stroke={focused ? "var(--cyan)" : "var(--text-muted)"}
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -76,9 +76,9 @@ export function SearchBar({
           width: "100%",
           padding: "14px 16px 14px 46px",
           borderRadius: 10,
-          border: `1px solid ${focused ? "rgba(34, 211, 238, 0.4)" : "#16163a"}`,
-          background: focused ? "#0e0e22" : "#0c0c1d",
-          color: "#e8e8f4",
+          border: `1px solid ${focused ? "var(--cyan-border-strong)" : "var(--border-subtle)"}`,
+          background: focused ? "var(--bg-surface-hover)" : "var(--bg-surface)",
+          color: "var(--text-primary-alt)",
           fontSize: 15,
           fontFamily: "var(--font-ui)",
           transition: "all 0.25s",
@@ -98,7 +98,7 @@ export function SearchBar({
           right: "10%",
           height: 1,
           background: focused
-            ? "linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.3), transparent)"
+            ? "linear-gradient(90deg, transparent, var(--cyan-border), transparent)"
             : "transparent",
           transition: "all 0.3s",
         }}

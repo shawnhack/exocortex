@@ -30,7 +30,7 @@ const queryClient = new QueryClient({
 function PageFallback() {
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 200 }}>
-      <div style={{ color: "#8080a0", fontSize: 14 }}>Loading...</div>
+      <div style={{ color: "var(--text-muted)", fontSize: 14 }}>Loading...</div>
     </div>
   );
 }
@@ -59,7 +59,7 @@ export default function App() {
 
                 <Route path="/chat" element={<Chat />} />
                 <Route path="/settings" element={<Settings />} />
-                <Route path="*" element={<div style={{ padding: 40 }}><h1 style={{ color: "#e8e8f4", fontSize: 22 }}>Page not found</h1><p style={{ color: "#8080a0" }}>The page you're looking for doesn't exist.</p></div>} />
+                <Route path="*" element={<div style={{ padding: 40 }}><h1 style={{ color: "var(--text-primary-alt)", fontSize: 22 }}>Page not found</h1><p style={{ color: "var(--text-muted)" }}>The page you're looking for doesn't exist.</p></div>} />
               </Route>
             </Routes>
           </Suspense>

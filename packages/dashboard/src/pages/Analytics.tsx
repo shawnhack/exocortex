@@ -76,7 +76,7 @@ function LineChart({
         >
           {/* Grid */}
           {[0, 0.5, 1].map((f) => (
-            <line key={f} x1={padL} y1={padT + chartH * (1 - f)} x2={W - padR} y2={padT + chartH * (1 - f)} stroke="#16163a" strokeWidth={1} />
+            <line key={f} x1={padL} y1={padT + chartH * (1 - f)} x2={W - padR} y2={padT + chartH * (1 - f)} stroke="var(--border-subtle)" strokeWidth={1} />
           ))}
 
           {/* Lines + dots */}
@@ -84,7 +84,7 @@ function LineChart({
             <g key={l.label}>
               <path d={toPath(l.pts)} fill="none" stroke={l.color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
               {l.pts.map((p, i) => (
-                <circle key={i} cx={p.x} cy={p.y} r={hoverIdx === i ? 5 : 3} fill={l.color} stroke="#0a0a1e" strokeWidth={1.5} style={{ transition: "r 0.1s" }} />
+                <circle key={i} cx={p.x} cy={p.y} r={hoverIdx === i ? 5 : 3} fill={l.color} stroke="var(--bg-root)" strokeWidth={1.5} style={{ transition: "r 0.1s" }} />
               ))}
             </g>
           ))}
@@ -93,23 +93,23 @@ function LineChart({
             <g>
               <path d={toPath(rightPts.pts)} fill="none" stroke={rightPts.color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" opacity={0.7} />
               {rightPts.pts.map((p, i) => (
-                <circle key={i} cx={p.x} cy={p.y} r={hoverIdx === i ? 5 : 3} fill={rightPts.color} stroke="#0a0a1e" strokeWidth={1.5} opacity={0.8} style={{ transition: "r 0.1s" }} />
+                <circle key={i} cx={p.x} cy={p.y} r={hoverIdx === i ? 5 : 3} fill={rightPts.color} stroke="var(--bg-root)" strokeWidth={1.5} opacity={0.8} style={{ transition: "r 0.1s" }} />
               ))}
             </g>
           )}
 
           {/* Hover crosshair */}
           {hoverIdx !== null && (
-            <line x1={hoverX} y1={padT} x2={hoverX} y2={padT + chartH} stroke="#8080a0" strokeWidth={1} strokeDasharray="3,3" opacity={0.5} />
+            <line x1={hoverX} y1={padT} x2={hoverX} y2={padT + chartH} stroke="var(--text-muted)" strokeWidth={1} strokeDasharray="3,3" opacity={0.5} />
           )}
 
           {/* Axes */}
           <text x={padL - 4} y={padT + 4} textAnchor="end" fontSize={9} fill={lines[0].color} fontFamily="var(--font-mono)">{leftLabel(leftMax)}</text>
-          <text x={padL - 4} y={padT + chartH + 4} textAnchor="end" fontSize={9} fill="#6060a0" fontFamily="var(--font-mono)">0</text>
+          <text x={padL - 4} y={padT + chartH + 4} textAnchor="end" fontSize={9} fill="var(--text-dim-alt)" fontFamily="var(--font-mono)">0</text>
           {rightPts && (
             <>
               <text x={W - padR + 4} y={padT + 4} textAnchor="start" fontSize={9} fill={rightPts.color} fontFamily="var(--font-mono)">{Math.round(rightMax)}</text>
-              <text x={W - padR + 4} y={padT + chartH + 4} textAnchor="start" fontSize={9} fill="#6060a0" fontFamily="var(--font-mono)">0</text>
+              <text x={W - padR + 4} y={padT + chartH + 4} textAnchor="start" fontSize={9} fill="var(--text-dim-alt)" fontFamily="var(--font-mono)">0</text>
             </>
           )}
 
@@ -119,7 +119,7 @@ function LineChart({
             const step = Math.max(1, Math.ceil(n / 6));
             if (i !== 0 && i !== n - 1 && i % step !== 0) return null;
             return (
-              <text key={period} x={x} y={H - 4} textAnchor="middle" fontSize={9} fill="#6060a0" fontFamily="var(--font-mono)">
+              <text key={period} x={x} y={H - 4} textAnchor="middle" fontSize={9} fill="var(--text-dim-alt)" fontFamily="var(--font-mono)">
                 {period.replace(/^\d{4}-/, "")}
               </text>
             );
@@ -137,8 +137,8 @@ function LineChart({
                 left: `${pctX}%`,
                 transform: tooltipRight ? "translateX(-100%)" : "translateX(0)",
                 pointerEvents: "none",
-                background: "rgba(8, 8, 26, 0.92)",
-                border: "1px solid #22223a",
+                background: "var(--bg-overlay)",
+                border: "1px solid var(--border-panel)",
                 borderRadius: 6,
                 padding: "6px 10px",
                 fontFamily: "var(--font-mono)",
@@ -149,7 +149,7 @@ function LineChart({
                 marginLeft: tooltipRight ? -8 : 8,
               }}
             >
-              <div style={{ color: "#e8e8f4", fontWeight: 600, marginBottom: 2 }}>
+              <div style={{ color: "var(--text-primary-alt)", fontWeight: 600, marginBottom: 2 }}>
                 {periods[hoverIdx]}
               </div>
               {lines.map((l) => (
@@ -168,7 +168,7 @@ function LineChart({
       </div>
 
       {/* Legend */}
-      <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 11, color: "#8080a0" }}>
+      <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
         {[...lines, ...(rightLine ? [rightLine] : [])].map((l) => (
           <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <div style={{ width: 14, height: 2, borderRadius: 1, background: l.color, opacity: 0.8 }} />
@@ -287,7 +287,7 @@ export function Analytics() {
   return (
     <div>
       <h1>Analytics</h1>
-      <p style={{ color: "#8080a0", fontSize: 13, marginBottom: 24 }}>
+      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24 }}>
         Memory quality and usage insights
       </p>
 
@@ -311,7 +311,7 @@ export function Analytics() {
               <LineChart
                 periods={periods}
                 lines={[
-                  { data: sorted.map((t) => t.searches), color: "#22d3ee", label: "Searches" },
+                  { data: sorted.map((t) => t.searches), color: "var(--cyan)", label: "Searches" },
                 ]}
                 leftLabel={(max) => String(Math.round(max))}
               />
@@ -321,10 +321,10 @@ export function Analytics() {
               <LineChart
                 periods={periods}
                 lines={[
-                  { data: sorted.map((t) => t.avgUseful), color: "#34d399", label: "Avg Useful", format: (v) => v.toFixed(2) },
+                  { data: sorted.map((t) => t.avgUseful), color: "var(--emerald)", label: "Avg Useful", format: (v) => v.toFixed(2) },
                 ]}
                 leftLabel={(max) => max.toFixed(1)}
-                rightLine={{ data: sorted.map((t) => t.neverAccessedPct), color: "#f59e0b", label: "Never Accessed %", format: (v) => `${v.toFixed(1)}%` }}
+                rightLine={{ data: sorted.map((t) => t.neverAccessedPct), color: "var(--warning)", label: "Never Accessed %", format: (v) => `${v.toFixed(1)}%` }}
               />
             </Section>
 
@@ -332,10 +332,10 @@ export function Analytics() {
               <LineChart
                 periods={periods}
                 lines={[
-                  { data: sorted.map((t) => t.totalMemories), color: "#22d3ee", label: "Total Memories", format: (v) => v.toLocaleString() },
+                  { data: sorted.map((t) => t.totalMemories), color: "var(--cyan)", label: "Total Memories", format: (v) => v.toLocaleString() },
                 ]}
                 leftLabel={(max) => Math.round(max).toLocaleString()}
-                rightLine={{ data: sorted.map((t) => t.created), color: "#a78bfa", label: "Created", format: (v) => String(v) }}
+                rightLine={{ data: sorted.map((t) => t.created), color: "var(--purple)", label: "Created", format: (v) => String(v) }}
               />
             </Section>
           </>
@@ -352,12 +352,12 @@ export function Analytics() {
             marginBottom: 14,
           }}
         >
-          <StatCard label="Avg Quality" value={qualityDist.avg.toFixed(3)} accent="#a78bfa" />
-          <StatCard label="Median Quality" value={qualityDist.median.toFixed(3)} accent="#a78bfa" />
-          <StatCard label="P10" value={qualityDist.p10.toFixed(3)} accent="#f87171" />
-          <StatCard label="P90" value={qualityDist.p90.toFixed(3)} accent="#34d399" />
-          <StatCard label="High Quality" value={qualityDist.highQuality} accent="#22d3ee" />
-          <StatCard label="Low Quality" value={qualityDist.lowQuality} accent="#f59e0b" />
+          <StatCard label="Avg Quality" value={qualityDist.avg.toFixed(3)} accent="var(--purple)" />
+          <StatCard label="Median Quality" value={qualityDist.median.toFixed(3)} accent="var(--purple)" />
+          <StatCard label="P10" value={qualityDist.p10.toFixed(3)} accent="var(--red)" />
+          <StatCard label="P90" value={qualityDist.p90.toFixed(3)} accent="var(--emerald)" />
+          <StatCard label="High Quality" value={qualityDist.highQuality} accent="var(--cyan)" />
+          <StatCard label="Low Quality" value={qualityDist.lowQuality} accent="var(--warning)" />
         </div>
       )}
 
@@ -367,7 +367,7 @@ export function Analytics() {
         const HIST_COLORS = [
           "#f87171", "#f59e0b", "#fbbf24", "#facc15",
           "#a3e635", "#4ade80", "#34d399", "#2dd4bf",
-          "#22d3ee", "#22d3ee",
+          "var(--cyan)", "var(--cyan)",
         ];
         return (
           <Section title="Quality Score Distribution">
@@ -382,7 +382,7 @@ export function Analytics() {
                       width: 60,
                       textAlign: "right",
                       fontSize: 13,
-                      color: "#a0a0be",
+                      color: "var(--text-secondary-alt)",
                       fontFamily: "var(--font-mono)",
                     }}
                   >
@@ -392,7 +392,7 @@ export function Analytics() {
                     style={{
                       flex: 1,
                       height: 22,
-                      background: "rgba(34, 211, 238, 0.06)",
+                      background: "var(--cyan-bg-subtle)",
                       borderRadius: 4,
                       overflow: "hidden",
                     }}
@@ -411,7 +411,7 @@ export function Analytics() {
                     style={{
                       width: 50,
                       fontSize: 13,
-                      color: "#e8e8f4",
+                      color: "var(--text-primary-alt)",
                       fontFamily: "var(--font-mono)",
                     }}
                   >
@@ -437,17 +437,17 @@ export function Analytics() {
           <StatCard
             label="Never Accessed"
             value={`${summary.neverAccessedPct}%`}
-            accent="#f59e0b"
+            accent="var(--warning)"
           />
           <StatCard
             label="Useful"
             value={`${summary.usefulPct}%`}
-            accent="#22d3ee"
+            accent="var(--cyan)"
           />
           <StatCard
             label="Median Accesses"
             value={summary.medianAccessCount}
-            accent="#34d399"
+            accent="var(--emerald)"
           />
         </div>
       )}
@@ -466,7 +466,7 @@ export function Analytics() {
                     width: 60,
                     textAlign: "right",
                     fontSize: 13,
-                    color: "#a0a0be",
+                    color: "var(--text-secondary-alt)",
                     fontFamily: "var(--font-mono)",
                   }}
                 >
@@ -476,7 +476,7 @@ export function Analytics() {
                   style={{
                     flex: 1,
                     height: 22,
-                    background: "rgba(34, 211, 238, 0.06)",
+                    background: "var(--cyan-bg-subtle)",
                     borderRadius: 4,
                     overflow: "hidden",
                   }}
@@ -486,7 +486,7 @@ export function Analytics() {
                       width: `${(b.count / maxDistCount) * 100}%`,
                       height: "100%",
                       background:
-                        "linear-gradient(90deg, rgba(34, 211, 238, 0.4), rgba(34, 211, 238, 0.2))",
+                        "linear-gradient(90deg, var(--cyan-border-strong), var(--cyan-border-dim))",
                       borderRadius: 4,
                       minWidth: b.count > 0 ? 2 : 0,
                     }}
@@ -496,7 +496,7 @@ export function Analytics() {
                   style={{
                     width: 50,
                     fontSize: 13,
-                    color: "#e8e8f4",
+                    color: "var(--text-primary-alt)",
                     fontFamily: "var(--font-mono)",
                   }}
                 >
@@ -574,8 +574,8 @@ export function Analytics() {
               marginBottom: 14,
             }}
           >
-            <StatCard label="Total Tags" value={tagHealth.totalTags} accent="#22d3ee" />
-            <StatCard label="Alias Merges" value={tagHealth.mergeCount} accent="#a78bfa" />
+            <StatCard label="Total Tags" value={tagHealth.totalTags} accent="var(--cyan)" />
+            <StatCard label="Alias Merges" value={tagHealth.mergeCount} accent="var(--purple)" />
           </div>
           {tagHealth.suggestions.length > 0 && (
             <Table
@@ -597,7 +597,7 @@ export function Analytics() {
         <Section title="Knowledge Gaps (14d)">
           <div
             style={{
-              border: "1px solid #16163a",
+              border: "1px solid var(--border-subtle)",
               borderRadius: 8,
               overflow: "hidden",
             }}
@@ -617,11 +617,11 @@ export function Analytics() {
                       style={{
                         textAlign: "left",
                         padding: "10px 14px",
-                        color: "#8080a0",
+                        color: "var(--text-muted)",
                         fontWeight: 500,
                         fontSize: 12,
-                        borderBottom: "1px solid #16163a",
-                        background: "rgba(8, 8, 26, 0.4)",
+                        borderBottom: "1px solid var(--border-subtle)",
+                        background: "var(--bg-overlay-subtle)",
                       }}
                     >
                       {h}
@@ -632,18 +632,18 @@ export function Analytics() {
               <tbody>
                 {knowledgeGaps.map((g, i) => (
                   <tr key={i}>
-                    <td style={{ padding: "8px 14px", color: "#e8e8f4", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.query}</td>
-                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.count}</td>
-                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.avg_max_score !== null ? g.avg_max_score.toFixed(4) : "\u2014"}</td>
-                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.last_seen.slice(0, 10)}</td>
+                    <td style={{ padding: "8px 14px", color: "var(--text-primary-alt)", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.query}</td>
+                    <td style={{ padding: "8px 14px", color: "var(--text-secondary-alt)", fontFamily: "var(--font-mono)", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.count}</td>
+                    <td style={{ padding: "8px 14px", color: "var(--text-secondary-alt)", fontFamily: "var(--font-mono)", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.avg_max_score !== null ? g.avg_max_score.toFixed(4) : "\u2014"}</td>
+                    <td style={{ padding: "8px 14px", color: "var(--text-secondary-alt)", fontFamily: "var(--font-mono)", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>{g.last_seen.slice(0, 10)}</td>
                     <td style={{ padding: "8px 14px", borderBottom: i < knowledgeGaps.length - 1 ? "1px solid #0d0d24" : "none" }}>
                       <span style={{
                         padding: "2px 10px",
                         borderRadius: 12,
                         fontSize: 11,
                         fontWeight: 600,
-                        background: g.severity === "critical" ? "rgba(248, 113, 113, 0.15)" : g.severity === "warning" ? "rgba(245, 158, 11, 0.15)" : "rgba(128, 128, 160, 0.15)",
-                        color: g.severity === "critical" ? "#f87171" : g.severity === "warning" ? "#f59e0b" : "#8080a0",
+                        background: g.severity === "critical" ? "var(--red-bg)" : g.severity === "warning" ? "var(--warning-bg)" : "var(--muted-bg)",
+                        color: g.severity === "critical" ? "var(--red)" : g.severity === "warning" ? "var(--warning)" : "var(--text-muted)",
                       }}>
                         {g.severity}
                       </span>
@@ -661,7 +661,7 @@ export function Analytics() {
         <Section title="Query Effectiveness">
           <div
             style={{
-              border: "1px solid #16163a",
+              border: "1px solid var(--border-subtle)",
               borderRadius: 8,
               overflow: "hidden",
             }}
@@ -681,11 +681,11 @@ export function Analytics() {
                       style={{
                         textAlign: "left",
                         padding: "10px 14px",
-                        color: "#8080a0",
+                        color: "var(--text-muted)",
                         fontWeight: 500,
                         fontSize: 12,
-                        borderBottom: "1px solid #16163a",
-                        background: "rgba(8, 8, 26, 0.4)",
+                        borderBottom: "1px solid var(--border-subtle)",
+                        background: "var(--bg-overlay-subtle)",
                       }}
                     >
                       {h}
@@ -696,13 +696,13 @@ export function Analytics() {
               <tbody>
                 {queryOutcomes.map((q: QueryOutcome, i: number) => (
                   <tr key={i}>
-                    <td style={{ padding: "8px 14px", color: "#e8e8f4", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.query}</td>
-                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.search_count}</td>
-                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.result_count_avg}</td>
-                    <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.feedback_count}</td>
+                    <td style={{ padding: "8px 14px", color: "var(--text-primary-alt)", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.query}</td>
+                    <td style={{ padding: "8px 14px", color: "var(--text-secondary-alt)", fontFamily: "var(--font-mono)", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.search_count}</td>
+                    <td style={{ padding: "8px 14px", color: "var(--text-secondary-alt)", fontFamily: "var(--font-mono)", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.result_count_avg}</td>
+                    <td style={{ padding: "8px 14px", color: "var(--text-secondary-alt)", fontFamily: "var(--font-mono)", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>{q.feedback_count}</td>
                     <td style={{ padding: "8px 14px", borderBottom: i < queryOutcomes.length - 1 ? "1px solid #0d0d24" : "none" }}>
                       <span style={{
-                        color: q.feedback_ratio > 50 ? "#34d399" : q.feedback_ratio >= 10 ? "#f59e0b" : "#f87171",
+                        color: q.feedback_ratio > 50 ? "var(--emerald)" : q.feedback_ratio >= 10 ? "var(--warning)" : "var(--red)",
                         fontFamily: "var(--font-mono)",
                         fontWeight: 500,
                       }}>
@@ -731,12 +731,12 @@ export function Analytics() {
             <StatCard
               label="Golden Queries"
               value={regressionLatest.golden_count}
-              accent="#22d3ee"
+              accent="var(--cyan)"
             />
             <StatCard
               label="Last Run Alerts"
               value={regressionLatest.results.filter((r) => r.alert).length}
-              accent={regressionLatest.results.some((r) => r.alert) ? "#f87171" : "#34d399"}
+              accent={regressionLatest.results.some((r) => r.alert) ? "var(--red)" : "var(--emerald)"}
             />
             <StatCard
               label="Avg Overlap@10"
@@ -745,13 +745,13 @@ export function Analytics() {
                   ? (regressionLatest.results.reduce((s, r) => s + r.overlap_at_10, 0) / regressionLatest.results.length).toFixed(2)
                   : "\u2014"
               }
-              accent="#a78bfa"
+              accent="var(--purple)"
             />
           </div>
           {regressionLatest.results.length > 0 ? (
             <div
               style={{
-                border: "1px solid #16163a",
+                border: "1px solid var(--border-subtle)",
                 borderRadius: 8,
                 overflow: "hidden",
               }}
@@ -771,11 +771,11 @@ export function Analytics() {
                         style={{
                           textAlign: "left",
                           padding: "10px 14px",
-                          color: "#8080a0",
+                          color: "var(--text-muted)",
                           fontWeight: 500,
                           fontSize: 12,
-                          borderBottom: "1px solid #16163a",
-                          background: "rgba(8, 8, 26, 0.4)",
+                          borderBottom: "1px solid var(--border-subtle)",
+                          background: "var(--bg-overlay-subtle)",
                         }}
                       >
                         {h}
@@ -786,14 +786,14 @@ export function Analytics() {
                 <tbody>
                   {regressionLatest.results.map((r, i) => (
                     <tr key={i}>
-                      <td style={{ padding: "8px 14px", color: "#e8e8f4", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>{r.query}</td>
-                      <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>{r.overlap_at_10.toFixed(2)}</td>
-                      <td style={{ padding: "8px 14px", color: "#a0a0be", fontFamily: "var(--font-mono)", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>{r.avg_rank_shift.toFixed(2)}</td>
+                      <td style={{ padding: "8px 14px", color: "var(--text-primary-alt)", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>{r.query}</td>
+                      <td style={{ padding: "8px 14px", color: "var(--text-secondary-alt)", fontFamily: "var(--font-mono)", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>{r.overlap_at_10.toFixed(2)}</td>
+                      <td style={{ padding: "8px 14px", color: "var(--text-secondary-alt)", fontFamily: "var(--font-mono)", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>{r.avg_rank_shift.toFixed(2)}</td>
                       <td style={{ padding: "8px 14px", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>
-                        <span style={{ color: r.exact_order ? "#34d399" : "#f87171" }}>{r.exact_order ? "\u2713" : "\u2717"}</span>
+                        <span style={{ color: r.exact_order ? "var(--emerald)" : "var(--red)" }}>{r.exact_order ? "\u2713" : "\u2717"}</span>
                       </td>
                       <td style={{ padding: "8px 14px", borderBottom: i < regressionLatest.results.length - 1 ? "1px solid #0d0d24" : "none" }}>
-                        <span style={{ color: r.alert ? "#f87171" : "#34d399", fontWeight: r.alert ? 600 : 400 }}>{r.alert ? "ALERT" : "OK"}</span>
+                        <span style={{ color: r.alert ? "var(--red)" : "var(--emerald)", fontWeight: r.alert ? 600 : 400 }}>{r.alert ? "ALERT" : "OK"}</span>
                       </td>
                     </tr>
                   ))}
@@ -801,7 +801,7 @@ export function Analytics() {
               </table>
             </div>
           ) : (
-            <div style={{ color: "#8080a0", fontSize: 13 }}>No regression runs yet</div>
+            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>No regression runs yet</div>
           )}
         </Section>
       )}
@@ -817,11 +817,11 @@ export function Analytics() {
               style={{
                 padding: "4px 12px",
                 fontSize: 12,
-                border: "1px solid rgba(34, 211, 238, 0.3)",
+                border: "1px solid var(--cyan-border)",
                 borderRadius: 6,
                 cursor: consolidateMutation.isPending ? "wait" : "pointer",
-                background: "rgba(34, 211, 238, 0.15)",
-                color: "#22d3ee",
+                background: "var(--cyan-bg)",
+                color: "var(--cyan)",
                 fontFamily: "var(--font-mono)",
                 display: "inline-flex",
                 alignItems: "center",
@@ -862,13 +862,13 @@ function StatCard({
   return (
     <div
       style={{
-        background: "rgba(8, 8, 26, 0.6)",
-        border: "1px solid #16163a",
+        background: "var(--bg-overlay-light)",
+        border: "1px solid var(--border-subtle)",
         borderRadius: 10,
         padding: "16px 20px",
       }}
     >
-      <div style={{ fontSize: 12, color: "#8080a0", marginBottom: 6 }}>
+      <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
         {label}
       </div>
       <div
@@ -904,7 +904,7 @@ function Section({
           marginBottom: 12,
         }}
       >
-        <h2 style={{ fontSize: 16, fontWeight: 600, color: "#e8e8f4", margin: 0 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary-alt)", margin: 0 }}>
           {title}
         </h2>
         {actions}
@@ -928,10 +928,10 @@ function Toggle({
       style={{
         display: "flex",
         gap: 2,
-        background: "rgba(8, 8, 26, 0.6)",
+        background: "var(--bg-overlay-light)",
         borderRadius: 6,
         padding: 2,
-        border: "1px solid #16163a",
+        border: "1px solid var(--border-subtle)",
       }}
     >
       {options.map((opt) => (
@@ -945,8 +945,8 @@ function Toggle({
             borderRadius: 4,
             cursor: "pointer",
             background:
-              active === opt ? "rgba(34, 211, 238, 0.15)" : "transparent",
-            color: active === opt ? "#22d3ee" : "#8080a0",
+              active === opt ? "var(--cyan-bg)" : "transparent",
+            color: active === opt ? "var(--cyan)" : "var(--text-muted)",
             fontFamily: "var(--font-mono)",
           }}
         >
@@ -967,7 +967,7 @@ function Table({
   return (
     <div
       style={{
-        border: "1px solid #16163a",
+        border: "1px solid var(--border-subtle)",
         borderRadius: 8,
         overflow: "hidden",
       }}
@@ -987,11 +987,11 @@ function Table({
                 style={{
                   textAlign: "left",
                   padding: "10px 14px",
-                  color: "#8080a0",
+                  color: "var(--text-muted)",
                   fontWeight: 500,
                   fontSize: 12,
-                  borderBottom: "1px solid #16163a",
-                  background: "rgba(8, 8, 26, 0.4)",
+                  borderBottom: "1px solid var(--border-subtle)",
+                  background: "var(--bg-overlay-subtle)",
                 }}
               >
                 {h}
@@ -1007,7 +1007,7 @@ function Table({
                   key={j}
                   style={{
                     padding: "8px 14px",
-                    color: j === 0 ? "#e8e8f4" : "#a0a0be",
+                    color: j === 0 ? "var(--text-primary-alt)" : "var(--text-secondary-alt)",
                     fontFamily: j > 0 ? "var(--font-mono)" : undefined,
                     borderBottom:
                       i < rows.length - 1 ? "1px solid #0d0d24" : "none",

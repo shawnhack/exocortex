@@ -73,16 +73,16 @@ export function Skills() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: "#e8e8f4", marginBottom: 4 }}>Knowledge Skills</h1>
-          <p style={{ fontSize: 13, color: "#8080a0", margin: 0 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: "var(--text-primary-alt)", marginBottom: 4 }}>Knowledge Skills</h1>
+          <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0 }}>
             Agent-authored operational skills with vote-based governance
           </p>
         </div>
         <span
           style={{
-            background: "rgba(34, 211, 238, 0.15)",
-            color: "#22d3ee",
-            border: "1px solid rgba(34, 211, 238, 0.3)",
+            background: "var(--cyan-bg)",
+            color: "var(--cyan)",
+            border: "1px solid var(--cyan-border)",
             borderRadius: 20,
             padding: "6px 14px",
             fontSize: 12,
@@ -100,9 +100,9 @@ export function Skills() {
           <button
             onClick={() => setFilter("all")}
             style={{
-              background: filter === "all" ? "rgba(34, 211, 238, 0.15)" : "transparent",
-              color: filter === "all" ? "#22d3ee" : "#8080a0",
-              border: "1px solid " + (filter === "all" ? "rgba(34, 211, 238, 0.3)" : "transparent"),
+              background: filter === "all" ? "var(--cyan-bg)" : "transparent",
+              color: filter === "all" ? "var(--cyan)" : "var(--text-muted)",
+              border: "1px solid " + (filter === "all" ? "var(--cyan-border)" : "transparent"),
               borderRadius: 20,
               padding: "5px 14px",
               fontSize: 12,
@@ -120,9 +120,9 @@ export function Skills() {
               key={tag}
               onClick={() => setFilter(tag)}
               style={{
-                background: filter === tag ? "rgba(34, 211, 238, 0.15)" : "transparent",
-                color: filter === tag ? "#22d3ee" : "#8080a0",
-                border: "1px solid " + (filter === tag ? "rgba(34, 211, 238, 0.3)" : "transparent"),
+                background: filter === tag ? "var(--cyan-bg)" : "transparent",
+                color: filter === tag ? "var(--cyan)" : "var(--text-muted)",
+                border: "1px solid " + (filter === tag ? "var(--cyan-border)" : "transparent"),
                 borderRadius: 20,
                 padding: "5px 14px",
                 fontSize: 12,
@@ -141,13 +141,13 @@ export function Skills() {
 
       {/* Skills grid */}
       {filteredSkills.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 60, color: "#8080a0" }}>
+        <div style={{ textAlign: "center", padding: 60, color: "var(--text-muted)" }}>
           <svg
             width="48"
             height="48"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="#3a3a5c"
+            stroke="var(--border-toggle-off)"
             strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -158,8 +158,8 @@ export function Skills() {
             <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
           </svg>
           <div style={{ fontSize: 14, marginBottom: 8 }}>No knowledge skills found</div>
-          <div style={{ fontSize: 12, color: "#5a5a7a" }}>
-            Skills are created by agents via <code style={{ color: "#22d3ee" }}>memory_store</code> with the "skill" tag
+          <div style={{ fontSize: 12, color: "var(--text-faint)" }}>
+            Skills are created by agents via <code style={{ color: "var(--cyan)" }}>memory_store</code> with the "skill" tag
           </div>
         </div>
       ) : (
@@ -181,8 +181,8 @@ export function Skills() {
                 key={skill.id}
                 onClick={() => navigate(`/memory/${skill.id}`)}
                 style={{
-                  background: "#0c0c1d",
-                  border: "1px solid #16163a",
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border-subtle)",
                   borderRadius: 10,
                   padding: 18,
                   cursor: "pointer",
@@ -192,19 +192,19 @@ export function Skills() {
                   gap: 10,
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(34, 211, 238, 0.2)";
+                  e.currentTarget.style.borderColor = "var(--cyan-border-dim)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = "#16163a";
+                  e.currentTarget.style.borderColor = "var(--border-subtle)";
                 }}
               >
                 {/* Title + importance */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#e8e8f4" }}>{parseTitle(skill.content)}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary-alt)" }}>{parseTitle(skill.content)}</div>
                   <span
                     style={{
-                      background: "rgba(34, 211, 238, 0.12)",
-                      color: "#22d3ee",
+                      background: "var(--violet-dim)",
+                      color: "var(--cyan)",
                       padding: "2px 8px",
                       borderRadius: 10,
                       fontSize: 10,
@@ -218,7 +218,7 @@ export function Skills() {
                 </div>
 
                 {/* Preview */}
-                <div style={{ fontSize: 13, color: "#a0a0be", lineHeight: 1.5 }}>{parsePreview(skill.content)}</div>
+                <div style={{ fontSize: 13, color: "var(--text-secondary-alt)", lineHeight: 1.5 }}>{parsePreview(skill.content)}</div>
 
                 {/* Tags */}
                 {displayTags.length > 0 && (
@@ -249,12 +249,12 @@ export function Skills() {
                     alignItems: "center",
                     justifyContent: "space-between",
                     paddingTop: 10,
-                    borderTop: "1px solid #16163a",
+                    borderTop: "1px solid var(--border-subtle)",
                     marginTop: 2,
                   }}
                 >
                   {/* Attribution */}
-                  <div style={{ fontSize: 10, color: "#5a5a7a", fontFamily: "var(--font-mono)", display: "flex", gap: 6 }}>
+                  <div style={{ fontSize: 10, color: "var(--text-faint)", fontFamily: "var(--font-mono)", display: "flex", gap: 6 }}>
                     {skill.agent && <span>{skill.agent}</span>}
                     {skill.model_name && <span>· {skill.model_name}</span>}
                     <span>· {timeAgo(skill.created_at)}</span>
@@ -270,22 +270,22 @@ export function Skills() {
                         alignItems: "center",
                         gap: 4,
                         background: "none",
-                        border: "1px solid #16163a",
+                        border: "1px solid var(--border-subtle)",
                         borderRadius: 6,
                         padding: "3px 8px",
-                        color: "#8080a0",
+                        color: "var(--text-muted)",
                         fontSize: 11,
                         fontFamily: "var(--font-mono)",
                         cursor: "pointer",
                         transition: "all 0.15s",
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = "rgba(34, 211, 238, 0.5)";
-                        e.currentTarget.style.color = "#22d3ee";
+                        e.currentTarget.style.borderColor = "var(--border-hover)";
+                        e.currentTarget.style.color = "var(--cyan)";
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = "#16163a";
-                        e.currentTarget.style.color = "#8080a0";
+                        e.currentTarget.style.borderColor = "var(--border-subtle)";
+                        e.currentTarget.style.color = "var(--text-muted)";
                       }}
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -302,7 +302,7 @@ export function Skills() {
                         fontWeight: 600,
                         minWidth: 20,
                         textAlign: "center",
-                        color: net > 0 ? "#22d3ee" : net < 0 ? "#f87171" : "#5a5a7a",
+                        color: net > 0 ? "var(--cyan)" : net < 0 ? "var(--red)" : "var(--text-faint)",
                       }}
                     >
                       {net > 0 ? "+" : ""}{net}
@@ -316,10 +316,10 @@ export function Skills() {
                         alignItems: "center",
                         gap: 4,
                         background: "none",
-                        border: "1px solid #16163a",
+                        border: "1px solid var(--border-subtle)",
                         borderRadius: 6,
                         padding: "3px 8px",
-                        color: "#8080a0",
+                        color: "var(--text-muted)",
                         fontSize: 11,
                         fontFamily: "var(--font-mono)",
                         cursor: "pointer",
@@ -327,11 +327,11 @@ export function Skills() {
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.borderColor = "rgba(248, 113, 113, 0.5)";
-                        e.currentTarget.style.color = "#f87171";
+                        e.currentTarget.style.color = "var(--red)";
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = "#16163a";
-                        e.currentTarget.style.color = "#8080a0";
+                        e.currentTarget.style.borderColor = "var(--border-subtle)";
+                        e.currentTarget.style.color = "var(--text-muted)";
                       }}
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

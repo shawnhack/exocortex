@@ -46,7 +46,7 @@ export function Timeline() {
       >
         <div>
           <h1>Timeline</h1>
-          <p style={{ color: "#8080a0", fontSize: 13, margin: 0 }}>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, margin: 0 }}>
             Epoch &rarr; Theme &rarr; Episode hierarchy
           </p>
         </div>
@@ -54,9 +54,9 @@ export function Timeline() {
           value={month}
           onChange={(e) => setMonth(e.target.value)}
           style={{
-            background: "rgba(8, 8, 26, 0.8)",
-            border: "1px solid #16163a",
-            color: "#e8e8f4",
+            background: "var(--bg-overlay-medium)",
+            border: "1px solid var(--border-subtle)",
+            color: "var(--text-primary-alt)",
             padding: "6px 12px",
             borderRadius: 6,
             fontSize: 13,
@@ -73,7 +73,7 @@ export function Timeline() {
       </div>
 
       {data && data.epochs.length === 0 && data.orphan_themes.length === 0 && (
-        <div style={{ color: "#8080a0", padding: 40, textAlign: "center" }}>
+        <div style={{ color: "var(--text-muted)", padding: 40, textAlign: "center" }}>
           No epochs or narratives found
           {month ? ` for ${month}` : ""}.
         </div>
@@ -88,7 +88,7 @@ export function Timeline() {
           <h2
             style={{
               fontSize: 14,
-              color: "#8080a0",
+              color: "var(--text-muted)",
               fontWeight: 500,
               marginBottom: 12,
             }}
@@ -115,7 +115,7 @@ function EpochCard({ epoch }: { epoch: HierarchyEpoch }) {
     <div
       style={{
         marginBottom: 20,
-        border: "1px solid #1e1e4a",
+        border: "1px solid var(--border-mid)",
         borderRadius: 10,
         overflow: "hidden",
       }}
@@ -124,7 +124,7 @@ function EpochCard({ epoch }: { epoch: HierarchyEpoch }) {
         onClick={() => setExpanded(!expanded)}
         style={{
           width: "100%",
-          background: "rgba(34, 211, 238, 0.06)",
+          background: "var(--cyan-bg-subtle)",
           border: "none",
           padding: "14px 18px",
           cursor: "pointer",
@@ -136,7 +136,7 @@ function EpochCard({ epoch }: { epoch: HierarchyEpoch }) {
       >
         <span
           style={{
-            color: "#22d3ee",
+            color: "var(--cyan)",
             fontSize: 11,
             fontFamily: "var(--font-mono)",
             flexShrink: 0,
@@ -158,8 +158,8 @@ function EpochCard({ epoch }: { epoch: HierarchyEpoch }) {
               style={{
                 fontSize: 11,
                 fontFamily: "var(--font-mono)",
-                color: "#22d3ee",
-                background: "rgba(34, 211, 238, 0.1)",
+                color: "var(--cyan)",
+                background: "var(--cyan-bg-active)",
                 padding: "2px 8px",
                 borderRadius: 4,
               }}
@@ -169,14 +169,14 @@ function EpochCard({ epoch }: { epoch: HierarchyEpoch }) {
             <span
               style={{
                 fontSize: 11,
-                color: "#8080a0",
+                color: "var(--text-muted)",
                 fontFamily: "var(--font-mono)",
               }}
             >
               {epoch.themes.length} themes
             </span>
           </div>
-          <div style={{ color: "#c8c8e0", fontSize: 13, lineHeight: 1.5 }}>
+          <div style={{ color: "var(--text-body-light)", fontSize: 13, lineHeight: 1.5 }}>
             {preview}
           </div>
         </div>
@@ -189,7 +189,7 @@ function EpochCard({ epoch }: { epoch: HierarchyEpoch }) {
           ))}
           {epoch.themes.length === 0 && (
             <div
-              style={{ color: "#8080a0", fontSize: 12, padding: "8px 0" }}
+              style={{ color: "var(--text-muted)", fontSize: 12, padding: "8px 0" }}
             >
               No themes in this epoch
             </div>
@@ -211,7 +211,7 @@ function ThemeCard({ theme }: { theme: HierarchyTheme }) {
     <div
       style={{
         marginTop: 8,
-        border: "1px solid #16163a",
+        border: "1px solid var(--border-subtle)",
         borderRadius: 8,
         overflow: "hidden",
       }}
@@ -220,7 +220,7 @@ function ThemeCard({ theme }: { theme: HierarchyTheme }) {
         onClick={() => setExpanded(!expanded)}
         style={{
           width: "100%",
-          background: "rgba(52, 211, 153, 0.04)",
+          background: "var(--emerald-bg-subtle)",
           border: "none",
           padding: "10px 14px",
           cursor: "pointer",
@@ -232,7 +232,7 @@ function ThemeCard({ theme }: { theme: HierarchyTheme }) {
       >
         <span
           style={{
-            color: "#34d399",
+            color: "var(--emerald)",
             fontSize: 11,
             fontFamily: "var(--font-mono)",
             flexShrink: 0,
@@ -254,8 +254,8 @@ function ThemeCard({ theme }: { theme: HierarchyTheme }) {
               style={{
                 fontSize: 10,
                 fontFamily: "var(--font-mono)",
-                color: "#34d399",
-                background: "rgba(52, 211, 153, 0.1)",
+                color: "var(--emerald)",
+                background: "var(--emerald-bg-active)",
                 padding: "1px 6px",
                 borderRadius: 3,
               }}
@@ -263,21 +263,21 @@ function ThemeCard({ theme }: { theme: HierarchyTheme }) {
               THEME
             </span>
             {theme.linked && (
-              <span style={{ fontSize: 11, color: "#8080a0" }} title="Explicitly linked">
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }} title="Explicitly linked">
                 ~
               </span>
             )}
             <span
               style={{
                 fontSize: 11,
-                color: "#8080a0",
+                color: "var(--text-muted)",
                 fontFamily: "var(--font-mono)",
               }}
             >
               {theme.episodes.length} episodes
             </span>
           </div>
-          <div style={{ color: "#b8b8d0", fontSize: 12, lineHeight: 1.5 }}>
+          <div style={{ color: "var(--text-body-dim)", fontSize: 12, lineHeight: 1.5 }}>
             {preview}
           </div>
         </div>
@@ -290,7 +290,7 @@ function ThemeCard({ theme }: { theme: HierarchyTheme }) {
               key={ep.id}
               style={{
                 padding: "6px 0",
-                borderBottom: "1px solid #0d0d24",
+                borderBottom: "1px solid var(--border-inner)",
                 display: "flex",
                 alignItems: "flex-start",
                 gap: 8,
@@ -299,7 +299,7 @@ function ThemeCard({ theme }: { theme: HierarchyTheme }) {
               <Link
                 to={`/memory/${ep.id}`}
                 style={{
-                  color: "#a0a0be",
+                  color: "var(--text-secondary-alt)",
                   fontSize: 12,
                   textDecoration: "none",
                   lineHeight: 1.5,
@@ -320,7 +320,7 @@ function ThemeCard({ theme }: { theme: HierarchyTheme }) {
               >
                 {ep.linked && (
                   <span
-                    style={{ fontSize: 11, color: "#8080a0" }}
+                    style={{ fontSize: 11, color: "var(--text-muted)" }}
                     title="Explicitly linked"
                   >
                     ~
@@ -330,7 +330,7 @@ function ThemeCard({ theme }: { theme: HierarchyTheme }) {
                   style={{
                     fontSize: 10,
                     fontFamily: "var(--font-mono)",
-                    color: "#8080a0",
+                    color: "var(--text-muted)",
                   }}
                 >
                   {ep.importance.toFixed(1)}
