@@ -96,7 +96,9 @@ export class MemorySearch {
             for (const w of mWords) goalKeywords.add(w);
           }
         }
-      } catch {}
+      } catch (err) {
+        console.warn("[search] Goal keyword extraction failed:", (err as Error).message);
+      }
     }
 
     // Build WHERE clauses for filtering
@@ -222,8 +224,8 @@ export class MemorySearch {
           ftsRowids.push(Number(row.rowid));
         }
       }
-    } catch {
-      // FTS query may fail on unusual input; continue with vector-only
+    } catch (err) {
+      console.warn("[search] FTS query failed, falling back to vector-only:", (err as Error).message);
     }
 
     // Build candidate pool: FTS matches + recent memories
@@ -318,7 +320,7 @@ export class MemorySearch {
     // Batch-fetch link counts for quality score computation — only needed
     // when some rows lack a persisted quality_score
     const linkCountMap = new Map<string, number>();
-    const needsQualityCompute = rows.some((r) => (r as any).quality_score == null);
+    const needsQualityCompute = rows.some((r) => r.quality_score == null);
     if (rows.length > 0 && weights.quality > 0 && needsQualityCompute) {
       const ids = rows.map((r) => r.id);
       const placeholders = ids.map(() => "?").join(", ");
@@ -359,14 +361,14 @@ export class MemorySearch {
       }
 
       const ftsScore = ftsMatches.get(String(row._rowid)) ?? 0;
-      const recency = recencyScore(row.created_at, weights.recencyDecay, row.importance, (row as any).quality_score ?? undefined);
+      const recency = recencyScore(row.created_at, weights.recencyDecay, row.importance, row.quality_score ?? undefined);
       const freq = frequencyScore(row.access_count, maxAccessCount);
-      const usefulCount = (row as any).useful_count ?? 0;
+      const usefulCount = row.useful_count ?? 0;
       const usefulness = usefulnessScore(usefulCount);
-      const valence = valenceScore((row as any).valence ?? 0);
+      const valence = valenceScore(row.valence ?? 0);
       const memTags = candidateTagMap.get(row.id) ?? [];
       const goalRelevance = goalRelevanceScore(memTags, goalKeywords, row.content);
-      const persistedQuality = (row as any).quality_score as number | null;
+      const persistedQuality = row.quality_score;
       let quality: number;
       if (persistedQuality != null) {
         quality = persistedQuality;
@@ -450,13 +452,15 @@ export class MemorySearch {
           if (hasTagFilterMatch) {
             baseRrf = 1 / (rrfConfig.k + 1);
           } else if (hasQueryTagMatch) {
-            const denominator = rrfConfig.k + Math.max(10, candidates.length);
+            // Use count of RRF-scored results as rank position (stable regardless of total candidates)
+            const rrfScoredCount = rrfScores.size;
+            const denominator = rrfConfig.k + Math.max(10, rrfScoredCount) + 1;
             baseRrf = 1 / denominator;
           }
         }
 
         // Post-RRF multiplicative boost from recency + frequency + usefulness + valence + quality + tier
-        const memTier = (c.row as any).tier ?? "episodic";
+        const memTier = c.row.tier ?? "episodic";
         const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.quality * c.quality + weights.goalGated * c.goalRelevance + tierBoost(memTier);
         let score = baseRrf * boostMultiplier;
 
@@ -501,7 +505,7 @@ export class MemorySearch {
         score += weights.valence * c.valence;
         score += weights.quality * c.quality;
         score += weights.goalGated * c.goalRelevance;
-        const memTierLegacy = (c.row as any).tier ?? "episodic";
+        const memTierLegacy = c.row.tier ?? "episodic";
         score *= (1 + tierBoost(memTierLegacy));
 
         if (tagBoost > 0 && queryTerms.length > 0) {
@@ -547,8 +551,8 @@ export class MemorySearch {
       incrementCounter(this.db, "search.metadata_penalized_memories", penalizedMetadataCount);
     }
 
-    // Sort by score descending
-    scored.sort((a, b) => b.score - a.score);
+    // Sort by score descending, with deterministic tie-breaking by ID
+    scored.sort((a, b) => b.score - a.score || a.row.id.localeCompare(b.row.id));
 
     // Confidence gap filter: remove results far below the top score
     const parsedGapRatio = parseFloat(getSetting(this.db, "search.score_gap_ratio") ?? "0.15");
@@ -617,7 +621,7 @@ export class MemorySearch {
           chunk_index: row.chunk_index ?? null,
           keywords: row.keywords ?? undefined,
           metadata: rawMeta ? JSON.parse(rawMeta) : undefined,
-          tier: ((p.row as any).tier ?? "episodic") as import("./types.js").MemoryTier,
+          tier: (p.row.tier ?? "episodic") as import("./types.js").MemoryTier,
           tags: tagMap.get(row.id) ?? [],
         },
         score: p.score,

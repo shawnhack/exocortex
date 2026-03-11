@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { secureHeaders } from "hono/secure-headers";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { serve } from "@hono/node-server";
 import { getDb, initializeSchema } from "@exocortex/core";
@@ -18,7 +19,7 @@ import analyticsRoutes from "./routes/analytics.js";
 import retrievalRoutes from "./routes/retrieval.js";
 import libraryRoutes from "./routes/library.js";
 import mcpRoutes from "./routes/mcp.js";
-import { startScheduler } from "./scheduler.js";
+import { startScheduler, stopScheduler } from "./scheduler.js";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -51,17 +52,23 @@ export function createApp(): Hono {
   }
   app.use("*", errorHandler);
 
-  // Security headers
-  app.use("*", async (c, next) => {
-    await next();
-    c.header("X-Content-Type-Options", "nosniff");
-    c.header("X-Frame-Options", "DENY");
-    c.header("Referrer-Policy", "strict-origin-when-cross-origin");
-    c.header(
-      "Content-Security-Policy",
-      "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
-    );
-  });
+  // Security headers (Hono built-in — sets 12 headers including HSTS, CORP, COOP)
+  app.use(
+    "*",
+    secureHeaders({
+      contentSecurityPolicy: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:"],
+        connectSrc: ["'self'"],
+      },
+      referrerPolicy: "strict-origin-when-cross-origin",
+      xFrameOptions: "DENY",
+      // Disable HSTS since we serve over localhost HTTP
+      strictTransportSecurity: false,
+    })
+  );
 
   // MCP route (before auth — MCP protocol handles its own sessions)
   app.route("/", mcpRoutes);
@@ -89,6 +96,13 @@ export function createApp(): Hono {
   );
 
   if (fs.existsSync(dashboardDist)) {
+    // Content-hashed assets — cache aggressively (1 year, immutable)
+    app.use("/assets/*", async (c, next) => {
+      await next();
+      if (c.res.status === 200) {
+        c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    });
     app.use(
       "/assets/*",
       serveStatic({ root: dashboardDist, rewriteRequestPath: (p) => p })
@@ -151,11 +165,31 @@ export function startServer(
 
   console.log(`Exocortex server starting on http://${host}:${port}`);
 
-  serve({
+  const server = serve({
     fetch: app.fetch,
     port,
     hostname: host,
   }, (info) => {
     console.log(`Exocortex server listening on http://${host}:${info.port}`);
+  });
+
+  // Graceful shutdown
+  const shutdown = () => {
+    console.log("[exocortex] Shutting down...");
+    stopScheduler();
+    server.close(() => {
+      console.log("[exocortex] Server closed");
+      process.exit(0);
+    });
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+
+  // PM2 graceful shutdown on Windows (POSIX signals don't work on Windows,
+  // so PM2 sends an IPC message instead when shutdown_with_message is enabled)
+  process.on("message", (msg) => {
+    if (msg === "shutdown") {
+      shutdown();
+    }
   });
 }

@@ -2,25 +2,8 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type LibraryDocument, type LibraryDocumentDetail, type ResearchResult } from "../api/client";
 import { useToast } from "../components/Toast";
-
-const TIER_COLORS: Record<string, { color: string; bg: string }> = {
-  reference: { color: "#38bdf8", bg: "rgba(56, 189, 248, 0.15)" },
-  semantic: { color: "#a78bfa", bg: "rgba(167, 139, 250, 0.15)" },
-  procedural: { color: "#34d399", bg: "rgba(52, 211, 153, 0.15)" },
-  episodic: { color: "#fbbf24", bg: "rgba(251, 191, 36, 0.15)" },
-  working: { color: "#8080a0", bg: "rgba(128, 128, 160, 0.1)" },
-};
-
-function timeAgo(dateStr: string): string {
-  const d = new Date(dateStr.includes("T") ? dateStr : dateStr.replace(" ", "T") + "Z");
-  const diff = Date.now() - d.getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
+import { TIER_BADGE_COLORS } from "../constants/colors";
+import { timeAgo } from "../utils/format";
 
 function formatChars(chars: number): string {
   if (chars >= 1000000) return `${(chars / 1000000).toFixed(1)}M`;
@@ -522,7 +505,7 @@ function DocumentCard({
   onToggle: () => void;
   onDelete: () => void;
 }) {
-  const tierStyle = TIER_COLORS[doc.tier] ?? TIER_COLORS.reference;
+  const tierStyle = TIER_BADGE_COLORS[doc.tier] ?? TIER_BADGE_COLORS.reference;
 
   return (
     <div

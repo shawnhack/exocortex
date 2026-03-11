@@ -1,7 +1,12 @@
 import type { EmbeddingProvider } from "./types.js";
 
+// Pipeline from @huggingface/transformers — typed as `any` because the
+// FeatureExtractionPipeline union is too broad to narrow without importing
+// the full (heavy) module at parse time.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let pipeline: any = null;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getPipeline(model: string): Promise<any> {
   if (pipeline) return pipeline;
 

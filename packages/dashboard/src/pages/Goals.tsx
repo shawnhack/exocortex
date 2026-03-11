@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, type Goal } from "../api/client";
 import { useToast } from "../components/Toast";
+import { timeAgo } from "../utils/format";
 
 const STATUS_COLORS: Record<string, { color: string; bg: string }> = {
   active: { color: "#34d399", bg: "rgba(52, 211, 153, 0.15)" },
@@ -17,17 +18,6 @@ const PRIORITY_COLORS: Record<string, string> = {
   medium: "#fbbf24",
   low: "#8080a0",
 };
-
-function timeAgo(dateStr: string): string {
-  const d = new Date(dateStr.includes("T") ? dateStr : dateStr.replace(" ", "T") + "Z");
-  const diff = Date.now() - d.getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
 
 export function Goals() {
   const navigate = useNavigate();

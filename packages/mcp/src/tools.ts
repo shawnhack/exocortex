@@ -878,7 +878,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
 
         const lines = rows.map((r) => {
           let aliases: string[] = [];
-          try { aliases = JSON.parse(r.aliases); } catch {}
+          try { aliases = JSON.parse(r.aliases); } catch { /* malformed aliases JSON */ }
           const aliasStr = aliases.length > 0 ? ` (aka: ${aliases.join(", ")})` : "";
           const entityTags = (tagStmt.all(r.id) as Array<{ tag: string }>).map((t) => t.tag);
           const tagsStr = entityTags.length > 0 ? ` [${entityTags.join(", ")}]` : "";
@@ -1117,7 +1117,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
         }
 
         const sql = `
-          SELECT DISTINCT m.id, m.content, m.content_type, m.importance, m.created_at
+          SELECT DISTINCT m.id, m.content, m.content_type, m.importance, m.valence, m.created_at
           FROM memories m${tagJoin}
           WHERE ${conditions.join(" AND ")}
           ORDER BY m.created_at DESC
@@ -1130,6 +1130,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           content: string;
           content_type: string;
           importance: number;
+          valence: number;
           created_at: string;
         }>;
 
@@ -1169,7 +1170,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
           meta.push(`type: ${r.content_type}`);
           meta.push(`created: ${r.created_at}`);
           if (r.importance !== 0.5) meta.push(`importance: ${r.importance}`);
-          if ((r as any).valence !== 0) meta.push(`valence: ${(r as any).valence}`);
+          if (r.valence !== 0) meta.push(`valence: ${r.valence}`);
           return `[${r.id}] ${r.content}\n  (${meta.join(" | ")})`;
         });
 
@@ -1224,29 +1225,36 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
     },
     async (args) => {
       try {
-        const clusters = findClusters(db, {
+        // Always find raw clusters first (without community filtering)
+        const rawClusters = findClusters(db, {
           minSimilarity: args.min_similarity,
           minClusterSize: args.min_cluster_size,
           timeBucket: args.time_bucket,
-          communityAware: args.community_aware,
         });
 
-        if (clusters.length === 0) {
+        if (rawClusters.length === 0) {
           return { content: [{ type: "text", text: "No clusters found eligible for consolidation." }] };
         }
 
+        // Apply community-aware filtering if requested, falling back to raw if it eliminates everything
+        let clusters = rawClusters;
+        let caResult: ReturnType<typeof applyCommunityAwareFiltering> | undefined;
+        if (args.community_aware) {
+          caResult = applyCommunityAwareFiltering(db, rawClusters, args.min_cluster_size ?? 2);
+          if (caResult.clusters.length > 0) {
+            clusters = caResult.clusters;
+          }
+          // If community filtering eliminated all clusters, fall back to raw clusters
+        }
+
         if (args.dry_run !== false) {
-          // If community-aware, also report bridge/split info in the dry-run output
+          // If community-aware, report bridge/split info in the dry-run output
           let bridgeInfo = "";
-          if (args.community_aware) {
-            // Re-run without community filtering to get raw clusters for comparison
-            const rawClusters = findClusters(db, {
-              minSimilarity: args.min_similarity,
-              minClusterSize: args.min_cluster_size,
-              timeBucket: args.time_bucket,
-            });
-            const caResult = applyCommunityAwareFiltering(db, rawClusters, args.min_cluster_size ?? 2);
+          if (args.community_aware && caResult) {
             bridgeInfo = `\n\nCommunity-aware: ${caResult.clustersSplit} cluster(s) split at community boundaries, ${caResult.bridgeMemoryIds.length} bridge memory(ies) protected (importance boosted to 0.8+)`;
+            if (caResult.clusters.length === 0) {
+              bridgeInfo += ` — all sub-clusters fell below minClusterSize, using ${rawClusters.length} raw clusters`;
+            }
           }
 
           const lines = clusters.map((c, i) => {
@@ -1773,7 +1781,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
               .prepare("SELECT id FROM memories WHERE superseded_by = ?")
               .get(m.id) as { id: string } | undefined;
             if (predecessor) supersessionParts.push(`supersedes: ${predecessor.id}`);
-            if ((m as any).superseded_by) supersessionParts.push(`superseded_by: ${(m as any).superseded_by}`);
+            if (m.superseded_by) supersessionParts.push(`superseded_by: ${m.superseded_by}`);
 
             const memLinks = linkStore.getLinks(m.id);
             const linkParts = memLinks

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 
 export function SearchBar({
   onSearch,
@@ -9,11 +9,25 @@ export function SearchBar({
 }) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const debouncedSearch = useCallback(
+    (q: string) => {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => onSearch(q), 300);
+    },
+    [onSearch]
+  );
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setValue(v);
-    if (v.trim() === "") onSearch("");
+    if (v.trim() === "") {
+      clearTimeout(debounceRef.current);
+      onSearch("");
+    } else {
+      debouncedSearch(v.trim());
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -56,6 +70,7 @@ export function SearchBar({
         onChange={handleChange}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
+        aria-label="Search memories"
         placeholder="Search memories semantically..."
         style={{
           width: "100%",

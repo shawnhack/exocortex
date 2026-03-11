@@ -94,8 +94,10 @@ intelligence.get("/api/contradictions", (c) => {
 // GET /api/contradictions/:id
 intelligence.get("/api/contradictions/:id", (c) => {
   const db = getDb();
-  const all = getContradictions(db);
-  const contradiction = all.find((ct) => ct.id === c.req.param("id"));
+  const id = c.req.param("id");
+  const contradiction = db
+    .prepare("SELECT * FROM contradictions WHERE id = ?")
+    .get(id) as Record<string, unknown> | undefined;
   if (!contradiction) return c.json({ error: "Not found" }, 404);
   return c.json(contradiction);
 });

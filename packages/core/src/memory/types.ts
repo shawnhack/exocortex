@@ -31,6 +31,7 @@ export interface Memory {
   importance: number;
   valence: number;
   access_count: number;
+  useful_count: number;
   last_accessed_at: string | null;
   parent_id: string | null;
   is_active: boolean;
@@ -186,6 +187,7 @@ export interface MemoryRow {
   importance: number;
   valence: number;
   access_count: number;
+  useful_count: number;
   last_accessed_at: string | null;
   parent_id: string | null;
   is_active: number;

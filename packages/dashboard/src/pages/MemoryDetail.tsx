@@ -1,15 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Memory, type MemoryLinkResult } from "../api/client";
 import { useToast } from "../components/Toast";
-
-const FACT_TAG_COLORS: Record<string, { color: string; bg: string }> = {
-  decision: { color: "#38bdf8", bg: "rgba(56, 189, 248, 0.15)" },
-  discovery: { color: "#22d3ee", bg: "rgba(34, 211, 238, 0.15)" },
-  architecture: { color: "#34d399", bg: "rgba(52, 211, 153, 0.15)" },
-  learning: { color: "#fbbf24", bg: "rgba(251, 191, 36, 0.15)" },
-};
+import { FACT_TAG_COLORS } from "../constants/colors";
 
 function wordDiff(oldText: string, newText: string) {
   const oldWords = oldText.split(/\s+/);
@@ -100,6 +94,9 @@ export function MemoryDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["memory", id] });
       setIsEditing(false);
+    },
+    onError: (err) => {
+      toast((err as Error).message, "error");
     },
   });
 
@@ -1067,6 +1064,12 @@ function SupersessionView({ memory }: { memory: Memory }) {
       <span style={{ color: "#8080a0", fontSize: 13 }}>Loading supersession data...</span>
     </div>
   );
+  // Memoize expensive LCS word diff (O(m*n) where m,n = word counts)
+  const diffParts = useMemo(
+    () => supersededBy ? wordDiff(memory.content, supersededBy.content) : [],
+    [memory.content, supersededBy?.content]
+  );
+
   if (!supersededBy) return null;
 
   return (
@@ -1106,7 +1109,7 @@ function SupersessionView({ memory }: { memory: Memory }) {
             maxHeight: 300,
             overflowY: "auto",
           }}>
-            {wordDiff(memory.content, supersededBy.content).map((part, i) => (
+            {diffParts.map((part, i) => (
               <span
                 key={i}
                 style={{

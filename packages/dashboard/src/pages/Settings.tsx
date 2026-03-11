@@ -209,7 +209,14 @@ export function Settings() {
   }
 
   const renderToggle = (on: boolean, onToggle: () => void) => (
-    <div style={toggleTrackStyle(on)} onClick={onToggle}>
+    <div
+      role="switch"
+      aria-checked={on}
+      tabIndex={0}
+      style={toggleTrackStyle(on)}
+      onClick={onToggle}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } }}
+    >
       <div style={toggleKnobStyle(on)} />
     </div>
   );

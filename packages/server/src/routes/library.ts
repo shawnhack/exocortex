@@ -57,14 +57,22 @@ library.get("/api/library/documents", (c) => {
     )
     .get(...searchParams) as { cnt: number };
 
+  // Batch-fetch tags for all documents in one query (avoids N+1)
+  const tagMap = new Map<string, string[]>();
+  if (rows.length > 0) {
+    const placeholders = rows.map(() => "?").join(",");
+    const tagRows = db
+      .prepare(`SELECT memory_id, tag FROM memory_tags WHERE memory_id IN (${placeholders})`)
+      .all(...rows.map((r) => r.id)) as Array<{ memory_id: string; tag: string }>;
+    for (const t of tagRows) {
+      const arr = tagMap.get(t.memory_id) ?? [];
+      arr.push(t.tag);
+      tagMap.set(t.memory_id, arr);
+    }
+  }
+
   const documents = rows.map((r) => {
     const meta = r.metadata ? JSON.parse(r.metadata) : {};
-    const tags = (
-      db
-        .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
-        .all(r.id) as Array<{ tag: string }>
-    ).map((t) => t.tag);
-
     return {
       id: r.id,
       title: meta.document_title ?? r.source_uri,
@@ -75,7 +83,7 @@ library.get("/api/library/documents", (c) => {
       importance: r.importance,
       tier: r.tier,
       namespace: r.namespace,
-      tags,
+      tags: tagMap.get(r.id) ?? [],
       ingested_at: meta.ingested_at ?? r.created_at,
       created_at: r.created_at,
     };

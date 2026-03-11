@@ -1,40 +1,7 @@
 import { Link } from "react-router-dom";
 import type { Memory } from "../api/client";
-
-function parseUTC(dateStr: string): number {
-  const normalized = dateStr.includes("T") ? dateStr : dateStr.replace(" ", "T") + "Z";
-  return new Date(normalized).getTime();
-}
-
-function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = parseUTC(dateStr);
-  const diff = now - then;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
-
-const TIER_COLORS: Record<string, string> = {
-  working: "#8080a0",
-  episodic: "#fbbf24",
-  semantic: "#a78bfa",
-  procedural: "#34d399",
-  reference: "#38bdf8",
-};
-
-const FACT_TAG_COLORS: Record<string, { color: string; bg: string; border: string }> = {
-  decision: { color: "#38bdf8", bg: "rgba(56, 189, 248, 0.1)", border: "rgba(56, 189, 248, 0.2)" },
-  discovery: { color: "#22d3ee", bg: "rgba(34, 211, 238, 0.1)", border: "rgba(34, 211, 238, 0.2)" },
-  architecture: { color: "#34d399", bg: "rgba(52, 211, 153, 0.1)", border: "rgba(52, 211, 153, 0.2)" },
-  learning: { color: "#fbbf24", bg: "rgba(251, 191, 36, 0.1)", border: "rgba(251, 191, 36, 0.2)" },
-};
+import { TIER_COLORS, FACT_TAG_COLORS } from "../constants/colors";
+import { timeAgo } from "../utils/format";
 
 export function MemoryCard({
   memory,

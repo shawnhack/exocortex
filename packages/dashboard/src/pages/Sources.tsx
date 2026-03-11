@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { TIER_COLORS } from "../constants/colors";
 
 export function Dashboard() {
   const { data: stats, isLoading } = useQuery({
@@ -215,14 +216,6 @@ function BarChart({ data }: { data: Record<string, number> }) {
     </div>
   );
 }
-
-const TIER_COLORS: Record<string, string> = {
-  working: "#8080a0",
-  episodic: "#fbbf24",
-  semantic: "#a78bfa",
-  procedural: "#34d399",
-  reference: "#38bdf8",
-};
 
 const TIER_DESCRIPTIONS: Record<string, string> = {
   working: "Scratch — expires 24h",

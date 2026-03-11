@@ -1,4 +1,5 @@
 import type { Context, Next } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 export async function errorHandler(c: Context, next: Next) {
   try {
@@ -9,9 +10,9 @@ export async function errorHandler(c: Context, next: Next) {
       return c.json({ error: "Invalid JSON in request body" }, 400);
     }
 
-    const status =
-      err instanceof Error && "status" in err
-        ? (err as any).status
+    const status: ContentfulStatusCode =
+      err instanceof Error && "status" in err && typeof (err as Record<string, unknown>).status === "number"
+        ? ((err as Record<string, unknown>).status as ContentfulStatusCode)
         : 500;
     const message = status >= 500
       ? "Internal server error"

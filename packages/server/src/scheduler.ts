@@ -1,4 +1,4 @@
-import cron from "node-cron";
+import cron, { type ScheduledTask } from "node-cron";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -147,9 +147,23 @@ export async function runScheduledRetrievalRegression(): Promise<
  * - Nightly contradiction detection (2:30 AM)
  * - Entity extraction for unprocessed memories (3:00 AM)
  */
+const scheduledTasks: ScheduledTask[] = [];
+
+export function stopScheduler(): void {
+  for (const task of scheduledTasks) {
+    task.stop();
+  }
+  scheduledTasks.length = 0;
+  console.log("[scheduler] All background jobs stopped");
+}
+
+function schedule(expression: string, fn: () => void | Promise<void>): void {
+  scheduledTasks.push(cron.schedule(expression, fn));
+}
+
 export function startScheduler(): void {
   // Database backup — every day at 1:30 AM (before nightly maintenance pipeline)
-  cron.schedule("30 1 * * *", () => {
+  schedule("30 1 * * *", () => {
     try {
       console.log("[scheduler] Running database backup...");
       const db = getDb();
@@ -168,7 +182,7 @@ export function startScheduler(): void {
   });
 
   // Consolidation — every day at 2:00 AM
-  cron.schedule("0 2 * * *", async () => {
+  schedule("0 2 * * *", async () => {
     try {
       console.log("[scheduler] Running nightly consolidation scan...");
       const db = getDb();
@@ -186,7 +200,7 @@ export function startScheduler(): void {
   });
 
   // Contradiction detection — every day at 2:30 AM (disabled by default)
-  cron.schedule("30 2 * * *", () => {
+  schedule("30 2 * * *", () => {
     try {
       const db = getDb();
       if (getSetting(db, "contradictions.auto_detect") !== "true") {
@@ -214,7 +228,7 @@ export function startScheduler(): void {
   });
 
   // Entity extraction + relationship backfill — every day at 3:00 AM
-  cron.schedule("0 3 * * *", () => {
+  schedule("0 3 * * *", () => {
     try {
       console.log("[scheduler] Running entity backfill on unprocessed memories...");
       const db = getDb();
@@ -228,7 +242,7 @@ export function startScheduler(): void {
   });
 
   // Importance auto-adjustment — every day at 3:30 AM
-  cron.schedule("30 3 * * *", () => {
+  schedule("30 3 * * *", () => {
     try {
       const db = getDb();
       const enabled = getSetting(db, "importance.auto_adjust");
@@ -251,7 +265,7 @@ export function startScheduler(): void {
   });
 
   // Stale memory archival + expired + sentinel report expiry — every day at 4:00 AM
-  cron.schedule("0 4 * * *", () => {
+  schedule("0 4 * * *", () => {
     try {
       console.log("[scheduler] Running stale memory archival...");
       const db = getDb();
@@ -290,7 +304,7 @@ export function startScheduler(): void {
   });
 
   // Trash purge — every day at 4:30 AM
-  cron.schedule("30 4 * * *", () => {
+  schedule("30 4 * * *", () => {
     try {
       console.log("[scheduler] Running trash purge...");
       const db = getDb();
@@ -302,7 +316,7 @@ export function startScheduler(): void {
   });
 
   // Graph densification — every day at 5:00 AM
-  cron.schedule("0 5 * * *", () => {
+  schedule("0 5 * * *", () => {
     try {
       console.log("[scheduler] Running graph densification...");
       const db = getDb();
@@ -314,7 +328,7 @@ export function startScheduler(): void {
   });
 
   // Co-retrieval link building + cleanup — every day at 5:30 AM
-  cron.schedule("30 5 * * *", () => {
+  schedule("30 5 * * *", () => {
     try {
       console.log("[scheduler] Running co-retrieval link building...");
       const db = getDb();
@@ -339,7 +353,7 @@ export function startScheduler(): void {
 
   const regressionSchedule =
     getSetting(getDb(), "retrieval_regression.schedule") ?? "15 6 * * *";
-  cron.schedule(regressionSchedule, async () => {
+  schedule(regressionSchedule, async () => {
     try {
       await runScheduledRetrievalRegression();
     } catch (err) {
@@ -350,6 +364,29 @@ export function startScheduler(): void {
   console.log(
     `[scheduler] Background jobs scheduled (backup 1:30, consolidation 2:00, contradictions 2:30, entities 3:00, importance 3:30, archival 4:00, purge 4:30, densify 5:00, co-retrieval 5:30, retrieval-regression ${regressionSchedule})`
   );
+
+  // WAL checkpoint every 5 minutes — prevents WAL file growth when nightly
+  // batch jobs or frequent writes cause checkpoint starvation
+  const walCheckpointHandle = setInterval(() => {
+    try {
+      const db = getDb();
+      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch (err) {
+      console.error("[scheduler] WAL checkpoint error:", err);
+    }
+  }, 5 * 60 * 1000);
+  scheduledTasks.push({ stop: () => clearInterval(walCheckpointHandle) } as ScheduledTask);
+
+  // Re-analyze query planner stats every 4 hours (supplements startup optimize)
+  const optimizeHandle = setInterval(() => {
+    try {
+      const db = getDb();
+      db.exec("PRAGMA optimize");
+    } catch (err) {
+      console.error("[scheduler] PRAGMA optimize error:", err);
+    }
+  }, 4 * 60 * 60 * 1000);
+  scheduledTasks.push({ stop: () => clearInterval(optimizeHandle) } as ScheduledTask);
 
   // Run maintenance on startup (short delay to not block server init)
   setTimeout(async () => {

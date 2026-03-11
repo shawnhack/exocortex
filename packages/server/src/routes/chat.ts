@@ -4,6 +4,18 @@ import { getDb, MemorySearch, getAllSettings } from "@exocortex/core";
 import type { Memory } from "@exocortex/core";
 import { stripEmbedding } from "../utils.js";
 
+interface ApiErrorResponse {
+  error?: { message?: string };
+}
+
+interface OpenAIResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+}
+
+interface AnthropicResponse {
+  content?: Array<{ text?: string }>;
+}
+
 const chat = new Hono();
 
 // Simple sliding window rate limiter (20 req/min global)
@@ -93,9 +105,13 @@ ${context || "(No relevant memories found)"}`;
       content: m.content,
     }));
 
+    // 30s timeout on external API calls to prevent indefinite hangs
+    const apiTimeout = AbortSignal.timeout(30_000);
+
     if (provider === "openai") {
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
+        signal: apiTimeout,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
@@ -111,24 +127,25 @@ ${context || "(No relevant memories found)"}`;
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = (await res.json().catch(() => ({}))) as ApiErrorResponse;
         throw new Error(
-          (err as any).error?.message ?? `OpenAI API error: ${res.status}`
+          err.error?.message ?? `OpenAI API error: ${res.status}`
         );
       }
-      const data = (await res.json()) as any;
+      const data = (await res.json()) as OpenAIResponse;
       responseText = data.choices?.[0]?.message?.content ?? "No response from API";
     } else {
       // Anthropic (default)
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
+        signal: apiTimeout,
         headers: {
           "Content-Type": "application/json",
           "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: settings["ai.model"] || "claude-sonnet-4-5-20250929",
+          model: settings["ai.model"] || "claude-sonnet-4-6",
           max_tokens: 1024,
           system: systemPrompt,
           messages: [
@@ -138,12 +155,12 @@ ${context || "(No relevant memories found)"}`;
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = (await res.json().catch(() => ({}))) as ApiErrorResponse;
         throw new Error(
-          (err as any).error?.message ?? `Anthropic API error: ${res.status}`
+          err.error?.message ?? `Anthropic API error: ${res.status}`
         );
       }
-      const data = (await res.json()) as any;
+      const data = (await res.json()) as AnthropicResponse;
       responseText = data.content?.[0]?.text ?? "No response from API";
     }
 

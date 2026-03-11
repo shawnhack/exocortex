@@ -55,7 +55,7 @@ export function findClusters(
 ): ConsolidationCluster[] {
   const minSimilarity = options.minSimilarity ?? 0.80;
   const minClusterSize = options.minClusterSize ?? 2;
-  const maxMemories = options.maxMemories ?? 500;
+  const maxMemories = options.maxMemories ?? 2000;
 
   // Build bucket column expression if time-constrained clustering is requested
   const bucketExpr = options.timeBucket === 'week'
@@ -599,9 +599,11 @@ export function validateSummary(
   }
 
   // Reject summaries that are mostly extracted specifics / bullet lists with no prose
+  // Relax for small clusters (2 members) where structured output is natural
   const lines = summaryContent.split('\n').filter(l => l.trim().length > 0);
   const bulletLines = lines.filter(l => /^\s*[-*•]/.test(l));
-  if (lines.length >= 5 && bulletLines.length / lines.length > 0.85) {
+  const bulletThreshold = sourceContents.length <= 2 ? 0.95 : 0.85;
+  if (lines.length >= 5 && bulletLines.length / lines.length > bulletThreshold) {
     reasons.push(`Summary is ${Math.round(bulletLines.length / lines.length * 100)}% bullet points — needs more synthesis`);
   }
 
@@ -611,7 +613,8 @@ export function validateSummary(
     reasons.push(`Summary is only ${Math.round(summaryContent.length / sourceLength * 100)}% of source length — too much information lost`);
   }
 
-  // Check proper noun preservation (>= 50%)
+  // Check proper noun preservation — adaptive threshold based on noun count.
+  // With many unique nouns (>30), a concise summary can't mention them all.
   const sourceNouns = new Set<string>();
   for (const src of sourceContents) {
     for (const noun of extractProperNouns(src)) sourceNouns.add(noun);
@@ -624,9 +627,10 @@ export function validateSummary(
       if (summaryLower.includes(noun.toLowerCase())) preserved++;
     }
     const ratio = preserved / sourceNouns.size;
-    if (ratio < 0.5) {
+    const minRatio = sourceNouns.size > 60 ? 0.15 : sourceNouns.size > 30 ? 0.25 : 0.5;
+    if (ratio < minRatio) {
       reasons.push(
-        `Only ${Math.round(ratio * 100)}% of proper nouns preserved (${preserved}/${sourceNouns.size}, min 50%)`
+        `Only ${Math.round(ratio * 100)}% of proper nouns preserved (${preserved}/${sourceNouns.size}, min ${Math.round(minRatio * 100)}%)`
       );
     }
   }
@@ -635,6 +639,38 @@ export function validateSummary(
 }
 
 // --- Auto-consolidation (no LLM needed) ---
+
+/**
+ * In-memory cooldown for clusters that fail quality validation.
+ * Key: sorted member IDs joined with ",", Value: next eligible timestamp.
+ * Prevents the same cluster from being retried every maintenance cycle.
+ * Uses exponential backoff: 1h → 2h → 4h → 8h (capped).
+ */
+const failedClusterCooldowns = new Map<string, { until: number; attempts: number }>();
+const MAX_COOLDOWN_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+function clusterKey(memberIds: string[]): string {
+  return [...memberIds].sort().join(",");
+}
+
+function isClusterOnCooldown(memberIds: string[]): boolean {
+  const key = clusterKey(memberIds);
+  const entry = failedClusterCooldowns.get(key);
+  if (!entry) return false;
+  if (Date.now() >= entry.until) {
+    // Cooldown expired — eligible for retry (keep attempts for backoff)
+    return false;
+  }
+  return true;
+}
+
+function recordClusterFailure(memberIds: string[]): void {
+  const key = clusterKey(memberIds);
+  const entry = failedClusterCooldowns.get(key);
+  const attempts = (entry?.attempts ?? 0) + 1;
+  const cooldownMs = Math.min(60 * 60 * 1000 * Math.pow(2, attempts - 1), MAX_COOLDOWN_MS);
+  failedClusterCooldowns.set(key, { until: Date.now() + cooldownMs, attempts });
+}
 
 export interface AutoConsolidateResult {
   clustersFound: number;
@@ -668,6 +704,9 @@ export async function autoConsolidate(
   let memoriesMerged = 0;
 
   for (const cluster of toProcess) {
+    // Skip clusters on cooldown from previous validation failures
+    if (isClusterOnCooldown(cluster.memberIds)) continue;
+
     const summary = generateBasicSummary(db, cluster.memberIds);
     if (!summary) continue;
 
@@ -679,6 +718,7 @@ export async function autoConsolidate(
       .all(...cluster.memberIds) as Array<{ content: string }>;
     const validation = validateSummary(summary, sourceContents.map((r) => r.content));
     if (!validation.valid) {
+      recordClusterFailure(cluster.memberIds);
       console.warn(
         `[consolidation] Skipping cluster (${cluster.memberIds.length} members): ${validation.reasons.join("; ")}`
       );

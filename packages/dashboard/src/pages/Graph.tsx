@@ -61,19 +61,20 @@ export function Graph() {
   const [showLabels, setShowLabels] = useState(true);
   showLabelsRef.current = showLabels;
 
-  const { data: graphData, isLoading: graphLoading } = useQuery({
+  const { data: graphData, isLoading: graphLoading, error: graphError } = useQuery({
     queryKey: ["entity-graph"],
     queryFn: () => api.getEntityGraph(),
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: analysisData, isLoading: analysisLoading } = useQuery({
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useQuery({
     queryKey: ["entity-graph-analysis"],
     queryFn: () => api.getEntityGraphAnalysis(),
     staleTime: 5 * 60 * 1000,
   });
 
   const isLoading = graphLoading || analysisLoading;
+  const loadError = graphError || analysisError;
 
   // Single init effect — runs once when both queries resolve
   useEffect(() => {
@@ -405,6 +406,16 @@ export function Graph() {
     );
   }
 
+  if (loadError) {
+    return (
+      <div className="loading">
+        <span style={{ color: "var(--red, #f87171)" }}>
+          Error loading graph: {(loadError as Error).message}
+        </span>
+      </div>
+    );
+  }
+
   const stats = analysisData?.stats;
 
   // Empty state — no entities yet
@@ -476,6 +487,7 @@ export function Graph() {
           <input
             type="text"
             placeholder="Search entities..."
+            aria-label="Search entities"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="mono"

@@ -119,7 +119,8 @@ const CREATE_FTS = `
   CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     content,
     content='memories',
-    content_rowid='rowid'
+    content_rowid='rowid',
+    tokenize='porter unicode61'
   );
 `;
 
@@ -150,7 +151,8 @@ const CREATE_FTS_WITH_KEYWORDS = `
     content,
     keywords,
     content='memories',
-    content_rowid='rowid'
+    content_rowid='rowid',
+    tokenize='porter unicode61'
   );
 `;
 
@@ -712,7 +714,17 @@ export function initializeSchema(db: DatabaseSync): void {
     needsTierBackfill = true;
   }
 
-  // Rebuild FTS5 to include keywords if needed
+  // Migrate FTS5 to porter stemmer if still using default tokenizer
+  if (!needsFtsRebuild) {
+    const ftsDef = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories_fts'")
+      .get() as { sql: string } | undefined;
+    if (ftsDef && !ftsDef.sql.includes("porter")) {
+      needsFtsRebuild = true;
+    }
+  }
+
+  // Rebuild FTS5 to include keywords/porter if needed
   if (needsFtsRebuild) {
     // Drop existing FTS table and triggers, recreate with keywords
     db.exec("DROP TRIGGER IF EXISTS memories_ai");

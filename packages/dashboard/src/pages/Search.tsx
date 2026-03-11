@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api, type SearchResult } from "../api/client";
@@ -119,13 +119,24 @@ export function Search() {
     enabled: query.length === 0,
   });
 
-  const allResults = query.length > 0
-    ? searchData?.pages.flatMap(p => p.results.map(r => r.memory)) ?? []
-    : browseData?.pages.flatMap(p => p.results) ?? [];
+  const allResults = useMemo(
+    () => query.length > 0
+      ? searchData?.pages.flatMap(p => p.results.map(r => r.memory)) ?? []
+      : browseData?.pages.flatMap(p => p.results) ?? [],
+    [query.length, searchData?.pages, browseData?.pages]
+  );
 
-  const allSearchResults = query.length > 0
-    ? searchData?.pages.flatMap(p => p.results) ?? []
-    : [];
+  const allSearchResults = useMemo(
+    () => query.length > 0
+      ? searchData?.pages.flatMap(p => p.results) ?? []
+      : [],
+    [query.length, searchData?.pages]
+  );
+
+  const groupedResults = useMemo(
+    () => groupByDate(allResults as any),
+    [allResults]
+  );
 
   const totalCount = allResults.length;
   const hasData = query.length > 0 ? !!searchData : !!browseData;
@@ -404,7 +415,11 @@ export function Search() {
               >
                 {tag}
                 <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Remove ${tag} filter`}
                   onClick={() => removeTagFilter(tag)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); removeTagFilter(tag); } }}
                   style={{ cursor: "pointer", opacity: 0.7, fontSize: 14, lineHeight: 1 }}
                 >
                   &times;
@@ -986,7 +1001,7 @@ export function Search() {
               );
             })
           ) : (
-            groupByDate(allResults as any).map(([date, memories]) => (
+            groupedResults.map(([date, memories]) => (
               <div key={date} style={{ marginBottom: 24 }}>
                 <div
                   style={{

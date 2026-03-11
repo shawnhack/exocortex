@@ -1425,7 +1425,7 @@ export class MemoryStore {
         const chunks = splitIntoChunks(replaceChunksContent, { targetSize });
         const parentRow = this.db
           .prepare(
-            "SELECT content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, valence, metadata, is_indexed, is_metadata FROM memories WHERE id = ?"
+            "SELECT content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, importance, valence, metadata, is_indexed, is_metadata, tier FROM memories WHERE id = ?"
           )
           .get(id) as
           | {
@@ -1443,6 +1443,7 @@ export class MemoryStore {
               metadata: string | null;
               is_indexed: number;
               is_metadata: number;
+              tier: string;
             }
           | undefined;
 
@@ -1498,7 +1499,7 @@ export class MemoryStore {
               id,
               i,
               parentRow.metadata,
-              (parentRow as any).tier ?? "episodic",
+              parentRow.tier ?? "episodic",
               now,
               now
             );

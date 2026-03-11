@@ -128,7 +128,8 @@ export async function reembedAll(
         const buffer = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
         update.run(buffer, modelName, new Date().toISOString().replace("T", " ").replace("Z", ""), row.id);
         processed++;
-      } catch {
+      } catch (err) {
+        console.warn(`[maintenance] Re-embed failed for ${row.id}:`, (err as Error).message);
         failed++;
       }
     }
@@ -672,6 +673,7 @@ export function promoteMemoryTiers(
     ).get() as { c: number }).c;
     const toProcedural = (db.prepare(
       `SELECT COUNT(*) as c FROM memories WHERE tier = 'episodic' AND is_active = 1
+       AND source != 'consolidation'
        AND id IN (SELECT memory_id FROM memory_tags WHERE tag IN ('technique', 'learning', 'how-to', 'procedure'))`
     ).get() as { c: number }).c;
     const toEpisodic = (db.prepare(
@@ -687,6 +689,7 @@ export function promoteMemoryTiers(
   const r2 = db.prepare(
     `UPDATE memories SET tier = 'procedural', updated_at = ?
      WHERE tier = 'episodic' AND is_active = 1
+       AND source != 'consolidation'
        AND id IN (SELECT memory_id FROM memory_tags WHERE tag IN ('technique', 'learning', 'how-to', 'procedure'))`
   ).run(now) as { changes: number };
 

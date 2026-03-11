@@ -1,9 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, type Memory } from "../api/client";
 import { useToast } from "../components/Toast";
 import { tagColor } from "../utils/tagColor";
+import { timeAgo } from "../utils/format";
 
 function parseTitle(content: string): string {
   const firstLine = content.split("\n")[0] || "";
@@ -15,17 +16,6 @@ function parsePreview(content: string): string {
   const body = lines.slice(1).join("\n").trim();
   if (body.length <= 150) return body;
   return body.slice(0, 150).trimEnd() + "...";
-}
-
-function timeAgo(dateStr: string): string {
-  const d = new Date(dateStr.includes("T") ? dateStr : dateStr.replace(" ", "T") + "Z");
-  const diff = Date.now() - d.getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 export function Skills() {
@@ -51,9 +41,15 @@ export function Skills() {
 
   const skills: Memory[] = data?.results ?? [];
 
-  const allTags = Array.from(new Set(skills.flatMap((s) => (s.tags ?? []).filter((t) => t !== "skill"))));
+  const allTags = useMemo(
+    () => Array.from(new Set(skills.flatMap((s) => (s.tags ?? []).filter((t) => t !== "skill")))),
+    [skills]
+  );
 
-  const filteredSkills = filter === "all" ? skills : skills.filter((s) => s.tags?.includes(filter));
+  const filteredSkills = useMemo(
+    () => filter === "all" ? skills : skills.filter((s) => s.tags?.includes(filter)),
+    [skills, filter]
+  );
 
   const handleVote = useCallback(
     (e: React.MouseEvent, id: string, field: "helpful" | "harmful", currentVal: number) => {

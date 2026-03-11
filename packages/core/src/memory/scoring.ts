@@ -36,10 +36,11 @@ export function getWeights(db: DatabaseSync): ScoringWeights {
 }
 
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  const len = Math.min(a.length, b.length);
   let dot = 0;
   let normA = 0;
   let normB = 0;
-  for (let i = 0; i < a.length; i++) {
+  for (let i = 0; i < len; i++) {
     dot += a[i] * b[i];
     normA += a[i] * a[i];
     normB += b[i] * b[i];
@@ -157,8 +158,8 @@ export function qualityScore(
   const access = accessCount > 0 ? Math.min(1.0, Math.log(1 + accessCount) / Math.log(21)) : 0;
   // Links: saturates at 5
   const links = linkCount > 0 ? Math.min(1.0, linkCount / 5) : 0;
-  // Freshness: exponential decay over 90 days
-  const freshness = Math.exp(-0.02 * ageDays);
+  // Freshness: exponential decay over 90 days (clamp age to non-negative)
+  const freshness = Math.exp(-0.02 * Math.max(0, ageDays));
 
   const score =
     0.30 * importance +
@@ -230,7 +231,7 @@ export function reciprocalRankFusion(
 
   for (const list of rankedLists) {
     // Sort descending by score to get ranks
-    const sorted = [...list.entries].sort((a, b) => b.score - a.score);
+    const sorted = [...list.entries].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
     for (let rank = 0; rank < sorted.length; rank++) {
       const entry = sorted[rank];
       const rrf = list.weight / (k + rank + 1); // rank+1 because ranks are 1-based
