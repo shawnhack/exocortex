@@ -138,13 +138,13 @@ export function createApp(): Hono {
       await next();
     });
 
-    // SPA fallback: serve index.html for non-API routes
+    // SPA fallback: serve index.html for non-API routes (cached at startup)
+    const indexPath = path.join(dashboardDist, "index.html");
+    const indexHtml = fs.existsSync(indexPath)
+      ? fs.readFileSync(indexPath, "utf-8")
+      : null;
     app.get("*", (c) => {
-      const indexPath = path.join(dashboardDist, "index.html");
-      if (fs.existsSync(indexPath)) {
-        const html = fs.readFileSync(indexPath, "utf-8");
-        return c.html(html);
-      }
+      if (indexHtml) return c.html(indexHtml);
       return c.text("Dashboard not built. Run: pnpm --filter @exocortex/dashboard build", 404);
     });
   }
