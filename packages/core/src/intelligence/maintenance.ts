@@ -67,7 +67,8 @@ export async function reembedMissing(
         const buffer = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
         update.run(buffer, new Date().toISOString().replace("T", " ").replace("Z", ""), row.id);
         processed++;
-      } catch {
+      } catch (err) {
+        console.warn(`[maintenance] Re-embed failed for ${row.id}:`, (err as Error).message);
         failed++;
       }
     }
@@ -466,8 +467,8 @@ export function tuneWeights(
   // Usefulness: self-reinforcing — if feedback is accumulating, slightly boost
   const usefulnessNudge = useful.length > 20 ? maxNudge : 0;
 
-  // Apply nudges with bounds [0.02, 0.40]
-  const clamp = (v: number) => Math.round(Math.max(0.02, Math.min(0.40, v)) * 100) / 100;
+  // Apply nudges with bounds [0.02, 0.50] (upper must accommodate default vector=0.45)
+  const clamp = (v: number) => Math.round(Math.max(0.02, Math.min(0.50, v)) * 100) / 100;
 
   const newWeights = {
     recency: clamp(currentWeights.recency + recencyNudge),

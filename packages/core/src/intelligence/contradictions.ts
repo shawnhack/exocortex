@@ -243,9 +243,10 @@ function truncSentence(s: string): string {
 
 function extractValues(text: string): Array<[string, string]> {
   const results: Array<[string, string]> = [];
-  const pattern = new RegExp(VALUE_PATTERN.source, "gi");
+  // Reset lastIndex on the shared regex before use (global flag is stateful)
+  VALUE_PATTERN.lastIndex = 0;
   let match;
-  while ((match = pattern.exec(text)) !== null) {
+  while ((match = VALUE_PATTERN.exec(text)) !== null) {
     results.push([match[0], match[1]]);
   }
   return results;

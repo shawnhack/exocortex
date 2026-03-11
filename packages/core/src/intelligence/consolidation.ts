@@ -289,19 +289,34 @@ export function applyCommunityAwareFiltering(
 
     // Split: create sub-clusters per community
     clustersSplit++;
+
+    // Batch-fetch centroid content for all sub-clusters (avoids N+1 queries)
+    const centroidIds: string[] = [];
+    for (const [, memberIds] of byCommunity) {
+      if (memberIds.length < minClusterSize) continue;
+      centroidIds.push(
+        memberIds.includes(cluster.centroidId) ? cluster.centroidId : memberIds[0]
+      );
+    }
+    const centroidContentMap = new Map<string, string>();
+    if (centroidIds.length > 0) {
+      const placeholders = centroidIds.map(() => "?").join(",");
+      const rows = db
+        .prepare(`SELECT id, content FROM memories WHERE id IN (${placeholders})`)
+        .all(...centroidIds) as Array<{ id: string; content: string }>;
+      for (const row of rows) {
+        centroidContentMap.set(row.id, row.content);
+      }
+    }
+
     for (const [, memberIds] of byCommunity) {
       if (memberIds.length < minClusterSize) continue;
 
-      // Pick the original centroid if it's in this sub-cluster, otherwise first member
       const centroidId = memberIds.includes(cluster.centroidId)
         ? cluster.centroidId
         : memberIds[0];
 
-      // Retrieve content for topic extraction
-      const firstContent = db
-        .prepare("SELECT content FROM memories WHERE id = ?")
-        .get(centroidId) as { content: string } | undefined;
-      const topicContent = firstContent?.content ?? cluster.topic;
+      const topicContent = centroidContentMap.get(centroidId) ?? cluster.topic;
       const topic = topicContent.slice(0, 80).replace(/\s+/g, " ").trim();
 
       resultClusters.push({
