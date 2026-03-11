@@ -736,7 +736,7 @@ export async function autoConsolidate(
     const validation = validateSummary(summary, sourceContents.map((r) => r.content));
     if (!validation.valid) {
       recordClusterFailure(db, cluster.memberIds);
-      console.warn(
+      console.log(
         `[consolidation] Skipping cluster (${cluster.memberIds.length} members): ${validation.reasons.join("; ")}`
       );
       continue;
