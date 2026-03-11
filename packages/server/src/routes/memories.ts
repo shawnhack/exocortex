@@ -10,7 +10,7 @@ import {
   exportData,
 } from "@exocortex/core";
 import { notifyMemoryStored } from "../scheduler.js";
-import { stripEmbedding } from "../utils.js";
+import { parseIntQuery, stripEmbedding } from "../utils.js";
 
 const memories = new Hono();
 
@@ -101,13 +101,6 @@ const searchSchema = z.object({
 });
 
 const settingsPatchSchema = z.record(z.string(), z.string());
-
-function parseIntQuery(value: string | undefined, fallback: number, min: number, max: number): number {
-  if (value === undefined) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
 
 function isSensitiveSettingKey(key: string): boolean {
   return /(api[_-]?key|token|secret|password)/i.test(key);

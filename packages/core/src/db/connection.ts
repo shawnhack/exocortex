@@ -34,6 +34,7 @@ export function getDb(dbPath?: string): DatabaseSync {
   db.exec("PRAGMA mmap_size = 268435456"); // 256MB mmap — avoids read() syscalls for DB < 256MB
   db.exec("PRAGMA temp_store = MEMORY");   // keep temp tables in memory
   db.exec("PRAGMA journal_size_limit = 33554432"); // 32MB — caps WAL file size between checkpoints
+  db.exec("PRAGMA analysis_limit = 400");  // cap rows sampled per index during ANALYZE (faster optimize)
   db.exec("PRAGMA optimize(0x10002)");     // seed query planner stats on open (not just close)
 
   dbByPath.set(resolvedPath, db);

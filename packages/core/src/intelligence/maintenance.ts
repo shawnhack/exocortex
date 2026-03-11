@@ -416,18 +416,29 @@ export function tuneWeights(
   const usefulAvgImportance = mean(useful.map((m) => m.importance));
   const notUsefulAvgImportance = mean(notUseful.map((m) => m.importance));
 
-  // Count links per memory
-  const countLinks = (id: string): number => {
-    const row = db
+  // Batch-fetch link counts for all retrieved memories (avoids N+1)
+  const linkCountMap = new Map<string, number>();
+  const allIds = rows.map((r) => r.id);
+  const linkBatchSize = 500;
+  for (let i = 0; i < allIds.length; i += linkBatchSize) {
+    const batch = allIds.slice(i, i + linkBatchSize);
+    const placeholders = batch.map(() => "?").join(", ");
+    const linkRows = db
       .prepare(
-        "SELECT COUNT(*) as cnt FROM memory_links WHERE source_id = ? OR target_id = ?"
+        `SELECT id, COUNT(*) as cnt FROM (
+          SELECT source_id as id FROM memory_links WHERE source_id IN (${placeholders})
+          UNION ALL
+          SELECT target_id as id FROM memory_links WHERE target_id IN (${placeholders})
+        ) GROUP BY id`
       )
-      .get(id, id) as { cnt: number };
-    return row.cnt;
-  };
+      .all(...batch, ...batch) as Array<{ id: string; cnt: number }>;
+    for (const lr of linkRows) {
+      linkCountMap.set(lr.id, lr.cnt);
+    }
+  }
 
-  const usefulAvgLinks = mean(useful.map((m) => countLinks(m.id)));
-  const notUsefulAvgLinks = mean(notUseful.map((m) => countLinks(m.id)));
+  const usefulAvgLinks = mean(useful.map((m) => linkCountMap.get(m.id) ?? 0));
+  const notUsefulAvgLinks = mean(notUseful.map((m) => linkCountMap.get(m.id) ?? 0));
 
   // Current weights
   const currentWeights = {

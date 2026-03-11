@@ -15,20 +15,9 @@ import {
   getSearchMisses,
   getQueryOutcomes,
 } from "@exocortex/core";
+import { parseIntQuery } from "../utils.js";
 
 const analytics = new Hono();
-
-function parseIntQuery(
-  value: string | undefined,
-  fallback: number,
-  min: number,
-  max: number
-): number {
-  if (value === undefined) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
 
 analytics.get("/api/analytics/summary", (c) => {
   const db = getDb();

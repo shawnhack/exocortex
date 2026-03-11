@@ -22,15 +22,10 @@ import {
   autoConsolidate,
 } from "@exocortex/core";
 
+import { parseIntQuery } from "../utils.js";
+
 const intelligence = new Hono();
 const contradictionStatusSchema = z.enum(["pending", "resolved", "dismissed"]);
-
-function parseIntQuery(value: string | undefined, fallback: number, min: number, max: number): number {
-  if (value === undefined) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
 
 // POST /api/consolidate — find clusters and optionally consolidate them
 intelligence.post("/api/consolidate", async (c) => {
