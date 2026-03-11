@@ -22,6 +22,7 @@ import {
   buildCoRetrievalLinks,
   runRetrievalRegression,
   autoConsolidate,
+  validateSummary,
   expireSentinelReports,
   suggestTagMerges,
   applyTagMerge,
@@ -182,18 +183,36 @@ export function startScheduler(): void {
   });
 
   // Consolidation — every day at 2:00 AM
+  // Uses quality validation to prevent bad summaries from being persisted
   schedule("0 2 * * *", async () => {
     try {
       console.log("[scheduler] Running nightly consolidation scan...");
       const db = getDb();
       const clusters = findClusters(db);
+      let consolidated = 0;
+      let skipped = 0;
 
       for (const cluster of clusters) {
         const summary = generateBasicSummary(db, cluster.memberIds);
+        if (!summary) { skipped++; continue; }
+
+        // Validate summary quality before consolidating
+        const sourceContents = db
+          .prepare(
+            `SELECT content FROM memories WHERE id IN (${cluster.memberIds.map(() => "?").join(",")})`
+          )
+          .all(...cluster.memberIds) as Array<{ content: string }>;
+        const validation = validateSummary(summary, sourceContents.map((r) => r.content));
+        if (!validation.valid) {
+          skipped++;
+          continue;
+        }
+
         await consolidateCluster(db, cluster, summary);
+        consolidated++;
       }
 
-      console.log(`[scheduler] Consolidation complete: ${clusters.length} clusters processed`);
+      console.log(`[scheduler] Consolidation complete: ${consolidated}/${clusters.length} clusters consolidated${skipped > 0 ? `, ${skipped} skipped (quality check)` : ""}`);
     } catch (err) {
       console.error("[scheduler] Consolidation error:", err);
     }
