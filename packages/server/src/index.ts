@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { compress } from "hono/compress";
 import { secureHeaders } from "hono/secure-headers";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { serve } from "@hono/node-server";
@@ -51,6 +52,7 @@ export function createApp(): Hono {
     );
   }
   app.use("*", errorHandler);
+  app.use("*", compress({ threshold: 1024 }));
 
   // Security headers (Hono built-in — sets 12 headers including HSTS, CORP, COOP)
   app.use(
