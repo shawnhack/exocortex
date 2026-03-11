@@ -402,7 +402,7 @@ export function tuneWeights(
   const now = Date.now();
   const daysSince = (createdAt: string) => {
     const ts = new Date(createdAt + (createdAt.includes("Z") ? "" : "Z")).getTime();
-    return (now - ts) / (1000 * 60 * 60 * 24);
+    return Number.isFinite(ts) ? (now - ts) / (1000 * 60 * 60 * 24) : 0;
   };
 
   // Compute average properties for each group

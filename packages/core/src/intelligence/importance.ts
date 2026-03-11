@@ -57,7 +57,8 @@ export function adjustImportance(
 
   const now = Date.now();
   for (const row of boostCandidates) {
-    const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
+    const createdTs = new Date(row.created_at + (row.created_at.includes("Z") ? "" : "Z")).getTime();
+    const ageDays = Number.isFinite(createdTs) ? (now - createdTs) / (1000 * 60 * 60 * 24) : 0;
     const quality = qualityScore(row.importance, row.useful_count, row.access_count, row.link_count, ageDays);
     // Higher quality → bigger boost: +0.10 if quality >= 0.7, +0.05 otherwise
     const boost = quality >= 0.7 ? 0.10 : 0.05;
@@ -95,7 +96,8 @@ export function adjustImportance(
     .all(cutoffDate) as Array<{ id: string; importance: number; useful_count: number; access_count: number; created_at: string; link_count: number }>;
 
   for (const row of decayCandidates) {
-    const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
+    const createdTs = new Date(row.created_at + (row.created_at.includes("Z") ? "" : "Z")).getTime();
+    const ageDays = Number.isFinite(createdTs) ? (now - createdTs) / (1000 * 60 * 60 * 24) : 0;
     const quality = qualityScore(row.importance, row.useful_count, row.access_count, row.link_count, ageDays);
     // Only decay if quality is low — protects memories with usefulness signals or links
     if (quality >= 0.2) continue;

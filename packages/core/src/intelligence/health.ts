@@ -121,8 +121,11 @@ function checkGrowthStall(db: DatabaseSync): HealthCheck {
     return { name: "Growth stall", status: "ok", message: "No active memories", value: 0, threshold: 14 };
   }
 
-  const newestDate = new Date(row.newest.replace(" ", "T") + "Z");
-  const daysSince = Math.floor((Date.now() - newestDate.getTime()) / (24 * 60 * 60 * 1000));
+  const newestTs = new Date(row.newest.replace(" ", "T") + "Z").getTime();
+  if (!Number.isFinite(newestTs)) {
+    return { name: "Growth stall", status: "warn", message: "Invalid date on newest memory", value: 0, threshold: 14 };
+  }
+  const daysSince = Math.floor((Date.now() - newestTs) / (24 * 60 * 60 * 1000));
 
   if (daysSince > 30) return { name: "Growth stall", status: "critical", message: `${daysSince} days since last new memory`, value: daysSince, threshold: 30 };
   if (daysSince > 14) return { name: "Growth stall", status: "warn", message: `${daysSince} days since last new memory`, value: daysSince, threshold: 14 };
@@ -136,8 +139,11 @@ function checkStaleAccess(db: DatabaseSync): HealthCheck {
     return { name: "Stale access", status: "warn", message: "No access log entries found", value: 999, threshold: 14 };
   }
 
-  const latestDate = new Date(row.latest.replace(" ", "T") + "Z");
-  const daysSince = Math.floor((Date.now() - latestDate.getTime()) / (24 * 60 * 60 * 1000));
+  const latestTs = new Date(row.latest.replace(" ", "T") + "Z").getTime();
+  if (!Number.isFinite(latestTs)) {
+    return { name: "Stale access", status: "warn", message: "Invalid date on latest access", value: 0, threshold: 14 };
+  }
+  const daysSince = Math.floor((Date.now() - latestTs) / (24 * 60 * 60 * 1000));
 
   if (daysSince > 30) return { name: "Stale access", status: "critical", message: `${daysSince} days since last memory access`, value: daysSince, threshold: 30 };
   if (daysSince > 14) return { name: "Stale access", status: "warn", message: `${daysSince} days since last memory access`, value: daysSince, threshold: 14 };
