@@ -68,10 +68,11 @@ const OVERLAP_STOPWORDS = new Set([
  */
 export function detectContradictions(
   db: DatabaseSync,
-  options: { similarityThreshold?: number; maxMemories?: number } = {}
+  options: { similarityThreshold?: number; maxMemories?: number; maxCandidates?: number } = {}
 ): ContradictionCandidate[] {
   const threshold = options.similarityThreshold ?? 0.82;
   const maxMemories = options.maxMemories ?? 300;
+  const maxCandidates = options.maxCandidates ?? 50;
 
   // Get active memories with embeddings
   const rows = db
@@ -106,6 +107,7 @@ export function detectContradictions(
 
   const candidates: ContradictionCandidate[] = [];
 
+  outer:
   for (let i = 0; i < memories.length; i++) {
     for (let j = i + 1; j < memories.length; j++) {
       const a = memories[i];
@@ -126,6 +128,8 @@ export function detectContradictions(
           similarity: sim,
           reason,
         });
+        // Stop early once we have enough candidates to process
+        if (candidates.length >= maxCandidates) break outer;
       }
     }
   }
