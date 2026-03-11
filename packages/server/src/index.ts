@@ -171,6 +171,10 @@ export function startServer(
     hostname: host,
   }, (info) => {
     console.log(`Exocortex server listening on http://${host}:${info.port}`);
+    // Signal PM2 that the process is ready to accept connections
+    if (typeof process.send === "function") {
+      process.send("ready");
+    }
   });
 
   // Graceful shutdown
