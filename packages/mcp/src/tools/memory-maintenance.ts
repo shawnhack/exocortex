@@ -5,169 +5,38 @@ import type { ToolRegistrationContext } from "./types.js";
 export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): void {
   const { server, db, startTime } = ctx;
 
-  // memory_decay_preview
-  server.tool(
-    "memory_decay_preview",
-    "Preview which memories would be archived by the decay process. Dry-run only, no changes made.",
-    {},
-    async () => {
-      try {
-        const candidates = getArchiveCandidates(db);
-
-        if (candidates.length === 0) {
-          return { content: [{ type: "text", text: "No archive candidates found. All memories are healthy." }] };
-        }
-
-        const lines = candidates.map((c) => {
-          const preview = c.content.substring(0, 80) + (c.content.length > 80 ? "..." : "");
-          return `- [${c.id}] ${preview} (reason: ${c.reason}, importance: ${c.importance}, accesses: ${c.access_count}, created: ${c.created_at})`;
-        });
-
-        return {
-          content: [{ type: "text", text: `Archive candidates (${candidates.length}, dry-run):\n\n${lines.join("\n")}` }],
-        };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
-      }
-    }
-  );
-
-  // memory_consolidate
-  server.tool(
-    "memory_consolidate",
-    "Find clusters of similar memories and consolidate them into summaries. When consolidating (dry_run: false), provide a 'summary' you wrote — otherwise a basic auto-summary is used as fallback.",
-    {
-      dry_run: z.boolean().optional().describe("Preview clusters without consolidating (default true — safe preview mode)"),
-      min_similarity: z.number().min(0).max(1).optional().describe("Minimum cosine similarity for clustering (default 0.75)"),
-      min_cluster_size: z.number().min(2).optional().describe("Minimum cluster size (default 3)"),
-      time_bucket: z.enum(["week", "month"]).optional().describe("Constrain clustering to same time window (week or month)"),
-      community_aware: z.boolean().optional().describe("Use entity graph communities to split clusters at community boundaries and protect bridge memories (default false)"),
-      cluster_index: z.number().min(0).optional().describe("When consolidating, only process this cluster (0-indexed from dry_run results). Required when providing a summary."),
-      summary: z.string().optional().describe("Your synthesized summary for the cluster. Must preserve dates, versions, proper nouns, and file paths from originals. If omitted, a basic auto-summary is generated."),
-    },
-    async (args) => {
-      try {
-        // Always find raw clusters first (without community filtering)
-        const rawClusters = findClusters(db, {
-          minSimilarity: args.min_similarity,
-          minClusterSize: args.min_cluster_size,
-          timeBucket: args.time_bucket,
-        });
-
-        if (rawClusters.length === 0) {
-          return { content: [{ type: "text", text: "No clusters found eligible for consolidation." }] };
-        }
-
-        // Apply community-aware filtering if requested, falling back to raw if it eliminates everything
-        let clusters = rawClusters;
-        let caResult: ReturnType<typeof applyCommunityAwareFiltering> | undefined;
-        if (args.community_aware) {
-          caResult = applyCommunityAwareFiltering(db, rawClusters, args.min_cluster_size ?? 2);
-          if (caResult.clusters.length > 0) {
-            clusters = caResult.clusters;
-          }
-          // If community filtering eliminated all clusters, fall back to raw clusters
-        }
-
-        if (args.dry_run !== false) {
-          // If community-aware, report bridge/split info in the dry-run output
-          let bridgeInfo = "";
-          if (args.community_aware && caResult) {
-            bridgeInfo = `\n\nCommunity-aware: ${caResult.clustersSplit} cluster(s) split at community boundaries, ${caResult.bridgeMemoryIds.length} bridge memory(ies) protected (importance boosted to 0.8+)`;
-            if (caResult.clusters.length === 0) {
-              bridgeInfo += ` — all sub-clusters fell below minClusterSize, using ${rawClusters.length} raw clusters`;
-            }
-          }
-
-          const lines = clusters.map((c, i) => {
-            return `${i + 1}. [${i}] "${c.topic}" — ${c.memberIds.length} memories (${c.memberIds.join(", ")}), avg similarity: ${c.avgSimilarity.toFixed(2)}`;
-          });
-          return {
-            content: [{
-              type: "text",
-              text: `Found ${clusters.length} clusters (dry run):\n\n${lines.join("\n")}${bridgeInfo}\n\nTo consolidate: call with dry_run: false, cluster_index: N, and summary: "your synthesis". Or omit summary for auto-generated fallback.`,
-            }],
-          };
-        }
-
-        let embeddingProvider;
-        try {
-          embeddingProvider = await getEmbeddingProvider();
-        } catch {
-          // Proceed without embedding
-        }
-
-        // Determine which clusters to process
-        const toProcess = args.cluster_index !== undefined
-          ? [clusters[args.cluster_index]].filter(Boolean)
-          : clusters;
-
-        if (toProcess.length === 0) {
-          return { content: [{ type: "text", text: `Invalid cluster_index: ${args.cluster_index} (${clusters.length} clusters available)` }], isError: true };
-        }
-
-        const results: string[] = [];
-        const skipped: string[] = [];
-        for (let i = 0; i < toProcess.length; i++) {
-          const cluster = toProcess[i];
-
-          // Use agent-provided summary for targeted consolidation, auto-generate for batch
-          const summaryContent = (args.summary && toProcess.length === 1)
-            ? args.summary
-            : generateBasicSummary(db, cluster.memberIds);
-
-          if (!summaryContent) {
-            skipped.push(`Cluster "${cluster.topic}": empty summary`);
-            continue;
-          }
-
-          // Validate summary quality
-          const sourceContents = db
-            .prepare(
-              `SELECT content FROM memories WHERE id IN (${cluster.memberIds.map(() => "?").join(",")})`
-            )
-            .all(...cluster.memberIds) as Array<{ content: string }>;
-          const validation = validateSummary(summaryContent, sourceContents.map((r) => r.content));
-          if (!validation.valid) {
-            skipped.push(`Cluster "${cluster.topic}": ${validation.reasons.join("; ")}`);
-            continue;
-          }
-
-          const summaryId = await consolidateCluster(db, cluster, summaryContent, embeddingProvider);
-          results.push(`Consolidated ${cluster.memberIds.length} memories → ${summaryId} ("${cluster.topic}")`);
-        }
-
-        let text = results.length > 0
-          ? `Consolidated ${results.length} cluster(s):\n\n${results.join("\n")}`
-          : "No clusters consolidated.";
-        if (skipped.length > 0) {
-          text += `\n\nSkipped ${skipped.length} cluster(s) (failed quality validation):\n${skipped.join("\n")}`;
-        }
-
-        return { content: [{ type: "text", text }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
-      }
-    }
-  );
-
   // memory_maintenance
   server.tool(
     "memory_maintenance",
-    "Run maintenance: adjust importance scores based on access patterns and archive stale memories.",
+    "Run maintenance tasks: importance adjustment, archival, health checks, and optional operations via boolean flags.",
     {
       reembed: z.boolean().optional().describe("Re-embed memories with missing embeddings"),
-      backfill_entities: z.boolean().optional().describe("Process memories without entity links and extract relationships"),
-      recalibrate: z.boolean().optional().describe("Normalize importance distribution via percentile-rank mapping"),
-      densify_graph: z.boolean().optional().describe("Create co_occurs relationships between entities sharing memories"),
+      backfill_entities: z.boolean().optional().describe("Extract entities from unprocessed memories"),
+      recalibrate: z.boolean().optional().describe("Normalize importance via percentile-rank mapping"),
+      densify_graph: z.boolean().optional().describe("Create co_occurs relationships between entities"),
       build_co_retrieval_links: z.boolean().optional().describe("Build memory links from co-retrieval patterns"),
-      tune_weights: z.boolean().optional().describe("Auto-adjust scoring weights based on usefulness feedback data"),
-      reembed_all: z.boolean().optional().describe("Re-embed ALL memories (model migration). Use with limit to test first."),
-      reembed_all_limit: z.number().optional().describe("Max memories to re-embed when using reembed_all (default 100)"),
-      recompute_profiles: z.boolean().optional().describe("Recompute entity profiles for entities with ≥3 active memories"),
+      tune_weights: z.boolean().optional().describe("Auto-adjust scoring weights from feedback data"),
+      reembed_all: z.boolean().optional().describe("Re-embed ALL memories (model migration)"),
+      reembed_all_limit: z.number().optional().describe("Max memories for reembed_all (default 100)"),
+      recompute_profiles: z.boolean().optional().describe("Recompute entity profiles (entities with 3+ memories)"),
       recompute_quality: z.boolean().optional().describe("Recompute quality_score for all active memories"),
-      auto_consolidate: z.boolean().optional().describe("Run auto-consolidation to merge similar memory clusters"),
-      promote_tiers: z.boolean().optional().describe("Auto-promote memories between tiers (episodic→semantic if useful, episodic→procedural if technique-tagged, working→episodic if accessed)"),
+      auto_consolidate: z.boolean().optional().describe("Auto-merge similar memory clusters"),
+      promote_tiers: z.boolean().optional().describe("Auto-promote memories between knowledge tiers"),
+      decay_preview: z.boolean().optional().describe("Preview archive candidates (dry-run, no changes)"),
+      consolidate: z.boolean().optional().describe("Find and consolidate similar memory clusters"),
+      consolidate_min_similarity: z.number().min(0).max(1).optional().describe("Min cosine similarity for clustering (default 0.75)"),
+      consolidate_min_cluster_size: z.number().min(2).optional().describe("Min cluster size (default 3)"),
+      consolidate_time_bucket: z.enum(["week", "month"]).optional().describe("Constrain clustering to same time window"),
+      consolidate_community_aware: z.boolean().optional().describe("Split clusters at community boundaries"),
+      consolidate_cluster_index: z.number().min(0).optional().describe("Only process this cluster (0-indexed)"),
+      consolidate_dry_run: z.boolean().optional().describe("Preview clusters without merging (default true)"),
+      consolidate_summary: z.string().optional().describe("Summary override for targeted consolidation"),
+      tag_cleanup: z.boolean().optional().describe("Find and merge near-duplicate tags"),
+      tag_cleanup_min_similarity: z.number().min(0).max(1).optional().describe("Min string similarity for tag suggestions (default 0.8)"),
+      tag_cleanup_limit: z.number().optional().describe("Max tag suggestions to return (default 20)"),
+      tag_cleanup_apply: z.boolean().optional().describe("Apply top suggestion or specified from/to pair"),
+      tag_cleanup_from: z.string().optional().describe("Specific tag to merge FROM (with tag_cleanup_apply)"),
+      tag_cleanup_to: z.string().optional().describe("Specific tag to merge TO (with tag_cleanup_apply)"),
     },
     async (args) => {
       try {
@@ -202,7 +71,7 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
         try {
           const clusters = findClusters(db);
           if (clusters.length > 0) {
-            parts.push(`\nConsolidation: Found ${clusters.length} cluster(s) eligible for consolidation (run memory_consolidate to merge)`);
+            parts.push(`\nConsolidation: Found ${clusters.length} cluster(s) eligible for consolidation`);
           }
         } catch {
           // Non-critical
@@ -219,7 +88,7 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
               "Entity orphans": "Clean up unused entities or link them to memories",
               "Retrieval desert": "Use memory_search more actively to surface stored knowledge",
               "Importance collapse": "Manually boost key memories with memory_update importance:0.7+",
-              "Consolidation backlog": "Run memory_consolidate dry_run:false to merge similar memories",
+              "Consolidation backlog": "Run memory_maintenance with consolidate:true to merge similar memories",
               "Growth stall": "Store new memories — the system works best with regular input",
               "Stale access": "Query your memories more often to keep the system active",
             };
@@ -377,6 +246,159 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
           }
         }
 
+        // decay_preview flag
+        if (args.decay_preview) {
+          try {
+            const candidates = getArchiveCandidates(db);
+            if (candidates.length === 0) {
+              parts.push(`\nDecay preview: no archive candidates found`);
+            } else {
+              const lines = candidates.map((c) => {
+                const preview = c.content.substring(0, 80) + (c.content.length > 80 ? "..." : "");
+                return `  [${c.id}] ${preview} (reason: ${c.reason}, importance: ${c.importance}, accesses: ${c.access_count}, created: ${c.created_at})`;
+              });
+              parts.push(`\nDecay preview (${candidates.length} archive candidates, dry-run):\n${lines.join("\n")}`);
+            }
+          } catch (err) {
+            parts.push(`\nDecay preview: error — ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
+        // consolidate flag
+        if (args.consolidate) {
+          try {
+            // Find raw clusters
+            const rawClusters = findClusters(db, {
+              minSimilarity: args.consolidate_min_similarity,
+              minClusterSize: args.consolidate_min_cluster_size,
+              timeBucket: args.consolidate_time_bucket,
+            });
+
+            if (rawClusters.length === 0) {
+              parts.push(`\nConsolidate: no clusters found eligible for consolidation`);
+            } else {
+              // Apply community-aware filtering if requested
+              let clusters = rawClusters;
+              let caResult: ReturnType<typeof applyCommunityAwareFiltering> | undefined;
+              if (args.consolidate_community_aware) {
+                caResult = applyCommunityAwareFiltering(db, rawClusters, args.consolidate_min_cluster_size ?? 2);
+                if (caResult.clusters.length > 0) {
+                  clusters = caResult.clusters;
+                }
+              }
+
+              if (args.consolidate_dry_run !== false) {
+                // Dry-run: preview clusters
+                let bridgeInfo = "";
+                if (args.consolidate_community_aware && caResult) {
+                  bridgeInfo = `\n  Community-aware: ${caResult.clustersSplit} cluster(s) split, ${caResult.bridgeMemoryIds.length} bridge memory(ies) protected`;
+                  if (caResult.clusters.length === 0) {
+                    bridgeInfo += ` — all sub-clusters fell below minClusterSize, using ${rawClusters.length} raw clusters`;
+                  }
+                }
+
+                const lines = clusters.map((c, i) => {
+                  return `  ${i + 1}. [${i}] "${c.topic}" — ${c.memberIds.length} memories (${c.memberIds.join(", ")}), avg similarity: ${c.avgSimilarity.toFixed(2)}`;
+                });
+                parts.push(`\nConsolidate (dry run, ${clusters.length} clusters):\n${lines.join("\n")}${bridgeInfo}\n  To merge: set consolidate_dry_run:false, consolidate_cluster_index:N, and consolidate_summary:"your synthesis"`);
+              } else {
+                // Actually consolidate
+                let embeddingProvider;
+                try {
+                  embeddingProvider = await getEmbeddingProvider();
+                } catch {
+                  // Proceed without embedding
+                }
+
+                const toProcess = args.consolidate_cluster_index !== undefined
+                  ? [clusters[args.consolidate_cluster_index]].filter(Boolean)
+                  : clusters;
+
+                if (toProcess.length === 0) {
+                  parts.push(`\nConsolidate: invalid cluster_index ${args.consolidate_cluster_index} (${clusters.length} available)`);
+                } else {
+                  const results: string[] = [];
+                  const skipped: string[] = [];
+                  for (const cluster of toProcess) {
+                    const summaryContent = (args.consolidate_summary && toProcess.length === 1)
+                      ? args.consolidate_summary
+                      : generateBasicSummary(db, cluster.memberIds);
+
+                    if (!summaryContent) {
+                      skipped.push(`Cluster "${cluster.topic}": empty summary`);
+                      continue;
+                    }
+
+                    const sourceContents = db
+                      .prepare(
+                        `SELECT content FROM memories WHERE id IN (${cluster.memberIds.map(() => "?").join(",")})`
+                      )
+                      .all(...cluster.memberIds) as Array<{ content: string }>;
+                    const validation = validateSummary(summaryContent, sourceContents.map((r) => r.content));
+                    if (!validation.valid) {
+                      skipped.push(`Cluster "${cluster.topic}": ${validation.reasons.join("; ")}`);
+                      continue;
+                    }
+
+                    const summaryId = await consolidateCluster(db, cluster, summaryContent, embeddingProvider);
+                    results.push(`Consolidated ${cluster.memberIds.length} memories → ${summaryId} ("${cluster.topic}")`);
+                  }
+
+                  let text = results.length > 0
+                    ? `\nConsolidate: ${results.length} cluster(s) merged:\n  ${results.join("\n  ")}`
+                    : `\nConsolidate: no clusters merged`;
+                  if (skipped.length > 0) {
+                    text += `\n  Skipped ${skipped.length} (quality validation):\n  ${skipped.join("\n  ")}`;
+                  }
+                  parts.push(text);
+                }
+              }
+            }
+          } catch (err) {
+            parts.push(`\nConsolidate: error — ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
+        // tag_cleanup flag
+        if (args.tag_cleanup) {
+          try {
+            if (args.tag_cleanup_apply) {
+              if (args.tag_cleanup_from && args.tag_cleanup_to) {
+                const result = applyTagMerge(db, args.tag_cleanup_from, args.tag_cleanup_to);
+                parts.push(`\nTag cleanup: merged "${args.tag_cleanup_from}" → "${args.tag_cleanup_to}": ${result.updated} tag(s) updated`);
+              } else {
+                const suggestions = suggestTagMerges(db, {
+                  minSimilarity: args.tag_cleanup_min_similarity,
+                  limit: 1,
+                });
+                if (suggestions.length === 0) {
+                  parts.push(`\nTag cleanup: no merge suggestions at this similarity threshold`);
+                } else {
+                  const top = suggestions[0];
+                  const result = applyTagMerge(db, top.from, top.to);
+                  parts.push(`\nTag cleanup: merged "${top.from}" (${top.fromCount}) → "${top.to}" (${top.toCount}): ${result.updated} tag(s) updated (similarity: ${top.similarity})`);
+                }
+              }
+            } else {
+              const suggestions = suggestTagMerges(db, {
+                minSimilarity: args.tag_cleanup_min_similarity,
+                limit: args.tag_cleanup_limit,
+              });
+
+              if (suggestions.length === 0) {
+                parts.push(`\nTag cleanup: no near-duplicate tags found`);
+              } else {
+                const lines = suggestions.map(
+                  (s) => `  "${s.from}" (${s.fromCount}) → "${s.to}" (${s.toCount}) — similarity: ${s.similarity}, co-occurrence: ${s.coOccurrence}`
+                );
+                parts.push(`\nTag cleanup (${suggestions.length} suggestions):\n${lines.join("\n")}\n  To merge: set tag_cleanup_apply:true or specify tag_cleanup_from and tag_cleanup_to`);
+              }
+            }
+          } catch (err) {
+            parts.push(`\nTag cleanup: error — ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
         try {
           const danglingRows = db.prepare(`
             SELECT e.id, e.name, e.type, COUNT(me.memory_id) as memory_count
@@ -418,84 +440,19 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
     }
   );
 
-  // memory_tag_cleanup
-  server.tool(
-    "memory_tag_cleanup",
-    "Find and merge near-duplicate tags. Preview mode shows suggestions; apply mode merges them.",
-    {
-      min_similarity: z.number().min(0).max(1).optional().describe("Minimum string similarity for suggestions (default 0.8)"),
-      limit: z.number().optional().describe("Max suggestions to return (default 20)"),
-      apply: z.boolean().optional().describe("If true, apply the top suggestion or specified from/to pair"),
-      from_tag: z.string().optional().describe("Specific tag to merge FROM (use with apply:true)"),
-      to_tag: z.string().optional().describe("Specific tag to merge TO (use with apply:true)"),
-    },
-    async (args) => {
-      try {
-        if (args.apply) {
-          if (args.from_tag && args.to_tag) {
-            const result = applyTagMerge(db, args.from_tag, args.to_tag);
-            return {
-              content: [{
-                type: "text",
-                text: `Merged tag "${args.from_tag}" → "${args.to_tag}": ${result.updated} memory tag(s) updated. Alias added to settings.`,
-              }],
-            };
-          }
-
-          const suggestions = suggestTagMerges(db, {
-            minSimilarity: args.min_similarity,
-            limit: 1,
-          });
-          if (suggestions.length === 0) {
-            return { content: [{ type: "text", text: "No merge suggestions found at this similarity threshold." }] };
-          }
-          const top = suggestions[0];
-          const result = applyTagMerge(db, top.from, top.to);
-          return {
-            content: [{
-              type: "text",
-              text: `Merged tag "${top.from}" (${top.fromCount}) → "${top.to}" (${top.toCount}): ${result.updated} memory tag(s) updated (similarity: ${top.similarity}).`,
-            }],
-          };
-        }
-
-        const suggestions = suggestTagMerges(db, {
-          minSimilarity: args.min_similarity,
-          limit: args.limit,
-        });
-
-        if (suggestions.length === 0) {
-          return { content: [{ type: "text", text: "No near-duplicate tags found at this similarity threshold." }] };
-        }
-
-        const lines = [`Found ${suggestions.length} merge suggestion(s):\n`];
-        for (const s of suggestions) {
-          lines.push(
-            `- "${s.from}" (${s.fromCount}) → "${s.to}" (${s.toCount}) — similarity: ${s.similarity}, co-occurrence: ${s.coOccurrence}`
-          );
-        }
-        lines.push(`\nTo merge, call with apply:true or specify from_tag and to_tag.`);
-
-        return { content: [{ type: "text", text: lines.join("\n") }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
-      }
-    }
-  );
-
   // memory_timeline
   server.tool(
     "memory_timeline",
-    "Query decision history, memory lineage, topic evolution, or temporal hierarchy. Use 'decisions' for decision-tagged memories chronologically, 'lineage' to trace a memory's supersession chain, 'evolution' to see how knowledge about a topic changed over time, or 'hierarchy' to view epoch -> theme -> episode organization.",
+    "Query decision history, memory lineage, topic evolution, or temporal hierarchy.",
     {
-      mode: z.enum(["decisions", "lineage", "evolution", "hierarchy"]).describe("'decisions' for decision timeline, 'lineage' for supersession chain, 'evolution' for topic knowledge evolution, 'hierarchy' for epoch/theme/episode tree"),
+      mode: z.enum(["decisions", "lineage", "evolution", "hierarchy"]).describe("Timeline mode to query"),
       memory_id: z.string().optional().describe("Memory ID (required for lineage mode)"),
-      topic: z.string().optional().describe("Topic to trace evolution for (required for evolution mode)"),
-      month: z.string().optional().describe("Month filter YYYY-MM (for hierarchy mode)"),
+      topic: z.string().optional().describe("Topic to trace (required for evolution mode)"),
+      month: z.string().optional().describe("Month filter YYYY-MM (hierarchy mode)"),
       after: z.string().optional().describe("Only after this date (YYYY-MM-DD)"),
       before: z.string().optional().describe("Only before this date (YYYY-MM-DD)"),
       limit: z.number().optional().describe("Max results (default 50)"),
-      tags: z.array(z.string()).optional().describe("Additional tag filters (for decisions mode)"),
+      tags: z.array(z.string()).optional().describe("Tag filters (decisions mode)"),
     },
     async (args) => {
       try {
@@ -660,7 +617,7 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
   // memory_ping
   server.tool(
     "memory_ping",
-    "Health check — returns memory counts, entity/tag stats, date range, and server uptime.",
+    "Health check — returns memory counts, entity/tag stats, and uptime.",
     {},
     async () => {
       try {

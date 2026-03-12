@@ -10,9 +10,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
   // memory_store
   server.tool(
     "memory_store",
-    "Store a new memory in Exocortex. Use for: decisions, discovered facts, learned techniques, user preferences, architectural choices, bug fixes worth remembering, and session summaries.\n" +
-    "Do NOT store: trivial observations, information already in the current conversation, obvious facts, or content that duplicates what was just said. When in doubt, ask whether this would be useful in a future session.\n" +
-    "Always set provider/model_id/agent for attribution. Set namespace to the current project name. Use deduplicate: true when storing facts that might already exist.",
+    "Store a new memory. Set provider/model_id/agent for attribution, namespace for project scope, deduplicate: true for facts that may already exist.",
     {
       content: z.string().describe("The content to remember"),
       tags: z.array(z.string()).optional().describe("Tags for categorization"),
@@ -31,15 +29,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
       expires_at: z.string().optional().describe("ISO timestamp when this memory should auto-expire (e.g. '2026-03-01T00:00:00Z')"),
       namespace: z.string().optional().describe("Project namespace — set to the current project name (e.g. 'exocortex', 'myapp'). Enables scoped retrieval so memories from different projects don't collide."),
       deduplicate: z.boolean().optional().describe("Set true when storing facts or knowledge that might already exist — prevents duplicates. Checks for >85% semantic similarity + >60% word overlap."),
-      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe(
-        "Knowledge tier — choose based on content type:\n" +
-        "• working: scratch/temp context, auto-expires in 24h. Use for in-progress notes, intermediate results.\n" +
-        "• episodic (default): events, conversations, session summaries. Decays over time. Use for 'what happened' memories.\n" +
-        "• semantic: permanent facts, definitions, relationships. Use for 'X is Y', stable truths, entity properties. Never decays.\n" +
-        "• procedural: permanent techniques, how-to knowledge, reusable skills. Use for 'how to do X', workflows, patterns. Never decays.\n" +
-        "• reference: permanent documents, articles, API docs. Use for ingested content, specs, guides. Never decays.\n" +
-        "Rule of thumb: if it's a fact → semantic. If it's a technique/skill → procedural. If it's a report/event → episodic. If it's a doc → reference."
-      ),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Knowledge tier: working (24h scratch), episodic (default, events), semantic (permanent facts), procedural (permanent techniques), reference (permanent docs)"),
     },
     async (args) => {
       try {
@@ -251,14 +241,10 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
   // memory_search
   server.tool(
     "memory_search",
-    "Search memories using hybrid retrieval (semantic + keyword + graph-aware scoring).\n" +
-    "**Workflow**: Use compact: true first to get previews, then memory_get for full content of relevant results. Or use max_tokens to auto-pack results into a budget.\n" +
-    "**Better recall**: Set expanded_query with 2-3 rephrasings using different vocabulary (e.g. query: 'auth flow' → expanded_query: 'login JWT session tokens authentication').\n" +
-    "**For precise lookups** (ports, versions, config values): use memory_facts instead — it queries structured subject-predicate-object triples.\n" +
-    "**For broad topic loading** at session start: use memory_context instead — it's optimized for loading background on a subject.",
+    "Hybrid search (semantic + keyword + graph). Use compact: true for previews, expanded_query for better recall, max_tokens for budget-packed results.",
     {
       query: z.string().describe("Natural language search query"),
-      expanded_query: z.string().optional().describe("Semantic rephrasings of the query to bridge vocabulary gaps. Provide 2-3 alternative phrasings with different words that capture the same intent (e.g. for 'auth flow' → 'login authentication JWT session tokens'). Feeds into both vector and keyword search."),
+      expanded_query: z.string().optional().describe("2-3 rephrasings with different vocabulary to improve recall"),
       limit: z.number().min(1).max(50).optional().describe("Max results (default 10)"),
       tags: z.array(z.string()).optional().describe("Filter by tags"),
       after: z.string().optional().describe("Only after this date (YYYY-MM-DD)"),
@@ -403,7 +389,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
   // memory_context
   server.tool(
     "memory_context",
-    "Load broad context about a topic — use at session start or when switching subjects. Returns memories ranked by relevance + recency + importance for the given topic.\n" +
+    "Load broad context about a topic for session start or subject switching. Returns memories ranked by relevance + recency + importance.\n" +
     "Prefer this over memory_search when you need general background rather than a specific answer. For targeted queries mid-conversation, use memory_search instead.",
     {
       topic: z.string().describe("Topic to load context for"),
@@ -518,7 +504,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
   // memory_get
   server.tool(
     "memory_get",
-    "Fetch full content for specific memory IDs. Use after compact search to retrieve details for the most relevant results. Also implicitly signals that retrieved memories were useful, improving future ranking.",
+    "Fetch full content for specific memory IDs. Implicitly signals usefulness for future ranking.",
     {
       ids: z.array(z.string()).min(1).max(10).describe("Memory IDs to fetch (max 10)"),
     },
@@ -564,65 +550,10 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
     }
   );
 
-  // memory_feedback
-  server.tool(
-    "memory_feedback",
-    "Mark memories as useful after retrieval. Call this after using search results to improve future ranking. Also triggered implicitly when memory_get is called on recent search results.",
-    {
-      ids: z.array(z.string()).min(1).max(20).describe("Memory IDs that were useful"),
-    },
-    async (args) => {
-      try {
-        const store = new MemoryStore(db);
-        let count = 0;
-        for (const id of args.ids) {
-          try {
-            store.incrementUsefulCount(id);
-            count++;
-          } catch { /* skip invalid IDs */ }
-        }
-
-        try {
-          const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000)
-            .toISOString()
-            .replace("T", " ")
-            .replace("Z", "");
-          const placeholders = args.ids.map(() => "?").join(", ");
-          const accessRows = db
-            .prepare(
-              `SELECT DISTINCT query FROM access_log
-               WHERE memory_id IN (${placeholders})
-                 AND query IS NOT NULL
-                 AND accessed_at >= ?
-               ORDER BY accessed_at DESC LIMIT 5`
-            )
-            .all(...args.ids, fiveMinAgo) as Array<{ query: string }>;
-
-          const { createHash } = await import("node:crypto");
-          for (const row of accessRows) {
-            const hash = createHash("sha256")
-              .update(row.query.toLowerCase().trim())
-              .digest("hex")
-              .slice(0, 16);
-            db.prepare(
-              "UPDATE query_outcomes SET feedback_count = feedback_count + 1 WHERE query_hash = ?"
-            ).run(hash);
-          }
-        } catch {
-          // Non-critical
-        }
-
-        return { content: [{ type: "text", text: `Recorded usefulness signal for ${count} memories.` }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
-      }
-    }
-  );
-
   // memory_facts
   server.tool(
     "memory_facts",
-    "Query structured subject-predicate-object facts (e.g. 'Exocortex → runs on → port 4010'). Use for precise lookups: ports, versions, config values, dependencies, entity relationships. Faster and more precise than memory_search for factual queries.",
+    "Query structured subject-predicate-object facts. Use for precise lookups: ports, versions, config values, dependencies.",
     {
       subject: z.string().optional().describe("Filter by subject (LIKE match)"),
       predicate: z.string().optional().describe("Filter by predicate (exact: port, uses, replaced, path, default, version, is)"),
@@ -660,7 +591,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
   // memory_entities
   server.tool(
     "memory_entities",
-    "List entities (people, projects, technologies, etc.) tracked in Exocortex with linked memory counts.",
+    "List tracked entities (people, projects, technologies) with linked memory counts.",
     {
       type: z.enum(["person", "project", "technology", "organization", "concept"]).optional().describe("Filter by entity type (deprecated — prefer tags)"),
       tags: z.array(z.string()).optional().describe("Filter entities by tags"),
@@ -757,7 +688,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
   // memory_graph
   server.tool(
     "memory_graph",
-    "Analyze the entity relationship graph. Compute centrality metrics to find bridge entities that connect different knowledge domains.",
+    "Analyze the entity relationship graph — centrality metrics, bridge entities, knowledge domain connections.",
     {
       action: z.enum(["stats", "centrality", "bridges", "communities", "community_summaries"]).describe("Analysis type: 'stats' for overview, 'centrality' for top entities by betweenness, 'bridges' for bridge entities, 'communities' for dense subgraphs, 'community_summaries' for communities with context"),
       limit: z.number().min(1).max(50).optional().describe("Max results for centrality/bridges (default 10)"),

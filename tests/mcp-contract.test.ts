@@ -85,8 +85,7 @@ describe("mcp contract", () => {
         "memory_get",
         "memory_update",
         "memory_browse",
-        "goal_create",
-        "goal_list",
+        "goal",
       ])
     );
   });
@@ -149,8 +148,9 @@ describe("mcp contract", () => {
 
     const goalTitle = `MCP Goal ${token}`;
     const goalCreate = await client!.callTool({
-      name: "goal_create",
+      name: "goal",
       arguments: {
+        action: "create",
         title: goalTitle,
         priority: "high",
       },
@@ -159,8 +159,8 @@ describe("mcp contract", () => {
     expect(extractText(goalCreate)).toContain("Created goal");
 
     const goalList = await client!.callTool({
-      name: "goal_list",
-      arguments: { status: "active" },
+      name: "goal",
+      arguments: { action: "list", status: "active" },
     });
     const goalText = extractText(goalList);
     expect((goalList as { isError?: boolean }).isError).not.toBe(true);
