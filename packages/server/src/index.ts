@@ -20,6 +20,7 @@ import analyticsRoutes from "./routes/analytics.js";
 import retrievalRoutes from "./routes/retrieval.js";
 import libraryRoutes from "./routes/library.js";
 import mcpRoutes from "./routes/mcp.js";
+import contextSyncRoutes from "./routes/context-sync.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
 import path from "node:path";
 import fs from "node:fs";
@@ -72,6 +73,34 @@ export function createApp(): Hono {
     })
   );
 
+  // Agent discovery files (no auth required)
+  const publicDir = path.resolve(import.meta.dirname ?? ".", "..", "public");
+  app.get("/llms.txt", (c) => {
+    const file = path.join(publicDir, "llms.txt");
+    if (!fs.existsSync(file)) return c.text("Not found", 404);
+    return c.text(fs.readFileSync(file, "utf-8"));
+  });
+  app.get("/SKILL.md", (c) => {
+    const file = path.join(publicDir, "SKILL.md");
+    if (!fs.existsSync(file)) return c.text("Not found", 404);
+    return c.text(fs.readFileSync(file, "utf-8"));
+  });
+  app.get("/a2a.json", (c) => {
+    const file = path.join(publicDir, "a2a.json");
+    if (!fs.existsSync(file)) return c.json({ error: "Not found" }, 404);
+    return c.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+  });
+  app.get("/.well-known/a2a.json", (c) => {
+    const file = path.join(publicDir, "a2a.json");
+    if (!fs.existsSync(file)) return c.json({ error: "Not found" }, 404);
+    return c.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+  });
+  app.get("/openapi.json", (c) => {
+    const file = path.join(publicDir, "openapi.json");
+    if (!fs.existsSync(file)) return c.json({ error: "Not found" }, 404);
+    return c.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+  });
+
   // MCP route (before auth — MCP protocol handles its own sessions)
   app.route("/", mcpRoutes);
 
@@ -90,6 +119,7 @@ export function createApp(): Hono {
   app.route("/", analyticsRoutes);
   app.route("/", retrievalRoutes);
   app.route("/", libraryRoutes);
+  app.route("/", contextSyncRoutes);
 
   // Serve dashboard static files if built
   const dashboardDist = path.resolve(

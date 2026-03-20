@@ -6,6 +6,14 @@ import { getDb, closeDb, initializeSchema, getEmbeddingProvider } from "@exocort
 import { registerAllTools } from "./tools.js";
 
 const startTime = Date.now();
+const suppressProtocolNoise = process.env.EXOCORTEX_MCP_ALLOW_STDIO_LOGS !== "1";
+
+if (suppressProtocolNoise) {
+  // MCP stdio transport requires stdout to be JSON-RPC only.
+  console.log = () => {};
+  console.info = () => {};
+  console.warn = () => {};
+}
 
 // Eagerly initialize DB + schema + embedding model at startup
 // so first tool call doesn't pay the cost
@@ -43,7 +51,7 @@ async function main() {
   // On Windows, MCP hosts may redirect stderr to "nul" which can create
   // a literal file in the CWD under some shell environments (git-bash/MSYS).
   // Suppress stderr to avoid this.
-  if (process.platform === "win32") {
+  if (suppressProtocolNoise && process.platform === "win32") {
     process.stderr.write = () => true;
   }
 

@@ -8,6 +8,7 @@ import { registerLinkTools } from "./links.js";
 import { registerGoalTools } from "./goals.js";
 import { registerPredictionTools } from "./predictions.js";
 import { registerIntelligenceTools } from "./intelligence.js";
+import { registerMemoryAutoTool } from "./memory-auto.js";
 import type { ToolRegistrationContext } from "./types.js";
 
 export interface RegisterToolsOptions {
@@ -43,4 +44,5 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
   registerGoalTools(ctx);
   registerPredictionTools(ctx);
   registerIntelligenceTools(ctx);
+  registerMemoryAutoTool(ctx);
 }

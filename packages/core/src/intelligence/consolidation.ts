@@ -549,20 +549,34 @@ export function generateBasicSummary(
   let summary = `${topicLabel} (${rows.length} sources, ${dateRange})`;
   wordCount += summary.split(/\s+/).length;
 
-  // 2. Key facts — the most valuable content
-  if (keyFacts.size > 0) {
-    summary += "\n\n";
-    for (const fact of keyFacts) {
-      const factWords = fact.split(/\s+/).length;
-      if (wordCount + factWords > WORD_BUDGET) break;
-      summary += `- ${fact}\n`;
-      wordCount += factWords;
+  // 2. Key facts — lead with a prose paragraph, then bullets for remaining
+  const factArray = Array.from(keyFacts);
+  if (factArray.length > 0) {
+    // First 3 key facts as a prose paragraph (avoids >85% bullet rejection)
+    const proseFacts = factArray.slice(0, 3);
+    const bulletFacts = factArray.slice(3);
+    const prosePara = proseFacts.join('. ') + '.';
+    const proseWords = prosePara.split(/\s+/).length;
+    if (wordCount + proseWords <= WORD_BUDGET) {
+      summary += "\n\n" + prosePara;
+      wordCount += proseWords;
+    }
+
+    // Remaining key facts as bullets
+    if (bulletFacts.length > 0) {
+      summary += "\n\n";
+      for (const fact of bulletFacts) {
+        const factWords = fact.split(/\s+/).length;
+        if (wordCount + factWords > WORD_BUDGET) break;
+        summary += `- ${fact}\n`;
+        wordCount += factWords;
+      }
     }
   }
 
-  // 3. Context — fill remaining budget with non-key-fact sentences
+  // 3. Context — fill remaining budget with non-key-fact sentences as bullets
   if (contextPoints.size > 0 && wordCount < WORD_BUDGET) {
-    if (keyFacts.size > 0) summary += "\n";
+    if (factArray.length > 0) summary += "\n";
     for (const ctx of contextPoints) {
       const ctxWords = ctx.split(/\s+/).length;
       if (wordCount + ctxWords > WORD_BUDGET) break;
@@ -609,9 +623,23 @@ export function validateSummary(
     reasons.push(`Summary too short (${summaryContent.length} chars, min ${minLength})`);
   }
 
-  // Reject known garbage patterns
+  // Reject known garbage patterns — mechanical headers, nested summaries, raw spillover
   if (/^\[Consolidated summary of \d+ memories/i.test(summaryContent)) {
     reasons.push('Mechanical header detected — summary must be prose, not "[Consolidated summary of...]"');
+  }
+  // Catch nested/embedded consolidation markers anywhere in the text (not just start)
+  const nestedCount = (summaryContent.match(/\[Consolidated summary of/gi) || []).length;
+  if (nestedCount > 0 && !reasons.some(r => r.includes('Mechanical header'))) {
+    reasons.push(`Nested consolidation marker found (${nestedCount} occurrences) — indicates summary-of-summaries`);
+  }
+  // Reject summaries with raw memory ID spillover (e.g. "01KJ38S9VJ...")
+  const idSpillover = (summaryContent.match(/\b01[A-Z0-9]{24,}\b/g) || []).length;
+  if (idSpillover > 2) {
+    reasons.push(`Raw memory IDs found in summary (${idSpillover}) — internal IDs should not leak into prose`);
+  }
+  // Reject summaries that are just metadata (dates, counts, tags with no substance)
+  if (/^\s*\d+ sources|^\s*\d+ memories/i.test(summaryContent) && summaryContent.length < 200) {
+    reasons.push('Summary appears to be metadata-only — needs substantive content');
   }
 
   // Reject summaries that are mostly extracted specifics / bullet lists with no prose

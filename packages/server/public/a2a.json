@@ -1,0 +1,53 @@
+{
+  "name": "exocortex",
+  "description": "Persistent long-term memory system for AI agents. Semantic search, knowledge graphs, temporal reasoning, and self-improving retrieval across sessions.",
+  "version": "0.3.0",
+  "url": "http://localhost:4010",
+  "protocols": {
+    "rest": "/openapi.json",
+    "mcp": {
+      "transport": "stdio",
+      "command": "npx exocortex-mcp"
+    }
+  },
+  "capabilities": [
+    {
+      "name": "memory_storage",
+      "description": "Store and retrieve long-term knowledge with semantic search, tags, importance scoring, and knowledge tiers",
+      "inputs": ["content", "tags", "importance", "tier", "namespace"],
+      "outputs": ["memory_id", "dedup_action"]
+    },
+    {
+      "name": "memory_search",
+      "description": "Hybrid semantic + keyword search with graph-aware scoring, temporal filtering, and adaptive weights",
+      "inputs": ["query", "expanded_query", "tags", "namespace", "date_range"],
+      "outputs": ["memories", "scores", "score_breakdowns"]
+    },
+    {
+      "name": "knowledge_graph",
+      "description": "Entity extraction, relationship discovery, community detection, and graph-based retrieval boosting",
+      "inputs": ["entity_name", "entity_type"],
+      "outputs": ["entities", "relationships", "centrality", "communities"]
+    },
+    {
+      "name": "intelligence",
+      "description": "Memory consolidation, contradiction detection, temporal reasoning, and project context snapshots",
+      "inputs": ["topic", "time_range"],
+      "outputs": ["consolidations", "contradictions", "timeline", "project_snapshot"]
+    },
+    {
+      "name": "context_sync",
+      "description": "Export stored knowledge as .cursorrules, CLAUDE.md, or AGENTS.md for cross-tool context synchronization",
+      "inputs": ["format", "namespace", "tags"],
+      "outputs": ["generated_context_file"]
+    }
+  ],
+  "authentication": {
+    "type": "bearer",
+    "header": "Authorization",
+    "optional": true
+  },
+  "contact": {
+    "support": "https://github.com/exocortex/exocortex/issues"
+  }
+}

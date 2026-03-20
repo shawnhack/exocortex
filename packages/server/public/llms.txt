@@ -1,0 +1,90 @@
+# Exocortex — Persistent Memory System for AI Agents
+
+> Long-term memory with semantic search, knowledge graphs, temporal reasoning, and self-improving retrieval. Give your agent a brain that persists across sessions.
+
+## Base URL
+REST: http://localhost:4010
+MCP: stdio transport via `npx exocortex-mcp`
+
+## Authentication
+Bearer token or X-Exocortex-Token header. Optional — if no token configured, all requests allowed.
+
+## MCP Tools (17 total)
+
+### Core Memory
+- `memory_store` — Store a new memory with content, tags, importance, tier, namespace
+- `memory_search` — Hybrid search (semantic + keyword + graph). Supports expanded_query, filters, compact mode
+- `memory_get` — Fetch full content for specific memory IDs
+- `memory_update` — Update memory content, tags, importance, metadata
+- `memory_forget` — Deactivate a memory (soft delete)
+- `memory_browse` — Browse memories with pagination and filters
+- `memory_context` — Load broad context for a topic (session start, subject switching). Optional deep mode with LLM follow-ups
+- `memory_facts` — Extract and list key facts from stored memories
+
+### Knowledge Graph
+- `memory_entities` — List entities (people, projects, technologies) with types and connections
+- `memory_graph` — Get entity relationship graph with centrality and communities
+- `memory_link` — Create explicit links between related memories
+
+### Intelligence
+- `memory_project_snapshot` — Load project context: goals, decisions, open threads, techniques
+- `memory_diff` — Compare memory state between two time periods
+- `memory_contradictions` — Detect contradictory facts in stored memories
+- `memory_timeline` — Chronological trace of a topic's evolution
+
+### Maintenance
+- `memory_maintenance` — Run maintenance tasks (consolidation, decay, reembedding, weight tuning)
+- `memory_ping` — Health check and uptime
+
+### Ingestion
+- `memory_ingest` — Ingest documents (files, URLs) with chunking and overlap
+- `memory_research` — Multi-source web research with automatic storage
+
+### Goals & Predictions
+- `goal` — Create, update, list goals with milestones and progress tracking
+- `prediction` — Create, resolve, and calibrate predictions
+
+## REST API Endpoints
+
+### Memories
+POST   /api/memories          — Create memory
+GET    /api/memories          — List memories (paginated)
+GET    /api/memories/:id      — Get single memory
+PATCH  /api/memories/:id      — Update memory
+DELETE /api/memories/:id      — Delete memory
+POST   /api/memories/search   — Search memories
+
+### Entities & Graph
+GET    /api/entities              — List entities
+GET    /api/entities/graph        — Entity relationship graph
+GET    /api/entities/graph/analysis — Graph analytics (centrality, communities)
+
+### Intelligence
+POST   /api/consolidate           — Trigger memory consolidation
+GET    /api/consolidations        — List consolidation history
+POST   /api/contradictions/detect — Detect contradictions
+GET    /api/contradictions        — List contradictions
+
+### Goals & Predictions
+GET/POST /api/goals               — CRUD for goals
+GET/POST /api/predictions         — CRUD for predictions
+
+### Analytics
+GET    /api/analytics/summary         — Memory stats overview
+GET    /api/analytics/tag-effectiveness — Tag usage analytics
+GET    /api/retrieval/stats           — Search hit rate and quality metrics
+
+## Memory Tiers
+- `working` — 24h auto-expire, excluded from general search
+- `episodic` — Default tier, medium-term
+- `semantic` — Permanent facts, exempt from decay
+- `procedural` — Permanent techniques/skills
+- `reference` — Permanent documents/references
+
+## Key Concepts
+- **Hybrid search**: Vector similarity + full-text search + graph proximity + recency + usefulness scoring
+- **Reciprocal Rank Fusion**: Combines vector and FTS results for better recall
+- **Adaptive weights**: Scoring weights auto-tune based on retrieval feedback
+- **Entity extraction**: Automatic extraction of people, projects, technologies from stored content
+- **Consolidation**: Similar memories auto-merged into summaries, originals archived
+- **Temporal reasoning**: Track how topics evolve over time, supersession chains

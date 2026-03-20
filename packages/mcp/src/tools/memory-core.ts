@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cosineSimilarity, getRRFConfig, searchFacts, getCachedProfiles, stripPrivateContent, validateStorageGate } from "@exocortex/core";
+import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cosineSimilarity, getRRFConfig, searchFacts, getCachedProfiles, stripPrivateContent, validateStorageGate, deepContext } from "@exocortex/core";
+import type { SearchResult } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "../utils.js";
 import { expandViaLinks, buildFactsSection, buildEntityProfileSection } from "./helpers.js";
 import type { ToolRegistrationContext } from "./types.js";
@@ -390,26 +391,40 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
   server.tool(
     "memory_context",
     "Load broad context about a topic for session start or subject switching. Returns memories ranked by relevance + recency + importance.\n" +
-    "Prefer this over memory_search when you need general background rather than a specific answer. For targeted queries mid-conversation, use memory_search instead.",
+    "Prefer this over memory_search when you need general background rather than a specific answer. For targeted queries mid-conversation, use memory_search instead.\n" +
+    "Set deep=true for complex topics — uses LLM to identify gaps and run follow-up queries iteratively (adds ~10-15s, costs ~3 Haiku calls).",
     {
       topic: z.string().describe("Topic to load context for"),
       limit: z.number().min(1).max(30).optional().describe("Max memories (default 15)"),
       compact: z.boolean().optional().describe("Return compact results (ID + preview + score) to save tokens. Use memory_get to fetch full content."),
       max_tokens: z.number().min(100).max(100000).optional().describe("Token budget — pack results by relevance until budget exhausted. Overrides limit."),
       namespace: z.string().optional().describe("Filter to a specific project's memories (set to project name)"),
+      deep: z.boolean().optional().describe("Enable iterative deep retrieval — LLM identifies gaps in retrieved memories and generates follow-up queries until converged (max 3 rounds). Requires ai.api_key in settings."),
     },
     async (args) => {
       try {
-        const search = new MemorySearch(db);
         const store = new MemoryStore(db);
-
         const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 15);
 
-        const results = await search.search({
-          query: args.topic,
-          limit: fetchLimit,
-          namespace: args.namespace,
-        });
+        let results: SearchResult[];
+        let deepMeta: { iterations: number; queries: string[]; gaps: string[] } | null = null;
+
+        if (args.deep) {
+          const deep = await deepContext(db, {
+            topic: args.topic,
+            limit: fetchLimit,
+            namespace: args.namespace,
+          });
+          results = deep.results;
+          deepMeta = { iterations: deep.iterations, queries: deep.queries, gaps: deep.gaps };
+        } else {
+          const search = new MemorySearch(db);
+          results = await search.search({
+            query: args.topic,
+            limit: fetchLimit,
+            namespace: args.namespace,
+          });
+        }
 
         if (results.length === 0) {
           return { content: [{ type: "text", text: `No context found for "${args.topic}".` }] };
@@ -425,16 +440,25 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
             return `- [${m.id}] ${preview}${tagStr} (${m.created_at})`;
           };
 
+          let compactDeepSection = "";
+          if (deepMeta && deepMeta.iterations > 0 && deepMeta.queries.length > 1) {
+            const queryLines = deepMeta.queries.slice(1).map((q) => `- ${q}`).join("\n");
+            compactDeepSection = `\n\n--- Deep retrieval (${deepMeta.iterations} rounds, ${deepMeta.queries.length} queries) ---\nFollow-up queries:\n${queryLines}`;
+            if (deepMeta.gaps.length > 0) {
+              compactDeepSection += `\nRemaining gaps:\n${deepMeta.gaps.map((g) => `- ${g}`).join("\n")}`;
+            }
+          }
+
           if (args.max_tokens) {
             const { formatted, totalTokens } = packByTokenBudget(results, args.max_tokens, formatCompact);
             return {
-              content: [{ type: "text", text: `Context for "${args.topic}" (~${totalTokens} tokens, ${formatted.length} memories, compact):\n\n${formatted.join("\n")}` }],
+              content: [{ type: "text", text: `Context for "${args.topic}" (~${totalTokens} tokens, ${formatted.length} memories, compact${deepMeta ? ", deep" : ""}):\n\n${formatted.join("\n")}${compactDeepSection}` }],
             };
           }
 
           const lines = results.map(formatCompact);
           return {
-            content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories, compact):\n\n${lines.join("\n")}` }],
+            content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories, compact${deepMeta ? ", deep" : ""}):\n\n${lines.join("\n")}${compactDeepSection}` }],
           };
         }
 
@@ -492,8 +516,18 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           }
         } catch { /* non-critical */ }
 
+        // Deep retrieval metadata section
+        let deepSection = "";
+        if (deepMeta && deepMeta.iterations > 0) {
+          const queryLines = deepMeta.queries.slice(1).map((q) => `- ${q}`).join("\n");
+          deepSection = `\n\n--- Deep retrieval (${deepMeta.iterations} rounds, ${deepMeta.queries.length} queries) ---\nFollow-up queries:\n${queryLines}`;
+          if (deepMeta.gaps.length > 0) {
+            deepSection += `\nRemaining gaps:\n${deepMeta.gaps.map((g) => `- ${g}`).join("\n")}`;
+          }
+        }
+
         return {
-          content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories):\n\n${lines.join("\n")}${linkSection}${entityProfileSection}${factsSection}${goalsSection}` }],
+          content: [{ type: "text", text: `Context for "${args.topic}" (${results.length} memories${deepMeta ? ", deep" : ""}):\n\n${lines.join("\n")}${linkSection}${entityProfileSection}${factsSection}${goalsSection}${deepSection}` }],
         };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };

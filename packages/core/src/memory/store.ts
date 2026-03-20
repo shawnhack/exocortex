@@ -90,6 +90,41 @@ export function validateStorageGate(
       `Memory content too short (${content.length} chars, min ${MIN_CONTENT_LENGTH}). Short memories rarely provide retrieval value.`
     );
   }
+
+  // Quality gate for consolidation/summary content — reject garbage patterns
+  if (opts?.content_type === "summary") {
+    const garbage = detectConsolidationGarbage(content);
+    if (garbage.length > 0) {
+      throw new Error(
+        `Consolidation quality gate failed: ${garbage.join("; ")}`
+      );
+    }
+  }
+}
+
+/** Detect garbage patterns in consolidation/summary content */
+function detectConsolidationGarbage(content: string): string[] {
+  const issues: string[] = [];
+
+  // Nested consolidation markers
+  const nestedCount = (content.match(/\[Consolidated summary of/gi) || []).length;
+  if (nestedCount > 0) {
+    issues.push(`Contains "[Consolidated summary of" header (${nestedCount}x) — summaries must be prose`);
+  }
+
+  // Raw memory IDs leaked into content
+  const idLeaks = (content.match(/\b01[A-Z0-9]{24,}\b/g) || []).length;
+  if (idLeaks > 2) {
+    issues.push(`Contains ${idLeaks} raw memory IDs — internal IDs should not appear in summaries`);
+  }
+
+  // Summary-of-summaries nesting (multiple date range headers)
+  const dateRangeHeaders = (content.match(/\d+ sources, \d{4}-\d{2}-\d{2}/g) || []).length;
+  if (dateRangeHeaders > 1) {
+    issues.push(`Contains ${dateRangeHeaders} date-range headers — indicates nested summary-of-summaries`);
+  }
+
+  return issues;
 }
 
 type MemoryAttribution = {

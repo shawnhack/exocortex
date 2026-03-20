@@ -74,6 +74,11 @@ export type {
   ResearchSourceResult,
   ResearchResult,
 } from "./memory/research.js";
+export { deepContext } from "./memory/deep-context.js";
+export type {
+  DeepContextOptions,
+  DeepContextResult,
+} from "./memory/deep-context.js";
 export { digestTranscript, extractFacts as extractDigestFacts } from "./memory/digest.js";
 export type { DigestResult, DigestAction, ExtractedFact as DigestExtractedFact, FactType } from "./memory/digest.js";
 export { extractFacts, storeFacts, searchFacts } from "./memory/facts.js";
