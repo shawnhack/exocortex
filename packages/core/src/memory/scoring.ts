@@ -153,8 +153,9 @@ export function qualityScore(
   linkCount: number,
   ageDays: number
 ): number {
-  // Usefulness: saturates at 5
-  const usefulness = usefulCount > 0 ? Math.min(1.0, Math.log(1 + usefulCount) / Math.log(6)) : 0;
+  // Reuse the retrieval usefulness curve so quality adjustment does not
+  // max out on sparse positive feedback sooner than retrieval scoring does.
+  const usefulness = usefulnessScore(usefulCount);
   // Access: saturates at 20
   const access = accessCount > 0 ? Math.min(1.0, Math.log(1 + accessCount) / Math.log(21)) : 0;
   // Links: saturates at 5
