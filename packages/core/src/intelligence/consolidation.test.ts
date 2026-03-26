@@ -427,6 +427,78 @@ describe("consolidation", () => {
       expect(result.clusters[0].memberIds).not.toContain(m3);
     });
 
+    it("should NOT boost bridge importance when dryRun is true", () => {
+      // Community A: e1 <-> e1b
+      const e1 = createEntity(db, "ent-1", "Alpha");
+      const e1b = createEntity(db, "ent-1b", "AlphaB");
+      addRelationship(db, e1, e1b);
+
+      // Community B: e2 <-> e2b (disconnected from A)
+      const e2 = createEntity(db, "ent-2", "Beta");
+      const e2b = createEntity(db, "ent-2b", "BetaB");
+      addRelationship(db, e2, e2b);
+
+      // Normal memories in respective communities
+      const m1 = insertMemoryWithEmbedding(db, { id: "m1-dry", content: "memory one" });
+      const m2 = insertMemoryWithEmbedding(db, { id: "m2-dry", content: "memory two" });
+      linkMemoryToEntity(db, m1, e1);
+      linkMemoryToEntity(db, m2, e2);
+
+      // Bridge memory linked to both communities, importance 0.5
+      const bridge = insertMemoryWithEmbedding(db, { id: "bridge-dry", content: "bridge memory", importance: 0.5 });
+      linkMemoryToEntity(db, bridge, e1);
+      linkMemoryToEntity(db, bridge, e2);
+
+      const clusters: ConsolidationCluster[] = [{
+        centroidId: m1,
+        memberIds: [m1, m2, bridge],
+        avgSimilarity: 0.85,
+        topic: "dry run bridge test",
+      }];
+
+      // dryRun = true — should NOT write to DB
+      applyCommunityAwareFiltering(db, clusters, 2, true);
+
+      const mem = db.prepare("SELECT importance FROM memories WHERE id = ?").get("bridge-dry") as any;
+      expect(mem.importance).toBe(0.5);
+    });
+
+    it("should boost bridge importance when dryRun is false", () => {
+      // Community A: e3 <-> e3b
+      const e3 = createEntity(db, "ent-3", "Gamma");
+      const e3b = createEntity(db, "ent-3b", "GammaB");
+      addRelationship(db, e3, e3b);
+
+      // Community B: e4 <-> e4b (disconnected from A)
+      const e4 = createEntity(db, "ent-4", "Delta");
+      const e4b = createEntity(db, "ent-4b", "DeltaB");
+      addRelationship(db, e4, e4b);
+
+      // Normal memories in respective communities
+      const m1 = insertMemoryWithEmbedding(db, { id: "m1-live", content: "memory three" });
+      const m2 = insertMemoryWithEmbedding(db, { id: "m2-live", content: "memory four" });
+      linkMemoryToEntity(db, m1, e3);
+      linkMemoryToEntity(db, m2, e4);
+
+      // Bridge memory linked to both communities, importance 0.5
+      const bridge = insertMemoryWithEmbedding(db, { id: "bridge-live", content: "bridge memory", importance: 0.5 });
+      linkMemoryToEntity(db, bridge, e3);
+      linkMemoryToEntity(db, bridge, e4);
+
+      const clusters: ConsolidationCluster[] = [{
+        centroidId: m1,
+        memberIds: [m1, m2, bridge],
+        avgSimilarity: 0.85,
+        topic: "live run bridge test",
+      }];
+
+      // dryRun = false — should write importance boost to DB
+      applyCommunityAwareFiltering(db, clusters, 2, false);
+
+      const mem = db.prepare("SELECT importance FROM memories WHERE id = ?").get("bridge-live") as any;
+      expect(mem.importance).toBe(0.8);
+    });
+
     it("handles memories with no entity links gracefully", () => {
       // Create a community so detection has something to find
       const e1 = createEntity(db, "ent-1", "Alpha");

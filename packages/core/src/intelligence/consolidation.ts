@@ -200,7 +200,8 @@ function buildMemoryCommunityMap(
 export function applyCommunityAwareFiltering(
   db: DatabaseSync,
   clusters: ConsolidationCluster[],
-  minClusterSize: number = 2
+  minClusterSize: number = 2,
+  dryRun: boolean = false
 ): CommunityAwareResult {
   const communities = detectCommunities(db);
 
@@ -235,8 +236,8 @@ export function applyCommunityAwareFiltering(
     }
   }
 
-  // Boost importance of bridge memories to at least 0.8
-  if (bridgeMemoryIds.length > 0) {
+  // Boost importance of bridge memories to at least 0.8 (skip during dry-run)
+  if (bridgeMemoryIds.length > 0 && !dryRun) {
     const boostStmt = db.prepare(
       "UPDATE memories SET importance = MAX(importance, 0.8) WHERE id = ? AND importance < 0.8"
     );
