@@ -28,7 +28,7 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
       consolidate_min_cluster_size: z.number().min(2).optional().describe("Min cluster size (default 3)"),
       consolidate_time_bucket: z.enum(["week", "month"]).optional().describe("Constrain clustering to same time window"),
       consolidate_community_aware: z.boolean().optional().describe("Split clusters at community boundaries"),
-      consolidate_cluster_index: z.number().min(0).optional().describe("Only process this cluster (0-indexed)"),
+      consolidate_cluster_id: z.string().optional().describe("Centroid memory ID of the cluster to process (from dry-run output)"),
       consolidate_dry_run: z.boolean().optional().describe("Preview clusters without merging (default true)"),
       consolidate_summary: z.string().optional().describe("Summary override for targeted consolidation"),
       tag_cleanup: z.boolean().optional().describe("Find and merge near-duplicate tags"),
@@ -281,7 +281,7 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
               let clusters = rawClusters;
               let caResult: ReturnType<typeof applyCommunityAwareFiltering> | undefined;
               if (args.consolidate_community_aware) {
-                caResult = applyCommunityAwareFiltering(db, rawClusters, args.consolidate_min_cluster_size ?? 2);
+                caResult = applyCommunityAwareFiltering(db, rawClusters, args.consolidate_min_cluster_size ?? 2, args.consolidate_dry_run !== false);
                 if (caResult.clusters.length > 0) {
                   clusters = caResult.clusters;
                 }
@@ -298,9 +298,9 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
                 }
 
                 const lines = clusters.map((c, i) => {
-                  return `  ${i + 1}. [${i}] "${c.topic}" — ${c.memberIds.length} memories (${c.memberIds.join(", ")}), avg similarity: ${c.avgSimilarity.toFixed(2)}`;
+                  return `  ${i + 1}. [${c.centroidId}] "${c.topic}" — ${c.memberIds.length} memories (${c.memberIds.join(", ")}), avg similarity: ${c.avgSimilarity.toFixed(2)}`;
                 });
-                parts.push(`\nConsolidate (dry run, ${clusters.length} clusters):\n${lines.join("\n")}${bridgeInfo}\n  To merge: set consolidate_dry_run:false, consolidate_cluster_index:N, and consolidate_summary:"your synthesis"`);
+                parts.push(`\nConsolidate (dry run, ${clusters.length} clusters):\n${lines.join("\n")}${bridgeInfo}\n  To merge: set consolidate_dry_run:false, consolidate_cluster_id:"<centroid_id>", and consolidate_summary:"your synthesis"`);
               } else {
                 // Actually consolidate
                 let embeddingProvider;
@@ -310,12 +310,12 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
                   // Proceed without embedding
                 }
 
-                const toProcess = args.consolidate_cluster_index !== undefined
-                  ? [clusters[args.consolidate_cluster_index]].filter(Boolean)
+                const toProcess = args.consolidate_cluster_id
+                  ? clusters.filter(c => c.centroidId === args.consolidate_cluster_id)
                   : clusters;
 
-                if (toProcess.length === 0) {
-                  parts.push(`\nConsolidate: invalid cluster_index ${args.consolidate_cluster_index} (${clusters.length} available)`);
+                if (toProcess.length === 0 && args.consolidate_cluster_id) {
+                  parts.push(`\nConsolidate: no cluster found with centroid ID ${args.consolidate_cluster_id} — re-run dry-run to get current cluster IDs`);
                 } else {
                   const results: string[] = [];
                   const skipped: string[] = [];
