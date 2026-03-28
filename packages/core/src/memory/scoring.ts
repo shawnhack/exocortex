@@ -183,17 +183,20 @@ export function computeHybridScore(
   // Gate secondary boosts by the stronger retrieval signal so weak semantic/FTS
   // matches do not outrank better evidence just because they are newer or popular.
   const relevanceGate = Math.max(0, Math.max(vectorScore, ftsScore));
+  const primaryScore =
+    weights.vector * vectorScore +
+    weights.fts * ftsScore;
   const secondaryBoostWeight =
     relevanceGate === 0 ? 0 : Math.min(1, 0.25 + relevanceGate * 0.75);
-
-  return (
-    weights.vector * vectorScore +
-    weights.fts * ftsScore +
+  const secondaryScore =
     secondaryBoostWeight * (
       weights.recency * recency +
       weights.frequency * frequency
-    )
-  );
+    );
+
+  // Secondary signals should never outweigh the evidence that made the item
+  // relevant in the first place; otherwise newer/popular weak matches can flip.
+  return primaryScore + Math.min(secondaryScore, primaryScore * secondaryBoostWeight);
 }
 /**
  * Tier-based retrieval boost. Higher-tier knowledge gets a scoring advantage.
