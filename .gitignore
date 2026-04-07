@@ -17,5 +17,7 @@ releases/
 benchmarks/longmemeval/*.json
 benchmarks/membench/data/
 benchmarks/membench/*.zip
+benchmarks/convomem/*.json
+benchmarks/memoryagentbench/*.parquet
 benchmarks/results_*.json
 benchmarks/_bench*.db

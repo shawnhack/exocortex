@@ -395,6 +395,78 @@ async function runMemBench(limit) {
 }
 
 // ---------------------------------------------------------------------------
+// Benchmark: ConvoMem (Salesforce)
+// ---------------------------------------------------------------------------
+
+async function runConvoMem(limit) {
+  const dataDir = path.join(__dirname, "convomem");
+  const files = fs.existsSync(dataDir) ? fs.readdirSync(dataDir).filter(f => f.endsWith(".json")) : [];
+  if (files.length === 0) { console.log("  SKIP: convomem/ not found or empty"); return null; }
+
+  const metrics = { recall: {}, ndcg: {} };
+  for (const k of K_VALUES) { metrics.recall[k] = []; metrics.ndcg[k] = []; }
+  const typeMetrics = {};
+  let totalQA = 0;
+
+  for (const file of files) {
+    const data = JSON.parse(fs.readFileSync(path.join(dataDir, file), "utf-8"));
+    // ConvoMem format: object with numeric keys, each containing evidenceItems + conversations
+    const items = Array.isArray(data) ? data : Object.values(data);
+    const catName = file.replace(/\.json$/, "").replace(/_\d+$/, "");
+    const itemLimit = Math.min(items.length, limit === Infinity ? 50 : Math.ceil(limit / files.length));
+
+    for (let ii = 0; ii < itemLimit; ii++) {
+      const item = items[ii];
+      if (!item.evidenceItems || !item.conversations) continue;
+
+      for (const ev of item.evidenceItems) {
+        if (!ev.question || !ev.message_evidences || !ev.conversations) continue;
+
+        // Build docs from all conversations
+        const docs = [];
+        const allConvos = ev.conversations || [];
+        for (let ci = 0; ci < allConvos.length; ci++) {
+          const convo = allConvos[ci];
+          const messages = convo.messages || [];
+          const text = messages.map(m => `${m.speaker}: ${m.text}`).join("\n");
+          docs.push({ id: `C${ci}`, content: text });
+        }
+        if (docs.length === 0) continue;
+
+        // Evidence is the conversation containing the evidence messages
+        // Find which conversation(s) contain the evidence text
+        const evidenceTexts = ev.message_evidences.map(m => m.text);
+        const evidenceConvos = [];
+        for (let ci = 0; ci < docs.length; ci++) {
+          if (evidenceTexts.some(et => docs[ci].content.includes(et.slice(0, 50)))) {
+            evidenceConvos.push(`C${ci}`);
+          }
+        }
+        if (evidenceConvos.length === 0) continue;
+
+        const db = createFreshDb();
+        try {
+          await ingestDocs(db, docs);
+          const retrieved = await search(db, ev.question, Math.max(...K_VALUES), docs);
+
+          for (const k of K_VALUES) {
+            const topK = retrieved.slice(0, k);
+            metrics.recall[k].push(computeRecall(topK, evidenceConvos));
+            metrics.ndcg[k].push(computeNDCG(topK, evidenceConvos, k));
+            if (!typeMetrics[catName]) typeMetrics[catName] = {};
+            if (!typeMetrics[catName][k]) typeMetrics[catName][k] = [];
+            typeMetrics[catName][k].push(computeRecall(topK, evidenceConvos));
+          }
+          totalQA++;
+        } finally { db.close(); }
+      }
+    }
+  }
+
+  return totalQA > 0 ? { name: "ConvoMem", questions: totalQA, metrics, typeMetrics } : null;
+}
+
+// ---------------------------------------------------------------------------
 // Report
 // ---------------------------------------------------------------------------
 
@@ -464,6 +536,11 @@ if (BENCH === "all" || BENCH === "locomo") {
 if (BENCH === "all" || BENCH === "membench") {
   process.stdout.write("Running MemBench...\n");
   results.push(printReport(await runMemBench(LIMIT)));
+}
+
+if (BENCH === "all" || BENCH === "convomem") {
+  process.stdout.write("Running ConvoMem...\n");
+  results.push(printReport(await runConvoMem(LIMIT)));
 }
 
 const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

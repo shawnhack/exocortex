@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { buildPalace, compactPalace, buildWakeUpContext, runBenchmark, writeDiaryEntry, readDiary, listDiaryAgents } from "@exocortex/core";
+import { buildPalace, compactPalace, buildWakeUpContext, runBenchmark, writeDiaryEntry, readDiary, listDiaryAgents, EMBEDDING_MODELS, getModelInfo, getSetting, setSetting } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
 export function registerHierarchyTools(ctx: ToolRegistrationContext): void {
@@ -176,6 +176,50 @@ export function registerHierarchyTools(ctx: ToolRegistrationContext): void {
         return { content: [{ type: "text", text: lines.join("\n") }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Diary list failed: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "embedding_models",
+    "List available embedding models with their characteristics. " +
+    "Shows current model, dimensions, size, quality, and speed ratings. " +
+    "Use setSetting to switch: embedding.model and embedding.dimensions (requires restart).",
+    {
+      set_model: z.string().optional().describe("Switch to this model ID (requires service restart to take effect)"),
+    },
+    async (args) => {
+      try {
+        const current = getSetting(db, "embedding.model") || "Xenova/bge-small-en-v1.5";
+        const currentDims = getSetting(db, "embedding.dimensions") || "384";
+
+        if (args.set_model) {
+          const info = getModelInfo(args.set_model);
+          if (!info) {
+            const valid = EMBEDDING_MODELS.map(m => m.id).join(", ");
+            return { content: [{ type: "text", text: `Unknown model "${args.set_model}". Available: ${valid}` }], isError: true };
+          }
+          setSetting(db, "embedding.model", info.id);
+          setSetting(db, "embedding.dimensions", String(info.dimensions));
+          return { content: [{ type: "text", text:
+            `Model set to ${info.name} (${info.id}, ${info.dimensions}d).\n` +
+            `Restart exocortex to load the new model.\n` +
+            `WARNING: Existing embeddings (${currentDims}d) will not match new dimensions (${info.dimensions}d). ` +
+            `Run memory_maintenance with reembed_all: true after restart to re-embed all memories.`
+          }] };
+        }
+
+        const lines = [`Current: ${current} (${currentDims}d)\n`, "Available models:\n"];
+        for (const m of EMBEDDING_MODELS) {
+          const active = m.id === current ? " ← active" : "";
+          lines.push(`  ${m.name}${active}`);
+          lines.push(`    ID: ${m.id} | ${m.dimensions}d | ${m.sizeMb}MB | RAM: ~${m.ramMb}MB`);
+          lines.push(`    Quality: ${"★".repeat(m.quality)}${"☆".repeat(5 - m.quality)} | Speed: ${"★".repeat(m.speed)}${"☆".repeat(5 - m.speed)}`);
+          lines.push(`    ${m.bestFor}\n`);
+        }
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
       }
     }
   );

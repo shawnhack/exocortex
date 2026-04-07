@@ -325,6 +325,10 @@ export type { Palace, Wing, Hall, Room, Tunnel, PalaceStats } from "./intelligen
 export { runBenchmark } from "./intelligence/benchmark.js";
 export type { BenchmarkResult, BenchmarkOptions, QueryResult } from "./intelligence/benchmark.js";
 
+// Embedding models
+export { EMBEDDING_MODELS, DEFAULT_MODEL, getModelInfo, getDefaultModel } from "./embedding/models.js";
+export type { EmbeddingModelInfo } from "./embedding/models.js";
+
 // Agent Diary
 export { writeDiaryEntry, readDiary, listDiaryAgents, ensureDiarySchema } from "./intelligence/diary.js";
 export type { DiaryEntry, DiaryWriteResult } from "./intelligence/diary.js";
