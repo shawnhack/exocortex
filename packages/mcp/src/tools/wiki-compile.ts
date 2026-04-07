@@ -4,7 +4,8 @@ import path from "node:path";
 import { compileWiki, runBehavioralAudit } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
-const DEFAULT_WIKI_PATH = "D:/Documents/Obsidian/Exocortex/wiki";
+const DEFAULT_WIKI_PATH = process.env.EXOCORTEX_WIKI_PATH
+  || (process.env.OBSIDIAN_VAULT ? `${process.env.OBSIDIAN_VAULT}/wiki` : "./wiki");
 
 export function registerWikiCompileTools(ctx: ToolRegistrationContext): void {
   const { server, db } = ctx;
@@ -80,7 +81,7 @@ export function registerWikiCompileTools(ctx: ToolRegistrationContext): void {
     "Write or update a synthesized wiki article. Use after reading an extractive article " +
     "and rewriting it into coherent prose. The content replaces the existing article file.",
     {
-      slug: z.string().describe("Article slug (filename without .md, e.g. 'alpha-trade', 'skills-and-techniques')"),
+      slug: z.string().describe("Article slug (filename without .md, e.g. 'my-project', 'skills-and-techniques')"),
       content: z.string().describe("Full article content including frontmatter (---...---) and markdown body"),
       wiki_path: z.string().optional().describe(`Wiki directory (default: ${DEFAULT_WIKI_PATH})`),
     },

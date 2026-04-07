@@ -129,7 +129,7 @@ function cleanVault(vaultPath: string): void {
   const entries = fs.readdirSync(vaultPath, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(vaultPath, entry.name);
-    if (entry.name === ".obsidian") continue;
+    if (entry.name === ".obsidian" || entry.name === "wiki") continue;
     if (entry.isDirectory()) {
       fs.rmSync(fullPath, { recursive: true, force: true });
     } else if (entry.name.endsWith(".md") || entry.name.endsWith(".json")) {
