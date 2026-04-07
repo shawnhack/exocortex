@@ -9,6 +9,8 @@ import { registerGoalTools } from "./goals.js";
 import { registerPredictionTools } from "./predictions.js";
 import { registerIntelligenceTools } from "./intelligence.js";
 import { registerMemoryAutoTool } from "./memory-auto.js";
+import { registerWikiCompileTools } from "./wiki-compile.js";
+import { registerHierarchyTools } from "./hierarchy.js";
 import type { ToolRegistrationContext } from "./types.js";
 
 export interface RegisterToolsOptions {
@@ -45,4 +47,6 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
   registerPredictionTools(ctx);
   registerIntelligenceTools(ctx);
   registerMemoryAutoTool(ctx);
+  registerWikiCompileTools(ctx);
+  registerHierarchyTools(ctx);
 }

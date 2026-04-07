@@ -14,3 +14,8 @@ nul
 .screenshot-temp.*
 packages/marketplace/
 releases/
+benchmarks/longmemeval/*.json
+benchmarks/membench/data/
+benchmarks/membench/*.zip
+benchmarks/results_*.json
+benchmarks/_bench*.db

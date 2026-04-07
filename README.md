@@ -20,6 +20,8 @@
 
 Exocortex gives AI coding agents persistent memory across sessions. It stores memories with embeddings, scores them using Reciprocal Rank Fusion, and exposes everything through an MCP server, REST API, CLI, and React dashboard. Works with any MCP-compatible tool — Claude Code, Codex, Gemini, Copilot, and others. All data stays local — no cloud, no API keys for embeddings.
 
+**96.4% Recall@5 on LongMemEval** — matching the highest published scores, zero API calls. [Full benchmark results →](benchmarks/BENCHMARKS.md)
+
 ## Dashboard
 
 <p align="center">

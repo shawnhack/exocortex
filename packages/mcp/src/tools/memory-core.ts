@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cosineSimilarity, getRRFConfig, searchFacts, getCachedProfiles, stripPrivateContent, validateStorageGate, deepContext } from "@exocortex/core";
+import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cosineSimilarity, getRRFConfig, searchFacts, getCachedProfiles, stripPrivateContent, validateStorageGate, deepContext, sanitizeContent, validateContent, redactSensitiveData, classifyTrust, detectInfluence } from "@exocortex/core";
 import type { SearchResult } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "../utils.js";
 import { expandViaLinks, buildFactsSection, buildEntityProfileSection } from "./helpers.js";
@@ -42,6 +42,20 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           tags: args.tags,
         });
 
+        // Security: sanitize content for prompt injection
+        const sanitized = sanitizeContent(stripped);
+        const contentToStore = sanitized.modified ? sanitized.content : stripped;
+
+        // Security: validate for sensitive data leaks
+        const validation = validateContent(contentToStore);
+        const finalContent = validation.safe ? contentToStore : redactSensitiveData(contentToStore);
+
+        // Security: classify trust level
+        const trustLevel = classifyTrust(
+          "mcp",
+          (args.metadata as Record<string, unknown>)?.source_url as string | undefined
+        );
+
         const store = new MemoryStore(db);
 
         // Auto-set expires_at for transient memories (unless caller provides one)
@@ -54,8 +68,28 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           }
         }
 
+        // Security: detect behavioral influence
+        const influence = detectInfluence(contentToStore);
+
+        // Merge security metadata into user-provided metadata
+        const securityMeta: Record<string, unknown> = {
+          ...(args.metadata ?? {}),
+          trust_level: trustLevel,
+        };
+        if (sanitized.threats.length > 0) {
+          securityMeta.threats_detected = sanitized.threats.length;
+          securityMeta.threat_types = [...new Set(sanitized.threats.map((t) => t.type))];
+        }
+        if (!validation.safe) {
+          securityMeta.redacted = true;
+        }
+        if (influence.score > 0.1) {
+          securityMeta.influence_score = influence.score;
+          securityMeta.influence_verdict = influence.verdict;
+        }
+
         const result = await store.create({
-          content: args.content,
+          content: finalContent,
           content_type: args.content_type ?? "text",
           source: "mcp",
           importance: args.importance,
@@ -67,7 +101,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           agent: args.agent || DEFAULT_ATTRIBUTION.agent,
           session_id: args.session_id,
           conversation_id: args.conversation_id,
-          metadata: args.metadata,
+          metadata: securityMeta,
           is_metadata: args.is_metadata,
           benchmark: args.benchmark,
           tier: args.tier,
@@ -77,6 +111,10 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
         });
 
         const meta: string[] = [`id: ${result.memory.id}`];
+        if (sanitized.threats.length > 0) meta.push(`⚠ ${sanitized.threats.length} threat(s) sanitized: ${[...new Set(sanitized.threats.map((t) => t.type))].join(", ")}`);
+        if (!validation.safe) meta.push(`⚠ sensitive data redacted`);
+        if (influence.verdict === "high") meta.push(`⚠ high behavioral influence score (${influence.score})`);
+        else if (influence.verdict === "moderate") meta.push(`⚠ moderate influence score (${influence.score})`);
         if (args.tags?.length) meta.push(`tags: ${args.tags.join(", ")}`);
         if (args.importance !== undefined) meta.push(`importance: ${args.importance}`);
         if (result.superseded_id) {

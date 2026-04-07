@@ -377,7 +377,7 @@ export function getCommunitySummaries(
     // Get relationships within the community for richer context
     const relationships = db
       .prepare(
-        `SELECT s.name as source_name, t.name as target_name, er.relationship_type
+        `SELECT s.name as source_name, t.name as target_name, er.relationship as relationship_type
          FROM entity_relationships er
          INNER JOIN entities s ON er.source_entity_id = s.id
          INNER JOIN entities t ON er.target_entity_id = t.id

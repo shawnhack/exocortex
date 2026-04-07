@@ -312,3 +312,56 @@ export type { BackupData, BackupDatabaseOptions, BackupDatabaseResult, VerifyBac
 // Obsidian export
 export { exportToObsidian } from "./export/obsidian.js";
 export type { ObsidianExportOptions, ObsidianExportResult } from "./export/obsidian.js";
+
+// Wiki compilation
+export { compileWiki } from "./intelligence/wiki-compile.js";
+export type { WikiCompileOptions, WikiCompileResult, WikiArticle } from "./intelligence/wiki-compile.js";
+
+// Hierarchical navigation
+export { buildPalace, compactPalace, buildWakeUpContext } from "./intelligence/hierarchy.js";
+export type { Palace, Wing, Hall, Room, Tunnel, PalaceStats } from "./intelligence/hierarchy.js";
+
+// Benchmarks
+export { runBenchmark } from "./intelligence/benchmark.js";
+export type { BenchmarkResult, BenchmarkOptions, QueryResult } from "./intelligence/benchmark.js";
+
+// Agent Diary
+export { writeDiaryEntry, readDiary, listDiaryAgents, ensureDiarySchema } from "./intelligence/diary.js";
+export type { DiaryEntry, DiaryWriteResult } from "./intelligence/diary.js";
+
+// Security
+export {
+  sanitizeContent,
+  hasHighSeverityThreats,
+  checkUrl,
+  filterUrls,
+  wrapExternalContent,
+  stripBoundaryMarkers,
+  buildProvenanceMetadata,
+  classifyTrust,
+  validateContent,
+  redactSensitiveData,
+  detectInfluence,
+  buildProvenance,
+  extractProvenance,
+  mergeProvenance,
+  aggregateTrust,
+  runBehavioralAudit,
+} from "./security/index.js";
+export type {
+  SanitizeResult,
+  ThreatDetection,
+  ThreatType,
+  UrlCheckResult,
+  BoundaryOptions,
+  TrustLevel,
+  ValidationResult,
+  ValidationWarning,
+  InfluenceScore,
+  InfluenceSignal,
+  ProvenanceRecord,
+  AnomalyReport,
+  Anomaly,
+  AnomalyType,
+  MonitorStats,
+} from "./security/index.js";

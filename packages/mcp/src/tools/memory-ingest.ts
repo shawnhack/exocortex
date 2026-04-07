@@ -1,7 +1,7 @@
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { MemoryStore, ingestFiles, ingestUrl, researchTopic, digestTranscript } from "@exocortex/core";
+import { MemoryStore, ingestFiles, ingestUrl, researchTopic, digestTranscript, checkUrl, sanitizeContent } from "@exocortex/core";
 import type { ContentType } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
@@ -115,10 +115,30 @@ export function registerMemoryIngestTools(ctx: ToolRegistrationContext): void {
           return { content: [{ type: "text", text: "url is required for source: url" }], isError: true };
         }
 
+        const ingestUrlStr = args.url;
+
+        // Security: check URL reputation before fetching
+        const urlCheck = checkUrl(ingestUrlStr);
+        if (!urlCheck.allowed) {
+          return {
+            content: [{ type: "text", text: `URL blocked: ${urlCheck.reason} (${ingestUrlStr})` }],
+            isError: true,
+          };
+        }
+
+        // Security: sanitize pre-fetched content if provided
+        let ingestContent = args.content;
+        if (ingestContent) {
+          const sanitized = sanitizeContent(ingestContent);
+          if (sanitized.threats.length > 0) {
+            ingestContent = sanitized.content;
+          }
+        }
+
         try {
           const result = await ingestUrl(db, {
-            url: args.url,
-            content: args.content,
+            url: ingestUrlStr,
+            content: ingestContent,
             title: args.title,
             tags: args.tags,
             importance: args.importance,
@@ -130,6 +150,7 @@ export function registerMemoryIngestTools(ctx: ToolRegistrationContext): void {
           });
 
           const replacedStr = result.replaced > 0 ? ` (replaced ${result.replaced} existing)` : "";
+          const riskNote = urlCheck.riskLevel === "suspicious" ? `\n- ⚠ URL risk: ${urlCheck.reason}` : "";
           return {
             content: [{
               type: "text",
@@ -138,7 +159,8 @@ export function registerMemoryIngestTools(ctx: ToolRegistrationContext): void {
                 `- Chunks stored: ${result.chunks_stored}\n` +
                 `- Total characters: ${result.total_chars.toLocaleString()}\n` +
                 `- Tier: ${result.tier}\n` +
-                (result.description ? `- Description: ${result.description}\n` : ""),
+                (result.description ? `- Description: ${result.description}\n` : "") +
+                riskNote,
             }],
           };
         } catch (err) {
