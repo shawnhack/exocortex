@@ -127,8 +127,7 @@ function discoverNamespaces(db: DatabaseSync, minMemories: number): NamespaceInf
 /** Tags that indicate operational/internal memories — not knowledge */
 const NOISE_TAGS = [
   "run-summary", "digest", "session-digest", "auto-digested",
-  "sentinel", "operations", "prompt-amendment",
-  "outcome", "goal-progress-implicit",
+  "prompt-amendment",
 ];
 
 /** SQL clause to exclude operational noise */
@@ -137,7 +136,7 @@ const NOISE_FILTER = `
   AND NOT EXISTS (
     SELECT 1 FROM memory_tags t
     WHERE t.memory_id = m.id
-    AND t.tag IN ('run-summary', 'digest', 'session-digest', 'auto-digested', 'prompt-amendment')
+    AND t.tag IN (${NOISE_TAGS.map((t) => `'${t}'`).join(", ")})
   )`;
 
 function gatherNamespaceMemories(

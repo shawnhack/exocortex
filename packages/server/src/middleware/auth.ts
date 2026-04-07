@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Context, Next } from "hono";
 import { getDb, getSetting } from "@exocortex/core";
-import { isX402Enabled, build402Response, verifyX402Payment } from "./x402.js";
+import { isX402Enabled, build402Response, verifyX402Payment, getPrice } from "./x402.js";
 
 /** Constant-time string comparison to prevent timing attacks */
 function safeEqual(a: string, b: string): boolean {
@@ -33,7 +33,8 @@ export async function authMiddleware(c: Context, next: Next) {
   const paymentTx = c.req.header("X-Payment");
   if (paymentTx && isX402Enabled()) {
     const wallet = process.env.EXOCORTEX_PAYMENT_WALLET!;
-    const valid = await verifyX402Payment(paymentTx, wallet, 1_000);
+    const price = getPrice(c.req.method, c.req.path);
+    const valid = await verifyX402Payment(paymentTx, wallet, price);
     if (valid) {
       await next();
       return;

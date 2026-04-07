@@ -295,15 +295,20 @@ export function buildWakeUpContext(db: DatabaseSync): string {
     lines.push(`PROJ: ${projects.map((p) => `${p.namespace.toUpperCase()}(${p.cnt})`).join(" ")}`);
   }
 
-  // Active goals
-  const goals = db
-    .prepare(
-      `SELECT title, status, priority FROM goals
-       WHERE status = 'active'
-       ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
-       LIMIT 5`
-    )
-    .all() as unknown as Array<{ title: string; status: string; priority: string }>;
+  // Active goals (table may not exist on fresh DBs)
+  let goals: Array<{ title: string; status: string; priority: string }> = [];
+  try {
+    goals = db
+      .prepare(
+        `SELECT title, status, priority FROM goals
+         WHERE status = 'active'
+         ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
+         LIMIT 5`
+      )
+      .all() as unknown as Array<{ title: string; status: string; priority: string }>;
+  } catch {
+    // goals table doesn't exist yet — skip
+  }
 
   if (goals.length > 0) {
     lines.push(`GOALS: ${goals.map((g) => `${g.title.slice(0, 40)}[${g.priority[0]}]`).join(" | ")}`);

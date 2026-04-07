@@ -44,9 +44,12 @@ app.get("/api/context/export", async (c) => {
   const techniques: string[] = [];
   const other: string[] = [];
 
+  const { sanitizeContent } = await import("@exocortex/core");
+
   for (const r of results) {
     const memTags = r.memory.tags || [];
-    const content = r.memory.content.trim();
+    const sanitized = sanitizeContent(r.memory.content.trim());
+    const content = sanitized.content;
     const preview = content.length > 500 ? content.slice(0, 500) + "..." : content;
 
     if (memTags.includes("decision") || memTags.includes("architecture")) {
