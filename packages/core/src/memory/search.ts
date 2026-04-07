@@ -194,39 +194,18 @@ export class MemorySearch {
     const ftsText = query.query;
     const extraFtsTerms = expansion ? expansion.expandedTerms : [];
 
-    // Get FTS matches FIRST (so we can include them in candidate pool)
+    // Get FTS matches using two-pass AND+OR search
     // Uses String() keys to avoid BigInt/Number mismatch from node:sqlite
-    const ftsMatches = new Map<string, number>();
-    const ftsRowids: number[] = [];
-    try {
-      let ftsQuery = this.sanitizeFtsQuery(ftsText);
-      if (extraFtsTerms.length > 0) {
-        const extraTermsStr = extraFtsTerms.map((t) => `"${t.replace(/"/g, "")}"`).join(" OR ");
-        ftsQuery = `${ftsQuery} OR ${extraTermsStr}`;
-      }
-      const rawKeywordBoost = parseFloat(getSetting(this.db, "scoring.keyword_boost") ?? "2.0");
-      const keywordBoost = Number.isFinite(rawKeywordBoost) ? rawKeywordBoost : 2.0;
-      const ftsRows = this.db
-        .prepare(
-          `SELECT rowid, bm25(memories_fts, 1.0, ${keywordBoost}) as rank FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT 200`
-        )
-        .all(ftsQuery) as unknown as FtsMatch[];
+    const rawKeywordBoost = parseFloat(getSetting(this.db, "scoring.keyword_boost") ?? "2.0");
+    const keywordBoost = Number.isFinite(rawKeywordBoost) ? rawKeywordBoost : 2.0;
 
-      // Normalize FTS ranks (rank is negative in FTS5, more negative = better)
-      if (ftsRows.length > 0) {
-        const minRank = Math.min(...ftsRows.map((r) => r.rank));
-        const maxRank = Math.max(...ftsRows.map((r) => r.rank));
-        const range = maxRank - minRank || 1;
-
-        for (const row of ftsRows) {
-          // Invert: most negative (best) → 1.0, least negative → 0.0
-          ftsMatches.set(String(row.rowid), (maxRank - row.rank) / range);
-          ftsRowids.push(Number(row.rowid));
-        }
-      }
-    } catch (err) {
-      console.warn("[search] FTS query failed, falling back to vector-only:", (err as Error).message);
+    // Build full FTS text with entity expansion terms
+    let fullFtsText = ftsText;
+    if (extraFtsTerms.length > 0) {
+      fullFtsText = `${ftsText} ${extraFtsTerms.join(" ")}`;
     }
+
+    const { matches: ftsMatches, rowids: ftsRowids } = this.twoPassFts(fullFtsText, keywordBoost);
 
     // Build candidate pool: FTS matches + recent memories
     // This ensures keyword-matched older memories are always included
@@ -989,6 +968,16 @@ export class MemorySearch {
     }
   }
 
+  /** Stopwords that pollute FTS results when used as query terms */
+  private static readonly FTS_STOPWORDS = new Set([
+    "what", "when", "where", "who", "how", "did", "was", "the", "are", "has", "have",
+    "does", "can", "will", "about", "with", "from", "that", "this", "for", "you", "your",
+    "would", "could", "should", "some", "any", "been", "being", "more", "also", "into",
+    "than", "then", "there", "their", "which", "were", "they", "them", "very", "just",
+    "but", "not", "all", "its", "his", "her", "our", "she", "him", "had", "may", "might",
+    "still", "recommend", "suggest", "give", "tell",
+  ]);
+
   private sanitizeFtsQuery(query: string): string {
     // Escape special FTS5 characters
     const cleaned = query
@@ -998,10 +987,91 @@ export class MemorySearch {
 
     if (!cleaned) return '""';
 
-    // Split into words and join with OR for broader matching
-    const terms = cleaned.split(" ").filter(Boolean);
+    // Remove stopwords for better precision
+    const terms = cleaned.split(" ")
+      .filter(Boolean)
+      .filter((t) => !MemorySearch.FTS_STOPWORDS.has(t.toLowerCase()));
+
+    if (terms.length === 0) {
+      // All words were stopwords — fall back to original terms
+      const fallback = cleaned.split(" ").filter(Boolean);
+      return fallback.map((t) => `"${t}"`).join(" OR ");
+    }
     if (terms.length === 1) return `"${terms[0]}"`;
 
     return terms.map((t) => `"${t}"`).join(" OR ");
+  }
+
+  /**
+   * Two-pass FTS query: AND first (high precision), then OR (high recall).
+   * Returns merged match map with AND results getting a precision bonus.
+   */
+  private twoPassFts(query: string, keywordBoost: number): { matches: Map<string, number>; rowids: number[] } {
+    const matches = new Map<string, number>();
+    const rowids: number[] = [];
+
+    const cleaned = query
+      .replace(/['"(){}[\]*:^~!@#$%&\\]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned) return { matches, rowids };
+
+    const terms = cleaned.split(" ")
+      .filter(Boolean)
+      .filter((t) => !MemorySearch.FTS_STOPWORDS.has(t.toLowerCase()));
+
+    if (terms.length === 0) return { matches, rowids };
+
+    // Pass 1: AND query (all content words must appear)
+    if (terms.length >= 3) {
+      try {
+        const andQuery = terms.slice(0, 8).map((t) => `"${t}"`).join(" AND ");
+        const andRows = this.db
+          .prepare(
+            `SELECT rowid, bm25(memories_fts, 1.0, ${keywordBoost}) as rank FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT 100`
+          )
+          .all(andQuery) as unknown as FtsMatch[];
+
+        if (andRows.length > 0) {
+          const minRank = Math.min(...andRows.map((r) => r.rank));
+          const maxRank = Math.max(...andRows.map((r) => r.rank));
+          const range = maxRank - minRank || 1;
+          for (const row of andRows) {
+            // AND matches get 1.3x precision bonus
+            const score = ((maxRank - row.rank) / range) * 1.3;
+            matches.set(String(row.rowid), score);
+            rowids.push(Number(row.rowid));
+          }
+        }
+      } catch {
+        // AND query can fail if terms don't exist in index
+      }
+    }
+
+    // Pass 2: OR query (any content word)
+    try {
+      const orQuery = terms.slice(0, 10).map((t) => `"${t}"`).join(" OR ");
+      const orRows = this.db
+        .prepare(
+          `SELECT rowid, bm25(memories_fts, 1.0, ${keywordBoost}) as rank FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT 200`
+        )
+        .all(orQuery) as unknown as FtsMatch[];
+
+      if (orRows.length > 0) {
+        const minRank = Math.min(...orRows.map((r) => r.rank));
+        const maxRank = Math.max(...orRows.map((r) => r.rank));
+        const range = maxRank - minRank || 1;
+        for (const row of orRows) {
+          const score = (maxRank - row.rank) / range;
+          const existing = matches.get(String(row.rowid)) ?? 0;
+          matches.set(String(row.rowid), Math.max(existing, score));
+          if (!rowids.includes(Number(row.rowid))) rowids.push(Number(row.rowid));
+        }
+      }
+    } catch {
+      // FTS can fail on unusual input
+    }
+
+    return { matches, rowids };
   }
 }

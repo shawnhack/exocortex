@@ -30,11 +30,11 @@ export interface DiaryWriteResult {
 // Schema — creates table if not exists
 // ---------------------------------------------------------------------------
 
-let schemaInitialized = false;
+const initializedDbs = new WeakSet<object>();
 
 export function ensureDiarySchema(db: DatabaseSync): void {
-  if (schemaInitialized) return;
-  schemaInitialized = true;
+  if (initializedDbs.has(db)) return;
+  initializedDbs.add(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_diary (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
