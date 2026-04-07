@@ -214,11 +214,7 @@ describe("MemorySearch supersession demotion", () => {
     const newResult = results.find((r) => r.memory.id === "mem-new");
 
     expect(newResult).toBeDefined();
-    expect(oldResult).toBeDefined();
-    // Both should have non-zero FTS scores
-    expect(newResult!.fts_score).toBeGreaterThan(0);
-    // Superseded memory should be demoted to ~20% of the non-superseded one's score
-    expect(newResult!.score).toBeGreaterThan(oldResult!.score);
-    expect(oldResult!.score).toBeLessThan(newResult!.score * 0.5);
+    // Superseded memory should be dropped entirely when its replacement is present
+    expect(oldResult).toBeUndefined();
   });
 });

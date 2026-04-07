@@ -26,21 +26,27 @@ function printResultRows(
     exact_order: boolean;
     alert: boolean;
     initialized?: boolean;
+    churned?: number;
+    rebaselined?: boolean;
   }>,
   chalk: any
 ): void {
   for (const row of rows) {
-    const state = row.initialized
-      ? chalk.blue("init")
-      : row.alert
-        ? chalk.red("alert")
-        : chalk.green("ok");
+    const state = row.rebaselined
+      ? chalk.yellow("rebase")
+      : row.initialized
+        ? chalk.blue("init")
+        : row.alert
+          ? chalk.red("alert")
+          : chalk.green("ok");
+    const churnSuffix =
+      row.churned && row.churned > 0 ? `  churned=${row.churned}` : "";
     console.log(
       `  ${state}  "${row.query}"  overlap=${(row.overlap_at_10 * 100).toFixed(
         1
       )}%  avgShift=${row.avg_rank_shift.toFixed(2)}  exact=${
         row.exact_order ? "yes" : "no"
-      }`
+      }${churnSuffix}`
     );
   }
 }
@@ -238,7 +244,7 @@ export function registerRetrievalRegression(program: Command): void {
 
         console.log(
           chalk.bold(
-            `\nRetrieval regression: ${result.ran} queries | alerts: ${result.alerts} | initialized: ${result.initialized}\n`
+            `\nRetrieval regression: ${result.ran} queries | alerts: ${result.alerts} | initialized: ${result.initialized}${result.rebaselined > 0 ? ` | rebaselined: ${result.rebaselined}` : ""}\n`
           )
         );
         if (result.run_id) {

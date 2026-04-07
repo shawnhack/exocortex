@@ -137,7 +137,7 @@ export async function runScheduledRetrievalRegression(): Promise<
   }
 
   console.log(
-    `[scheduler] Retrieval regression run ${result.run_id ?? "unknown"}: ${result.ran} queries, ${result.alerts} alerts${result.alert_memory_id ? ` (alert memory: ${result.alert_memory_id})` : ""}`
+    `[scheduler] Retrieval regression run ${result.run_id ?? "unknown"}: ${result.ran} queries, ${result.alerts} alerts${result.rebaselined > 0 ? `, ${result.rebaselined} rebaselined` : ""}${result.alert_memory_id ? ` (alert memory: ${result.alert_memory_id})` : ""}`
   );
   return { status: "ran", result };
 }

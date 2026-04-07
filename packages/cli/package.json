@@ -20,6 +20,6 @@
     "ora": "^9.3.0"
   },
   "devDependencies": {
-    "@types/node": "^25.4.0"
+    "@types/node": "^25.5.0"
   }
 }

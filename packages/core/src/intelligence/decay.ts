@@ -219,7 +219,7 @@ export function archiveExpired(db: DatabaseSync): number {
 
   const result = db
     .prepare(
-      `UPDATE memories SET is_active = 0, updated_at = ?
+      `UPDATE memories SET is_active = 0, is_indexed = 0, updated_at = ?
        WHERE is_active = 1 AND expires_at IS NOT NULL AND expires_at <= datetime('now')`
     )
     .run(now) as { changes: number };
@@ -313,7 +313,7 @@ export function archiveStaleMemories(
     return { archived: 0, candidates, dry_run: dryRun };
   }
 
-  const stmt = db.prepare("UPDATE memories SET is_active = 0, updated_at = ? WHERE id = ?");
+  const stmt = db.prepare("UPDATE memories SET is_active = 0, is_indexed = 0, updated_at = ? WHERE id = ?");
   const now = new Date().toISOString().slice(0, 19).replace("T", " ");
 
   db.exec("BEGIN");

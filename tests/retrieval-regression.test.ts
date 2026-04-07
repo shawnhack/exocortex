@@ -87,7 +87,7 @@ describe("runRetrievalRegression", () => {
     }
   });
 
-  it("raises alerts and can store alert memory when drift breaches thresholds", async () => {
+  it("recognizes deleted baseline IDs as churn, not drift", async () => {
     setGoldenQueries(db, ["alpha trade exit logic mismatches"]);
     await runRetrievalRegression(db, { limit: 5 });
 
@@ -102,6 +102,38 @@ describe("runRetrievalRegression", () => {
       create_alert_memory: true,
     });
 
+    // Deleted memory is excluded from comparison — not a real regression
+    expect(run.alerts).toBe(0);
+    const churnedResult = run.results.find((r) => r.churned > 0);
+    expect(churnedResult).toBeTruthy();
+  });
+
+  it("raises alerts on genuine drift when baseline IDs are still live", async () => {
+    const query = "alpha trade exit logic mismatches";
+    setGoldenQueries(db, [query]);
+
+    // Create a live memory that won't rank well for the query
+    const decoy = await store.create({
+      content: "Completely unrelated topic about weather patterns.",
+      tags: ["weather"],
+    });
+
+    // Plant a baseline pointing at the decoy — it's live but won't be in results
+    const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+    db.prepare(
+      `INSERT INTO retrieval_regression_baselines (query, top_ids, created_at, updated_at)
+       VALUES (?, ?, ?, ?)`
+    ).run(query, JSON.stringify([decoy.memory.id]), now, now);
+
+    const run = await runRetrievalRegression(db, {
+      limit: 1,
+      min_overlap_at_10: 1,
+      max_avg_rank_shift: 0,
+      create_alert_memory: true,
+    });
+
+    // Decoy is live but not in top results — genuine drift
+    expect(run.results[0].churned).toBe(0);
     expect(run.alerts).toBeGreaterThan(0);
     expect(run.alert_memory_id).toBeTruthy();
 

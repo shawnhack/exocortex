@@ -32,6 +32,8 @@ export interface RetrievalRegressionQueryResult {
   exact_order: boolean;
   alert: boolean;
   initialized: boolean;
+  churned: number;
+  rebaselined: boolean;
 }
 
 export interface RetrievalRegressionResult {
@@ -39,6 +41,7 @@ export interface RetrievalRegressionResult {
   ran: number;
   initialized: number;
   alerts: number;
+  rebaselined: number;
   limit: number;
   min_overlap_at_10: number;
   max_avg_rank_shift: number;
@@ -119,30 +122,55 @@ function parseIdList(raw: string | null | undefined): string[] {
   }
 }
 
+/**
+ * Check which memory IDs still exist and are active in the database.
+ * Handles both archived (is_active=0) and purged (fully deleted) IDs.
+ */
+function getLiveBaselineIds(db: DatabaseSync, ids: string[]): Set<string> {
+  if (ids.length === 0) return new Set();
+  const placeholders = ids.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT id FROM memories WHERE id IN (${placeholders}) AND is_active = 1`
+    )
+    .all(...ids) as Array<{ id: string }>;
+  return new Set(rows.map((r) => r.id));
+}
+
 function computeOverlapAtK(
   baseline: string[],
   current: string[],
-  k: number
-): { overlap: number; exact: boolean; avgShift: number } {
+  k: number,
+  liveBaselineIds?: Set<string>
+): { overlap: number; exact: boolean; avgShift: number; churned: number } {
   const b = baseline.slice(0, k);
   const c = current.slice(0, k);
-  const bSet = new Set(b);
+
+  // Filter out churned baseline IDs (archived/purged) from comparison
+  const liveB = liveBaselineIds ? b.filter((id) => liveBaselineIds.has(id)) : b;
+  const churned = b.length - liveB.length;
+  const effectiveK = Math.max(1, liveB.length);
+
+  const bSet = new Set(liveB);
   const overlapIds = c.filter((id) => bSet.has(id));
-  const overlap = overlapIds.length / Math.max(1, k);
-  const exact = b.length === c.length && b.every((id, i) => c[i] === id);
+  const overlap = overlapIds.length / effectiveK;
+  const exact =
+    liveB.length === c.length && liveB.every((id, i) => c[i] === id);
 
   let shiftTotal = 0;
   for (const id of overlapIds) {
-    const from = b.indexOf(id);
+    const from = liveB.indexOf(id);
     const to = c.indexOf(id);
     shiftTotal += Math.abs(from - to);
   }
-  const avgShift = overlapIds.length > 0 ? shiftTotal / overlapIds.length : k;
+  const avgShift =
+    overlapIds.length > 0 ? shiftTotal / overlapIds.length : effectiveK;
 
   return {
     overlap,
     exact,
     avgShift,
+    churned,
   };
 }
 
@@ -356,7 +384,8 @@ export async function compareRetrievalAgainstRun(
     const current = await search.search(searchQuery);
     const currentIds = current.map((r) => r.memory.id).slice(0, limit);
     const baselineIds = row.current_ids.slice(0, limit);
-    const comparison = computeOverlapAtK(baselineIds, currentIds, limit);
+    const liveIds = getLiveBaselineIds(db, baselineIds);
+    const comparison = computeOverlapAtK(baselineIds, currentIds, limit, liveIds);
     const isAlert =
       comparison.overlap < minOverlap ||
       comparison.avgShift > maxAvgShift;
@@ -371,6 +400,8 @@ export async function compareRetrievalAgainstRun(
       exact_order: comparison.exact,
       alert: isAlert,
       initialized: false,
+      churned: comparison.churned,
+      rebaselined: false,
     });
   }
 
@@ -397,6 +428,7 @@ export async function runRetrievalRegression(
       ran: 0,
       initialized: 0,
       alerts: 0,
+      rebaselined: 0,
       limit: thresholds.limit,
       min_overlap_at_10: thresholds.minOverlap,
       max_avg_rank_shift: thresholds.maxAvgShift,
@@ -429,6 +461,7 @@ export async function runRetrievalRegression(
   const results: RetrievalRegressionQueryResult[] = [];
   let initialized = 0;
   let alerts = 0;
+  let rebaselined = 0;
 
   for (const queryDef of queries) {
     const searchQuery: SearchQuery = {
@@ -472,18 +505,33 @@ export async function runRetrievalRegression(
         exact_order: true,
         alert: false,
         initialized: true,
+        churned: 0,
+        rebaselined: false,
       });
       continue;
     }
 
+    // Check which baseline IDs still exist (not archived/purged)
+    const liveIds = getLiveBaselineIds(db, baselineIds);
     const comparison = computeOverlapAtK(
       baselineIds,
       currentIds,
-      thresholds.limit
+      thresholds.limit,
+      liveIds
     );
+
+    // Auto-rebaseline if >50% of baseline IDs have been churned
+    const shouldRebaseline =
+      comparison.churned > thresholds.limit / 2 && !updateBaselines;
+    if (shouldRebaseline) {
+      baselineUpsert.run(queryDef.query, JSON.stringify(currentIds), now, now);
+      rebaselined++;
+    }
+
     const isAlert =
-      comparison.overlap < thresholds.minOverlap ||
-      comparison.avgShift > thresholds.maxAvgShift;
+      !shouldRebaseline &&
+      (comparison.overlap < thresholds.minOverlap ||
+        comparison.avgShift > thresholds.maxAvgShift);
     if (isAlert) alerts++;
 
     runInsert.run(
@@ -511,6 +559,8 @@ export async function runRetrievalRegression(
       exact_order: comparison.exact,
       alert: isAlert,
       initialized: false,
+      churned: comparison.churned,
+      rebaselined: shouldRebaseline,
     });
   }
 
@@ -519,6 +569,7 @@ export async function runRetrievalRegression(
     ran: results.length,
     initialized,
     alerts,
+    rebaselined,
     limit: thresholds.limit,
     min_overlap_at_10: thresholds.minOverlap,
     max_avg_rank_shift: thresholds.maxAvgShift,
@@ -534,14 +585,22 @@ export async function runRetrievalRegression(
     incrementCounter(db, "retrieval_regression.alerts", alerts);
   }
 
-  if (alerts > 0 && createAlertMemory) {
+  if ((alerts > 0 || rebaselined > 0) && createAlertMemory) {
     const alertLines = results
       .filter((r) => r.alert)
       .map(
         (r) =>
           `- ${r.query}: overlap@${thresholds.limit}=${(
             r.overlap_at_10 * 100
-          ).toFixed(1)}%, avg-rank-shift=${r.avg_rank_shift.toFixed(2)}`
+          ).toFixed(1)}%, avg-rank-shift=${r.avg_rank_shift.toFixed(
+            2
+          )}${r.churned > 0 ? `, churned=${r.churned}` : ""}`
+      );
+    const rebaselinedLines = results
+      .filter((r) => r.rebaselined)
+      .map(
+        (r) =>
+          `- ${r.query}: auto-rebaselined (${r.churned}/${thresholds.limit} baseline IDs churned)`
       );
     const report = [
       `Retrieval regression alerts (${now})`,
@@ -552,6 +611,9 @@ export async function runRetrievalRegression(
       ).toFixed(1)}% and avg-rank-shift <= ${thresholds.maxAvgShift.toFixed(2)}`,
       "",
       ...alertLines,
+      ...(rebaselinedLines.length > 0
+        ? ["", "Auto-rebaselined (>50% baseline churn):", ...rebaselinedLines]
+        : []),
     ].join("\n");
 
     const store = new MemoryStore(db);
@@ -566,6 +628,7 @@ export async function runRetrievalRegression(
         kind: "retrieval-regression-alert",
         run_id: runId,
         alerts,
+        rebaselined,
         ran: results.length,
       },
     });

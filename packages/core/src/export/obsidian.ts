@@ -1382,6 +1382,101 @@ function updateCrossLinks(
 }
 
 // ---------------------------------------------------------------------------
+// Third pass: inline wikilinks — replace entity mentions in body text
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a lookup of display names → wikilink targets from the file registry.
+ * Sorted longest-first to avoid partial matches (e.g. "alpha-trade" before "alpha").
+ */
+function buildInlineLinkMap(registry: FileRegistry): Array<{ re: RegExp; link: string }> {
+  const entries: Array<{ name: string; link: string }> = [];
+
+  for (const [, info] of registry.files) {
+    const target = `[[${info.section}/${info.slug}|${info.title}]]`;
+    entries.push({ name: info.title, link: target });
+    const slugName = info.slug.replace(/-/g, " ");
+    if (slugName !== info.title.toLowerCase()) {
+      entries.push({ name: slugName, link: target });
+    }
+  }
+
+  // Sort longest first to prevent partial matches
+  entries.sort((a, b) => b.name.length - a.name.length);
+
+  // Filter out very short names to avoid false positives
+  return entries
+    .filter((e) => e.name.length > 3)
+    .map((e) => ({
+      re: new RegExp(
+        `(?<!\\[\\[|\\|)\\b(${e.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})\\b(?![\\]|])`,
+        "gi",
+      ),
+      link: e.link,
+    }));
+}
+
+/**
+ * Replace entity/project mentions in markdown body text with [[wikilinks]].
+ * Skips frontmatter, headings, code blocks, and existing wikilinks.
+ */
+function injectInlineWikilinks(vaultPath: string, registry: FileRegistry): void {
+  const linkMap = buildInlineLinkMap(registry);
+  if (linkMap.length === 0) return;
+
+  for (const [, info] of registry.files) {
+    const filePath = path.join(vaultPath, info.section, `${info.slug}.md`);
+    if (!fs.existsSync(filePath)) {
+      const topLevel = path.join(vaultPath, `${info.slug}.md`);
+      if (fs.existsSync(topLevel)) applyInlineLinks(topLevel, info.slug, linkMap);
+      continue;
+    }
+    applyInlineLinks(filePath, info.slug, linkMap);
+  }
+
+  // Also process top-level files not in the registry
+  for (const f of fs.readdirSync(vaultPath).filter((f) => f.endsWith(".md"))) {
+    applyInlineLinks(path.join(vaultPath, f), f.replace(/\.md$/, "").toLowerCase().replace(/\s+/g, "-"), linkMap);
+  }
+}
+
+function applyInlineLinks(
+  filePath: string,
+  selfSlug: string,
+  linkMap: Array<{ re: RegExp; link: string }>,
+): void {
+  const lines = fs.readFileSync(filePath, "utf-8").split("\n");
+  let inFrontmatter = false;
+  let inCodeBlock = false;
+  let changed = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+
+    if (i === 0 && trimmed === "---") { inFrontmatter = true; continue; }
+    if (inFrontmatter) { if (trimmed === "---") inFrontmatter = false; continue; }
+    if (trimmed.startsWith("```")) { inCodeBlock = !inCodeBlock; continue; }
+    if (inCodeBlock || trimmed.startsWith("#") || /^- \[\[/.test(trimmed)) continue;
+
+    let line = lines[i];
+    for (const { re, link } of linkMap) {
+      if (link.includes(`/${selfSlug}|`)) continue;
+      const m = re.exec(line);
+      if (m) {
+        line = line.slice(0, m.index) + link + line.slice(m.index + m[0].length);
+        re.lastIndex = 0;
+        changed = true;
+      }
+    }
+    lines[i] = line;
+  }
+
+  if (changed) {
+    fs.writeFileSync(filePath, lines.join("\n"), "utf-8");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -1412,6 +1507,9 @@ export async function exportToObsidian(
 
   // Second pass: add cross-links now that all files exist
   updateCrossLinks(db, vaultPath, registry);
+
+  // Third pass: inject inline wikilinks for entity mentions in body text
+  injectInlineWikilinks(vaultPath, registry);
 
   writeDashboard(vaultPath, registry);
 

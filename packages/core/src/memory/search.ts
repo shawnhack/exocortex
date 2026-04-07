@@ -102,7 +102,7 @@ export class MemorySearch {
     }
 
     // Build WHERE clauses for filtering
-    const conditions: string[] = ["m.is_active = 1"];
+    const conditions: string[] = ["m.is_active = 1", "m.parent_id IS NULL"];
     const params: (string | number)[] = [];
 
     if (query.content_type) {
@@ -553,6 +553,17 @@ export class MemorySearch {
 
     // Sort by score descending, with deterministic tie-breaking by ID
     scored.sort((a, b) => b.score - a.score || a.row.id.localeCompare(b.row.id));
+
+    // Supersession dedup: if a superseded memory and its replacement both appear,
+    // drop the superseded one entirely instead of just demoting it
+    const resultIds = new Set(scored.map(s => s.row.id));
+    scored = scored.filter(s => {
+      const supersededBy = s.row.superseded_by;
+      if (supersededBy && resultIds.has(supersededBy)) {
+        return false; // replacement is present — drop the stale version
+      }
+      return true;
+    });
 
     // Confidence gap filter: remove results far below the top score
     const parsedGapRatio = parseFloat(getSetting(this.db, "search.score_gap_ratio") ?? "0.15");
