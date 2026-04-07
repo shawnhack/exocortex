@@ -8,11 +8,11 @@ Reproducible retrieval benchmarks measuring Recall@K and NDCG@K across three sta
 
 | Benchmark | Questions | R@1 | R@5 | R@10 | NDCG@5 |
 |-----------|-----------|-----|-----|------|--------|
-| **LongMemEval** | 470 | 83.2% | **96.4%** | 97.4% | 85.3% |
-| **LoCoMo** | 1,986 | 60.2% | **88.0%** | 95.5% | 72.4% |
-| **MemBench** | 300 | 78.7% | **98.3%** | 100% | 78.3% |
+| **LongMemEval** | 470 | 83.4% | **96.6%** | 98.1% | 85.5% |
+| **LoCoMo** | 1,986 | 60.5% | **89.2%** | 95.1% | 73.0% |
+| **MemBench** | 300 | 77.0% | **97.3%** | 99.7% | 76.6% |
 
-Search method: FTS5 (Porter stemming) + TF-IDF + Reciprocal Rank Fusion.
+Search method: Two-pass FTS5 (AND + OR with stopword removal) + Reciprocal Rank Fusion.
 No external API calls. Fully local.
 
 ### LongMemEval (ICLR 2025)

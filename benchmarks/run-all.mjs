@@ -138,25 +138,44 @@ async function search(db, query, topK, docs) {
   const results = new Map(); // id → RRF score
   const k = 60; // RRF constant
 
-  // 1. FTS search
+  // 1. FTS search — two-pass: try AND first (precise), fall back to OR (broad)
   const words = query.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 2);
-  const ftsQuery = words.slice(0, 10).map(w => `"${w}"`).join(" OR ");
+  const contentWords = words.filter(w => !["what", "when", "where", "who", "how", "did", "was", "the", "are", "has", "have", "does", "can", "will", "about", "with", "from", "that", "this", "for", "you", "your"].includes(w));
+  const ftsWordsAnd = contentWords.slice(0, 8).map(w => `"${w}"`).join(" AND ");
+  const ftsWordsOr = contentWords.slice(0, 10).map(w => `"${w}"`).join(" OR ");
 
-  if (ftsQuery) {
+  let ftsHitCount = 0;
+
+  // Pass 1: AND query (all content words must appear — high precision)
+  // Only use AND when query has 3+ content words (too strict for 2-word queries)
+  if (ftsWordsAnd && contentWords.length >= 3) {
     try {
-      const ftsRows = db.prepare(
+      const andRows = db.prepare(
         `SELECT d.id FROM docs_fts fts INNER JOIN docs d ON fts.rowid = d.rowid
          WHERE docs_fts MATCH ? ORDER BY rank LIMIT ?`
-      ).all(ftsQuery, topK * 3);
-      ftsRows.forEach((r, i) => results.set(r.id, (results.get(r.id) || 0) + 1 / (k + i + 1)));
+      ).all(ftsWordsAnd, topK * 2);
+      ftsHitCount = andRows.length;
+      // AND matches get a precision bonus (1.3x weight)
+      andRows.forEach((r, i) => results.set(r.id, (results.get(r.id) || 0) + 1.3 / (k + i + 1)));
+    } catch { /* AND can fail if terms don't exist in index */ }
+  }
+
+  // Pass 2: OR query (any content word — high recall, lower precision)
+  if (ftsWordsOr) {
+    try {
+      const orRows = db.prepare(
+        `SELECT d.id FROM docs_fts fts INNER JOIN docs d ON fts.rowid = d.rowid
+         WHERE docs_fts MATCH ? ORDER BY rank LIMIT ?`
+      ).all(ftsWordsOr, topK * 3);
+      if (ftsHitCount === 0) ftsHitCount = orRows.length;
+      orRows.forEach((r, i) => results.set(r.id, (results.get(r.id) || 0) + 1 / (k + i + 1)));
     } catch { /* FTS can fail on edge cases */ }
   }
 
-  // 2. Embedding search
+  // 2. Embedding search — adaptive weight based on FTS strength
   if (USE_EMBEDDINGS) {
     const provider = await getProvider();
     if (provider) {
-      // Cache query embeddings too
       const qKey = "q:" + contentKey(query);
       let queryVec = embeddingCache.get(qKey);
       if (!queryVec) {
@@ -165,14 +184,19 @@ async function search(db, query, topK, docs) {
       }
       const scores = [];
 
-      // Load embeddings from DB
       const rows = db.prepare("SELECT id, embedding FROM docs WHERE embedding IS NOT NULL").all();
       for (const row of rows) {
         const docVec = new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4);
         scores.push({ id: row.id, score: cosineSimVec(queryVec, docVec) });
       }
       scores.sort((a, b) => b.score - a.score);
-      scores.forEach((s, i) => results.set(s.id, (results.get(s.id) || 0) + 1 / (k + i + 1)));
+
+      // Adaptive weighting: if FTS found strong matches, reduce embedding influence
+      // If FTS is weak (<3 results), embeddings get full weight
+      const embedWeight = ftsHitCount >= 5 ? 0.4 : ftsHitCount >= 3 ? 0.7 : 1.0;
+      scores.forEach((s, i) => {
+        results.set(s.id, (results.get(s.id) || 0) + embedWeight * (1 / (k + i + 1)));
+      });
     }
   }
 
