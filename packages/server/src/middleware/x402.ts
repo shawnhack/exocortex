@@ -122,11 +122,11 @@ export async function verifyX402Payment(
     for (const post of postBalances) {
       if (post.mint !== USDC_MINT || post.owner !== expectedWallet) continue;
 
-      const postAmt = parseInt(post.uiTokenAmount?.amount || "0");
+      const postAmt = parseInt(post.uiTokenAmount?.amount || "0", 10);
       const pre = preBalances.find(
         (p: any) => p.accountIndex === post.accountIndex && p.mint === USDC_MINT,
       );
-      const preAmt = parseInt(pre?.uiTokenAmount?.amount || "0");
+      const preAmt = parseInt(pre?.uiTokenAmount?.amount || "0", 10);
 
       if (postAmt - preAmt >= expectedAmount) {
         // Mark as spent — evict oldest if cache is full

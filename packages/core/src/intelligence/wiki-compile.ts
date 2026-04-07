@@ -250,7 +250,7 @@ function findRelatedNamespaces(
 }
 
 // ---------------------------------------------------------------------------
-// LLM synthesis memories — produced by sentinel:wiki-compile job
+// LLM synthesis memories — produced by a scheduled wiki compilation job
 // ---------------------------------------------------------------------------
 
 function loadSynthesisMemories(db: DatabaseSync): Map<string, string> {
@@ -288,7 +288,7 @@ function loadSynthesisMemories(db: DatabaseSync): Map<string, string> {
 /** Primary topic tags that form natural article boundaries */
 const TOPIC_TAGS: Record<string, string[]> = {
   "skills-and-techniques": ["skill", "technique", "learning", "how-to"],
-  "operations-and-sentinel": ["sentinel", "operations"],
+  "operations-and-automation": ["operations", "automation", "scheduled"],
   "decisions-and-strategy": ["decision", "architecture", "strategy", "planning"],
   "goals-and-progress": ["goal-progress", "goal-progress-implicit", "milestone", "outcome"],
   "trading-and-crypto": ["trading", "crypto", "bitcoin", "solana", "defi", "alpha"],
@@ -782,7 +782,7 @@ export function compileWiki(
   }
   namespaceSlugs.set("general-knowledge", "general-knowledge");
 
-  // 4. Load any LLM-synthesized articles (from sentinel:wiki-compile job)
+  // 4. Load any LLM-synthesized articles (from scheduled wiki compilation)
   const synthesisMap = loadSynthesisMemories(db);
 
   // 5. Compile each namespace
