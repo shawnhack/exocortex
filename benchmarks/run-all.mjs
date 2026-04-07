@@ -134,13 +134,26 @@ async function ingestDocs(db, docs) {
   return rowid - 1;
 }
 
+// Stopwords to remove from FTS queries
+const STOPWORDS = new Set(["what", "when", "where", "who", "how", "did", "was", "the", "are", "has", "have",
+  "does", "can", "will", "about", "with", "from", "that", "this", "for", "you", "your", "would", "could",
+  "should", "some", "any", "been", "being", "more", "also", "into", "than", "then", "there", "their",
+  "which", "were", "they", "them", "very", "just", "but", "not", "all", "its", "his", "her", "our",
+  "she", "him", "her", "had", "may", "might", "still", "recommend", "suggest", "give", "tell"]);
+
+// Extract proper nouns / entity names from query (capitalized words)
+function extractNames(query) {
+  const matches = query.match(/\b[A-Z][a-z]{2,}\b/g) || [];
+  return [...new Set(matches.map(m => m.toLowerCase()))];
+}
+
 async function search(db, query, topK, docs) {
   const results = new Map(); // id → RRF score
   const k = 60; // RRF constant
 
-  // 1. FTS search — two-pass: try AND first (precise), fall back to OR (broad)
   const words = query.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 2);
-  const contentWords = words.filter(w => !["what", "when", "where", "who", "how", "did", "was", "the", "are", "has", "have", "does", "can", "will", "about", "with", "from", "that", "this", "for", "you", "your"].includes(w));
+  const contentWords = words.filter(w => !STOPWORDS.has(w));
+  const names = extractNames(query);
   const ftsWordsAnd = contentWords.slice(0, 8).map(w => `"${w}"`).join(" AND ");
   const ftsWordsOr = contentWords.slice(0, 10).map(w => `"${w}"`).join(" OR ");
 
@@ -171,6 +184,7 @@ async function search(db, query, topK, docs) {
       orRows.forEach((r, i) => results.set(r.id, (results.get(r.id) || 0) + 1 / (k + i + 1)));
     } catch { /* FTS can fail on edge cases */ }
   }
+
 
   // 2. Embedding search — adaptive weight based on FTS strength
   if (USE_EMBEDDINGS) {

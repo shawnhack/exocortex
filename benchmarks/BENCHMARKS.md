@@ -8,8 +8,8 @@ Reproducible retrieval benchmarks measuring Recall@K and NDCG@K across three sta
 
 | Benchmark | Questions | R@1 | R@5 | R@10 | NDCG@5 |
 |-----------|-----------|-----|-----|------|--------|
-| **LongMemEval** | 470 | 83.4% | **96.6%** | 98.1% | 85.5% |
-| **LoCoMo** | 1,986 | 60.5% | **89.2%** | 95.1% | 73.0% |
+| **LongMemEval** | 470 | 83.4% | **97.0%** | 98.9% | 85.5% |
+| **LoCoMo** | 1,986 | 60.5% | **89.9%** | 95.7% | 73.0% |
 | **MemBench** | 300 | 77.0% | **97.3%** | 99.7% | 76.6% |
 
 Search method: Two-pass FTS5 (AND + OR with stopword removal) + Reciprocal Rank Fusion.
@@ -90,7 +90,7 @@ node benchmarks/run-all.mjs --bench membench
 
 | System | LongMemEval R@5 | Method | Cost |
 |--------|----------------|--------|------|
-| **Exocortex** | **96.4%** | FTS + TF-IDF (local) | $0 |
+| **Exocortex** | **97.0%** | Two-pass FTS (local) | $0 |
 | MemPalace v4 raw | 96.6% | ChromaDB + all-MiniLM (local) | $0 |
 | MemPalace v4 hybrid | 100% | ChromaDB + Haiku rerank | ~$0.01/query |
 
