@@ -7,7 +7,6 @@
  */
 
 import type { DatabaseSync } from "node:sqlite";
-import { cosineSimilarity } from "../memory/scoring.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -125,21 +124,23 @@ function searchMemories(
   // since we can't generate embeddings inline without the model
 
   // Simple keyword overlap scoring as supplementary signal
-  const keywords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+  const keywords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && /^[a-z]+$/.test(w));
   const keywordResults: Array<{ id: string; score: number }> = [];
 
   if (keywords.length > 0) {
-    const likeConditions = keywords.map((k) => `m.content LIKE '%${k.replace(/'/g, "''")}%'`).join(" OR ");
-    const rows = db
-      .prepare(
-        `SELECT m.id, m.importance as score FROM memories m
-         WHERE m.is_active = 1 AND m.parent_id IS NULL
-         AND (${likeConditions})
-         ORDER BY m.importance DESC
-         LIMIT ?`
-      )
-      .all(limit * 2) as unknown as Array<{ id: string; score: number }>;
-    keywordResults.push(...rows);
+    // Use parameterized LIKE queries joined with UNION to avoid SQL injection
+    for (const keyword of keywords.slice(0, 5)) {
+      const rows = db
+        .prepare(
+          `SELECT m.id, m.importance as score FROM memories m
+           WHERE m.is_active = 1 AND m.parent_id IS NULL
+           AND m.content LIKE ?
+           ORDER BY m.importance DESC
+           LIMIT ?`
+        )
+        .all(`%${keyword}%`, limit) as unknown as Array<{ id: string; score: number }>;
+      keywordResults.push(...rows);
+    }
   }
 
   // Merge results via simple RRF
@@ -187,9 +188,13 @@ export function runBenchmark(
   const startTime = Date.now();
 
   // Select random high-importance memories as test targets
-  const nsFilter = namespace
-    ? `AND m.namespace = '${namespace.replace(/'/g, "''")}'`
-    : "";
+  const params: unknown[] = [minImportance];
+  let nsClause = "";
+  if (namespace) {
+    nsClause = "AND m.namespace = ?";
+    params.push(namespace);
+  }
+  params.push(numQueries);
 
   const candidates = db
     .prepare(
@@ -201,11 +206,11 @@ export function runBenchmark(
          AND m.parent_id IS NULL
          AND length(m.content) > 100
          AND m.importance >= ?
-         ${nsFilter}
+         ${nsClause}
        ORDER BY RANDOM()
        LIMIT ?`
     )
-    .all(minImportance, numQueries) as unknown as MemoryCandidate[];
+    .all(...(params as string[])) as unknown as MemoryCandidate[];
 
   // Run queries
   const queryResults: QueryResult[] = [];

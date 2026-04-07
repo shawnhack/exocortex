@@ -30,7 +30,11 @@ export interface DiaryWriteResult {
 // Schema — creates table if not exists
 // ---------------------------------------------------------------------------
 
+let schemaInitialized = false;
+
 export function ensureDiarySchema(db: DatabaseSync): void {
+  if (schemaInitialized) return;
+  schemaInitialized = true;
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_diary (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),

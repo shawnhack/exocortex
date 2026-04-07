@@ -1387,7 +1387,7 @@ function updateCrossLinks(
 
 /**
  * Build a lookup of display names → wikilink targets from the file registry.
- * Sorted longest-first to avoid partial matches (e.g. "alpha-trade" before "alpha").
+ * Sorted longest-first to avoid partial matches (e.g. "my-project" before "my").
  */
 function buildInlineLinkMap(registry: FileRegistry): Array<{ re: RegExp; link: string }> {
   const entries: Array<{ name: string; link: string }> = [];

@@ -39,7 +39,7 @@ const shellArg = isWindows ? "/c" : "-c";
 
 /**
  * Run a prompt through `codex exec` and return the text response.
- * Uses the same pattern as substrate's codex-backend.
+ * Uses iterative LLM-guided retrieval with gap analysis.
  */
 function runCodex(prompt: string, timeoutMs = 30_000): Promise<string> {
   return new Promise((resolve, reject) => {

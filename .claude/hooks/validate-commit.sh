@@ -24,7 +24,7 @@ if [ -n "$CONSOLELOGS" ]; then
 fi
 
 # Check for personal info in committed code (exocortex is public)
-PERSONAL=$(git diff --cached -U0 2>/dev/null | grep -iE '^\+.*(C:\\Users\\shawn|D:\\Apps|shawnhack)' | grep -v '^\+\+\+' || true)
+PERSONAL=$(git diff --cached -U0 2>/dev/null | grep -iE '^\+.*(C:\\Users\\[a-z]+\\|[A-Z]:\\Apps\\|\/home\/[a-z]+\/)' | grep -v '^\+\+\+' || true)
 if [ -n "$PERSONAL" ]; then
   echo "[HOOK] ERROR: Personal paths/info detected — exocortex is a public repo"
   echo "$PERSONAL"

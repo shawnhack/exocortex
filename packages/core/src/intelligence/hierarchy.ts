@@ -129,21 +129,24 @@ export function buildPalace(db: DatabaseSync): Palace {
 
   for (const nsRow of nsRows) {
     const wingName = nsRow.ns || "general";
-    const whereClause = nsRow.ns
-      ? `m.namespace = '${nsRow.ns.replace(/'/g, "''")}'`
-      : `(m.namespace IS NULL OR m.namespace = '')`;
+    const isGeneral = !nsRow.ns;
 
     // Get memories for this wing
-    const memories = db
-      .prepare(
-        `SELECT m.id, m.content, m.importance,
-                COALESCE((SELECT GROUP_CONCAT(t.tag, ',') FROM memory_tags t WHERE t.memory_id = m.id), '') as tags
-         FROM memories m
-         WHERE ${whereClause} AND m.is_active = 1 AND m.parent_id IS NULL AND length(m.content) > 50
-         ORDER BY m.importance DESC
-         LIMIT 200`
-      )
-      .all() as unknown as Array<{ id: string; content: string; importance: number; tags: string }>;
+    const memories = isGeneral
+      ? db.prepare(
+          `SELECT m.id, m.content, m.importance,
+                  COALESCE((SELECT GROUP_CONCAT(t.tag, ',') FROM memory_tags t WHERE t.memory_id = m.id), '') as tags
+           FROM memories m
+           WHERE (m.namespace IS NULL OR m.namespace = '') AND m.is_active = 1 AND m.parent_id IS NULL AND length(m.content) > 50
+           ORDER BY m.importance DESC LIMIT 200`
+        ).all() as unknown as Array<{ id: string; content: string; importance: number; tags: string }>
+      : db.prepare(
+          `SELECT m.id, m.content, m.importance,
+                  COALESCE((SELECT GROUP_CONCAT(t.tag, ',') FROM memory_tags t WHERE t.memory_id = m.id), '') as tags
+           FROM memories m
+           WHERE m.namespace = ? AND m.is_active = 1 AND m.parent_id IS NULL AND length(m.content) > 50
+           ORDER BY m.importance DESC LIMIT 200`
+        ).all(nsRow.ns) as unknown as Array<{ id: string; content: string; importance: number; tags: string }>;
 
     // Classify into halls
     const hallCounts = new Map<string, number>();

@@ -88,10 +88,11 @@ export function registerWikiCompileTools(ctx: ToolRegistrationContext): void {
     async (args) => {
       try {
         const wikiDir = args.wiki_path ?? DEFAULT_WIKI_PATH;
-        const filePath = path.join(wikiDir, `${args.slug}.md`);
+        const filePath = path.resolve(wikiDir, `${args.slug}.md`);
+        const resolvedDir = path.resolve(wikiDir);
 
-        // Validate the slug targets the wiki dir
-        if (!filePath.startsWith(wikiDir)) {
+        // Validate the slug targets the wiki dir (resolve normalizes slashes)
+        if (!filePath.startsWith(resolvedDir)) {
           return { content: [{ type: "text", text: "Error: slug must not contain path separators" }], isError: true };
         }
 

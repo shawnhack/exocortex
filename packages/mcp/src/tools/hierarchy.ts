@@ -115,7 +115,7 @@ export function registerHierarchyTools(ctx: ToolRegistrationContext): void {
     "Record a diary entry for an agent. Call after each session to log what happened, " +
     "what was learned, and what matters. Entries are per-agent and queryable by topic.",
     {
-      agent: z.string().describe("Agent name (e.g. 'sentinel', 'claude-code', 'codex')"),
+      agent: z.string().describe("Agent name (e.g. 'claude-code', 'codex', 'my-agent')"),
       entry: z.string().describe("What happened this session — actions taken, lessons learned, what matters"),
       topic: z.string().optional().describe("Topic tag (default 'general'). Examples: 'debugging', 'architecture', 'goal-work'"),
     },
