@@ -183,14 +183,30 @@ export class MemorySearch {
     // Candidate pool: fetch enough rows for scoring, but cap proportionally
     const candidateLimit = Math.min(1000, Math.max(100, (offset + limit) * 10));
 
-    // Use LLM-provided expanded query for richer retrieval if supplied
-    const baseQuery = query.expanded_query
+    // Use LLM-provided expanded query for richer retrieval if supplied,
+    // otherwise auto-generate heuristic rephrasings.
+    // Auto expansion is embedding-only — injecting synonyms into FTS reduces
+    // precision because FTS scores all terms equally. Embeddings handle synonyms
+    // naturally via vector similarity.
+    const autoExpansion = !query.expanded_query
+      ? this.generateAutoExpansion(query.query)
+      : null;
+
+    // Entity graph expansion runs on original query + LLM-provided expansion (if any),
+    // but NOT on auto-generated heuristic expansion (those are embedding-only)
+    const entityExpandBase = query.expanded_query
       ? `${query.query} ${query.expanded_query}`
       : query.query;
+    const expansion = this.expandQuery(entityExpandBase);
 
-    // Query expansion via entity graph
-    const expansion = this.expandQuery(baseQuery);
-    const embeddingText = expansion ? expansion.expandedText : baseQuery;
+    // Build embedding text: original query + all expansion sources
+    const expansionParts = [query.query];
+    if (query.expanded_query) expansionParts.push(query.expanded_query);
+    if (autoExpansion) expansionParts.push(autoExpansion);
+    if (expansion) expansionParts.push(expansion.expandedTerms.join(" "));
+    const embeddingText = expansionParts.join(" ");
+
+    // FTS stays on original query + entity graph terms only (no auto expansion)
     const ftsText = query.query;
     const extraFtsTerms = expansion ? expansion.expandedTerms : [];
 
@@ -763,6 +779,66 @@ export class MemorySearch {
       else reverse.set(canonical, [alias]);
     }
     return reverse;
+  }
+
+  /**
+   * Generate heuristic-based query expansion when no explicit expanded_query is provided.
+   * Produces synonyms and morphological variants for common domain terms.
+   */
+  private generateAutoExpansion(query: string): string | null {
+    const enabled = getSetting(this.db, "search.auto_expansion");
+    if (enabled?.toLowerCase() === "false") return null;
+
+    const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    if (words.length === 0) return null;
+
+    // Domain synonym map — covers terms that actually caused search friction
+    const SYNONYMS: Record<string, string[]> = {
+      export: ["generate", "output", "vault", "pipeline"],
+      import: ["ingest", "load", "parse"],
+      obsidian: ["vault", "markdown", "wikilink"],
+      gardening: ["maintenance", "cleanup", "consolidation", "pruning"],
+      consolidation: ["merge", "gardening", "clustering"],
+      maintenance: ["gardening", "cleanup", "upkeep"],
+      audit: ["review", "check", "inspect", "verify"],
+      compile: ["build", "generate", "assemble"],
+      wiki: ["article", "documentation", "knowledge"],
+      optimize: ["tuning", "improve", "enhance"],
+      retrieval: ["search", "recall", "finding"],
+      search: ["retrieval", "query", "find"],
+      friction: ["miss", "gap", "failure"],
+      quality: ["score", "health", "metric"],
+      prediction: ["forecast", "estimate", "calibration"],
+      goal: ["objective", "milestone", "target"],
+      technique: ["learning", "pattern", "how-to"],
+      bug: ["fix", "error", "issue", "broken"],
+      decision: ["chose", "selected", "architecture"],
+    };
+
+    const expansions = new Set<string>();
+    for (const word of words) {
+      const synonyms = SYNONYMS[word];
+      if (synonyms) {
+        for (const syn of synonyms) {
+          if (!words.includes(syn)) {
+            expansions.add(syn);
+          }
+        }
+      }
+    }
+
+    // Also generate compound forms — join adjacent words with hyphens
+    // since tags often use kebab-case (e.g., "memory gardening" → "memory-gardening")
+    if (words.length >= 2) {
+      for (let i = 0; i < words.length - 1; i++) {
+        expansions.add(`${words[i]}-${words[i + 1]}`);
+      }
+    }
+
+    if (expansions.size === 0) return null;
+
+    // Cap at 8 terms to avoid noise
+    return Array.from(expansions).slice(0, 8).join(" ");
   }
 
   private expandQuery(

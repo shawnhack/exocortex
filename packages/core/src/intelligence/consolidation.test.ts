@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { getDbForTesting, initializeSchema } from "@exocortex/core";
 import type { DatabaseSync } from "@exocortex/core";
-import { findClusters, consolidateCluster, generateBasicSummary, applyCommunityAwareFiltering } from "./consolidation.js";
+import { findClusters, consolidateCluster, generateBasicSummary, validateSummary, applyCommunityAwareFiltering } from "./consolidation.js";
 import type { ConsolidationCluster } from "./consolidation.js";
 
 function insertMemoryWithEmbedding(
@@ -499,6 +499,38 @@ describe("consolidation", () => {
       expect(mem.importance).toBe(0.8);
     });
 
+    it("does not write bridge boosts during dry-run (no side effects)", () => {
+      // Regression: applyCommunityAwareFiltering previously wrote bridge boosts
+      // during dry-run preview calls, shifting cluster composition between preview and live run
+      const e1 = createEntity(db, "ent-reg-1", "RegAlpha");
+      const e1b = createEntity(db, "ent-reg-1b", "RegAlphaB");
+      addRelationship(db, e1, e1b);
+      const e2 = createEntity(db, "ent-reg-2", "RegBeta");
+      const e2b = createEntity(db, "ent-reg-2b", "RegBetaB");
+      addRelationship(db, e2, e2b);
+
+      const m1 = insertMemoryWithEmbedding(db, { id: "reg-m1", content: "memory", importance: 0.3 });
+      const m2 = insertMemoryWithEmbedding(db, { id: "reg-m2", content: "memory", importance: 0.3 });
+      const bridge = insertMemoryWithEmbedding(db, { id: "reg-bridge", content: "bridge", importance: 0.3 });
+      linkMemoryToEntity(db, m1, e1);
+      linkMemoryToEntity(db, m2, e2);
+      linkMemoryToEntity(db, bridge, e1);
+      linkMemoryToEntity(db, bridge, e2);
+
+      const clusters: ConsolidationCluster[] = [{
+        centroidId: m1, memberIds: [m1, m2, bridge], avgSimilarity: 0.85, topic: "test",
+      }];
+
+      // Run dry-run twice — importance should NOT change between calls
+      applyCommunityAwareFiltering(db, clusters, 2, true);
+      const after1 = (db.prepare("SELECT importance FROM memories WHERE id = ?").get("reg-bridge") as any).importance;
+      applyCommunityAwareFiltering(db, clusters, 2, true);
+      const after2 = (db.prepare("SELECT importance FROM memories WHERE id = ?").get("reg-bridge") as any).importance;
+
+      expect(after1).toBe(0.3);
+      expect(after2).toBe(0.3);
+    });
+
     it("handles memories with no entity links gracefully", () => {
       // Create a community so detection has something to find
       const e1 = createEntity(db, "ent-1", "Alpha");
@@ -556,6 +588,104 @@ describe("consolidation", () => {
       for (const cluster of caClusters) {
         expect(cluster.memberIds).toHaveLength(2);
       }
+    });
+  });
+
+  describe("consolidation regression", () => {
+    it("rejects tiny fragment summaries", () => {
+      const sources = [
+        "The authentication middleware was refactored to use JWT tokens instead of session cookies for stateless auth.",
+        "Database connection pooling was implemented using pg-pool with min=2, max=10 connections.",
+        "Error handling was standardized across all API endpoints using a unified error response format.",
+      ];
+
+      // A tiny fragment should fail validation
+      const tinyFragment = "auth, db, errors";
+      const result = validateSummary(tinyFragment, sources);
+      expect(result.valid).toBe(false);
+      expect(result.reasons.some(r => r.includes("too short"))).toBe(true);
+    });
+
+    it("rejects summaries with nested consolidation markers", () => {
+      const sources = ["Source memory content about project architecture decisions."];
+      const badSummary = "[Consolidated summary of 3 memories] These memories discuss architecture. [Consolidated summary of 2 memories] More details about deployment.";
+      const result = validateSummary(badSummary, sources);
+      expect(result.valid).toBe(false);
+      expect(result.reasons.some(r => r.includes("Mechanical header") || r.includes("Nested consolidation"))).toBe(true);
+    });
+
+    it("rejects summaries with raw memory ID spillover", () => {
+      const sources = ["A meaningful source memory about system design."];
+      const badSummary = "This consolidation references 01KHXJ9J7E35V2W8B8K61NF311 and 01KJ52NQQTAPKN4W4X7AASNWCF and 01KJ7ZFR631R2GQFAB2HWCN73F as its source materials for the architecture discussion which covers multiple important topics.";
+      const result = validateSummary(badSummary, sources);
+      expect(result.valid).toBe(false);
+      expect(result.reasons.some(r => r.includes("Raw memory IDs"))).toBe(true);
+    });
+
+    it("accepts well-formed prose summaries", () => {
+      const sources = [
+        "The project uses SQLite as its primary database for simplicity and portability.",
+        "Vitest is used for testing with the forks pool mode for process isolation.",
+      ];
+      const goodSummary = "The project architecture relies on SQLite for database storage, chosen for its simplicity and portability. Testing is handled by Vitest using forks pool mode, which provides process isolation between test files for reliability.";
+      const result = validateSummary(goodSummary, sources);
+      expect(result.valid).toBe(true);
+    });
+
+    it("deduplicates identical summary content via content_hash", async () => {
+      const id1 = insertMemoryWithEmbedding(db, { id: "dup-1", content: "content about topic X" });
+      const id2 = insertMemoryWithEmbedding(db, { id: "dup-2", content: "content about topic X variant" });
+      const id3 = insertMemoryWithEmbedding(db, { id: "dup-3", content: "content about topic X related" });
+      const id4 = insertMemoryWithEmbedding(db, { id: "dup-4", content: "content about topic X extended" });
+
+      const summaryContent = "A comprehensive summary about topic X that combines all perspectives and insights from the source memories into a coherent narrative about the system architecture.";
+
+      const cluster1: ConsolidationCluster = {
+        centroidId: id1, memberIds: [id1, id2], avgSimilarity: 0.9, topic: "topic X",
+      };
+      const cluster2: ConsolidationCluster = {
+        centroidId: id3, memberIds: [id3, id4], avgSimilarity: 0.9, topic: "topic X",
+      };
+
+      const summaryId1 = await consolidateCluster(db, cluster1, summaryContent);
+      const summaryId2 = await consolidateCluster(db, cluster2, summaryContent);
+
+      // Second call should return the existing summary ID (dedup)
+      expect(summaryId2).toBe(summaryId1);
+
+      // Only one active summary should exist with this content
+      const count = db
+        .prepare("SELECT COUNT(*) as cnt FROM memories WHERE content = ? AND is_active = 1")
+        .get(summaryContent) as { cnt: number };
+      expect(count.cnt).toBe(1);
+
+      // Cluster2's source memories must NOT be archived (dedup returned early)
+      for (const id of ["dup-3", "dup-4"]) {
+        const mem = db.prepare("SELECT is_active, parent_id FROM memories WHERE id = ?").get(id) as any;
+        expect(mem.is_active).toBe(1);
+        expect(mem.parent_id).toBeNull();
+      }
+    });
+
+    it("stores provenance metadata in consolidated summaries", async () => {
+      const id1 = insertMemoryWithEmbedding(db, { id: "prov-1", content: "source memory one" });
+      const id2 = insertMemoryWithEmbedding(db, { id: "prov-2", content: "source memory two" });
+
+      const cluster: ConsolidationCluster = {
+        centroidId: id1, memberIds: [id1, id2], avgSimilarity: 0.9, topic: "provenance test",
+      };
+
+      const summaryContent = "A summary combining source memory one and source memory two into a coherent narrative about the system that preserves all key facts and details.";
+      const summaryId = await consolidateCluster(db, cluster, summaryContent);
+
+      const row = db.prepare("SELECT metadata FROM memories WHERE id = ?").get(summaryId) as { metadata: string };
+      const metadata = JSON.parse(row.metadata);
+
+      expect(metadata.origin_pipeline).toBe("consolidation");
+      expect(metadata.provenance).toBeDefined();
+      expect(metadata.provenance.derived_from).toEqual(["prov-1", "prov-2"]);
+      expect(metadata.provenance.source_trust).toBe("internal");
+      expect(metadata.provenance.derivation_depth).toBe(0);
     });
   });
 });

@@ -13,5 +13,12 @@ export default defineConfig({
     testTimeout: 30_000,
     pool: "forks",
     exclude: ["**/dist/**", "**/node_modules/**"],
+    coverage: {
+      provider: "v8",
+      include: ["packages/core/src/**/*.ts", "packages/server/src/**/*.ts", "packages/mcp/src/**/*.ts"],
+      exclude: ["**/*.test.ts", "**/*.spec.ts", "**/benchmark/**", "**/dist/**"],
+      reporter: ["text", "text-summary", "json-summary"],
+      reportsDirectory: "coverage",
+    },
   },
 });

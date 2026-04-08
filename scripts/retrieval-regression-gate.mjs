@@ -42,6 +42,27 @@ async function main() {
       content: "gamma incident response playbook",
       tags: ["project", "gamma"],
     },
+    // Friction queries — derived from actual search misses in production
+    {
+      id: "MEM_OBSIDIAN",
+      content: "obsidian export vault pipeline generates curated markdown files with wikilinks and YAML frontmatter from memory database",
+      tags: ["obsidian-export", "vault-export", "export"],
+    },
+    {
+      id: "MEM_GARDENING",
+      content: "memory gardening consolidation maintenance runs weekly to merge clusters, tune weights, prune orphans, and resolve search friction",
+      tags: ["memory-gardening", "consolidation", "maintenance"],
+    },
+    {
+      id: "MEM_SELFAUDIT",
+      content: "self-audit quality check reviews consolidation output, prediction calibration, goal progress, and meta-review of sentinel job fleet health",
+      tags: ["self-audit", "quality", "sentinel"],
+    },
+    {
+      id: "MEM_WIKI",
+      content: "wiki compile builds structured knowledge articles from memory clusters using entity graph and tag taxonomy for organized documentation",
+      tags: ["wiki", "compile", "knowledge"],
+    },
   ];
 
   for (const fixture of fixtures) {
@@ -61,6 +82,11 @@ async function main() {
     "alpha routing architecture",
     "beta latency budget",
     "gamma incident response",
+    // Friction queries — these actually missed in production
+    "obsidian export",
+    "memory gardening consolidation maintenance",
+    "self-audit quality check",
+    "wiki compile",
   ];
   setGoldenQueries(db, queries);
 
@@ -74,6 +100,10 @@ async function main() {
   upsertBaseline.run(queries[0], JSON.stringify(["MEM_ALPHA"]), now, now);
   upsertBaseline.run(queries[1], JSON.stringify(["MEM_BETA"]), now, now);
   upsertBaseline.run(queries[2], JSON.stringify(["MEM_GAMMA"]), now, now);
+  upsertBaseline.run(queries[3], JSON.stringify(["MEM_OBSIDIAN"]), now, now);
+  upsertBaseline.run(queries[4], JSON.stringify(["MEM_GARDENING"]), now, now);
+  upsertBaseline.run(queries[5], JSON.stringify(["MEM_SELFAUDIT"]), now, now);
+  upsertBaseline.run(queries[6], JSON.stringify(["MEM_WIKI"]), now, now);
 
   const result = await runRetrievalRegression(db, {
     queries,

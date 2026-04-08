@@ -518,6 +518,10 @@ export class MemoryStore {
             let existing = entityStore.getByName(entity.name);
             if (!existing) {
               existing = entityStore.create({ name: entity.name, type: entity.type });
+            } else if (existing.type === "concept" && entity.type !== "concept" && entity.confidence >= 0.85) {
+              // Upgrade stale "concept" type to a more specific auto-categorized type
+              entityStore.update(existing.id, { type: entity.type });
+              existing = { ...existing, type: entity.type };
             }
             entityStore.linkMemory(existing.id, id, entity.confidence);
             entityIdMap.set(entity.name.toLowerCase(), existing.id);
@@ -1105,6 +1109,9 @@ export class MemoryStore {
             let existing = entityStore.getByName(entity.name);
             if (!existing) {
               existing = entityStore.create({ name: entity.name, type: entity.type });
+            } else if (existing.type === "concept" && entity.type !== "concept" && entity.confidence >= 0.85) {
+              entityStore.update(existing.id, { type: entity.type });
+              existing = { ...existing, type: entity.type };
             }
             entityStore.linkMemory(existing.id, parentId, entity.confidence);
             entityIdMap.set(entity.name.toLowerCase(), existing.id);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { ulid } from "ulid";
 import { cosineSimilarity } from "../memory/scoring.js";
@@ -6,6 +7,8 @@ import type { MemoryRow } from "../memory/types.js";
 import { detectCommunities } from "../entities/graph.js";
 import type { Community } from "../entities/graph.js";
 import { getSetting, setSetting } from "../db/schema.js";
+import { buildProvenance, mergeProvenance, extractProvenance, aggregateTrust } from "../security/provenance.js";
+import type { ProvenanceRecord } from "../security/provenance.js";
 
 export interface ConsolidationCluster {
   centroidId: string;
@@ -383,21 +386,74 @@ export async function consolidateCluster(
     }
   }
 
-  db.exec("BEGIN");
+  // Use SAVEPOINT for nesting safety — consolidateCluster may be called
+  // inside an outer transaction (e.g., from autoConsolidate or sentinel jobs)
+  const savepointName = `consolidate_${summaryId.slice(0, 8)}`;
+  db.exec(`SAVEPOINT ${savepointName}`);
   try {
-    // Create summary memory with optional embedding
-    db.prepare(
-      `INSERT INTO memories (id, content, content_type, source, embedding, importance, metadata, created_at, updated_at)
-       VALUES (?, ?, 'summary', 'consolidation', ?, 0.8, ?, ?, ?)`
-    ).run(
-      summaryId,
-      summaryContent,
-      embeddingBlob,
-      JSON.stringify({
+    // Check for duplicate summary content before creating
+    const contentHash = createHash("sha256")
+      .update(summaryContent.toLowerCase().replace(/\s+/g, " ").trim())
+      .digest("hex");
+    const existingDupe = db
+      .prepare("SELECT id FROM memories WHERE content_hash = ? AND is_active = 1 LIMIT 1")
+      .get(contentHash) as { id: string } | undefined;
+    if (existingDupe) {
+      db.exec(`ROLLBACK TO ${savepointName}`);
+      db.exec(`RELEASE ${savepointName}`);
+      return existingDupe.id;
+    }
+
+    // Build provenance chain from source memories
+    const sourceProvenances: Array<"internal" | "verified" | "external" | "untrusted"> = [];
+    const derivedFrom: string[] = [...cluster.memberIds];
+    let maxSourceDepth = -1;
+    for (const memberId of cluster.memberIds) {
+      const row = db
+        .prepare("SELECT metadata FROM memories WHERE id = ?")
+        .get(memberId) as { metadata: string | null } | undefined;
+      if (row?.metadata) {
+        try {
+          const meta = JSON.parse(row.metadata);
+          const prov = extractProvenance(meta);
+          if (prov?.source_trust) sourceProvenances.push(prov.source_trust);
+          if (prov && prov.derivation_depth > maxSourceDepth) {
+            maxSourceDepth = prov.derivation_depth;
+          }
+        } catch { /* skip malformed metadata */ }
+      }
+    }
+
+    const provenance = buildProvenance({
+      derivedFrom,
+      trust: sourceProvenances.length > 0 ? aggregateTrust(sourceProvenances) : "internal",
+      // Consolidation depth = max source depth + 1 (or 0 if no sources have provenance)
+      parentProvenance: maxSourceDepth >= 0 ? {
+        derivation_depth: maxSourceDepth,
+        source_trust: "internal" as const,
+      } as ProvenanceRecord : undefined,
+    });
+
+    const metadata = mergeProvenance(
+      {
         strategy: "similarity",
         source_count: cluster.memberIds.length,
         source_ids: cluster.memberIds,
-      }),
+        origin_pipeline: "consolidation",
+      },
+      provenance,
+    );
+
+    // Create summary memory with optional embedding
+    db.prepare(
+      `INSERT INTO memories (id, content, content_hash, content_type, source, embedding, importance, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, 'summary', 'consolidation', ?, 0.8, ?, ?, ?)`
+    ).run(
+      summaryId,
+      summaryContent,
+      contentHash,
+      embeddingBlob,
+      JSON.stringify(metadata),
       now,
       now
     );
@@ -433,9 +489,10 @@ export async function consolidateCluster(
       updateSource.run(summaryId, memberId);
     }
 
-    db.exec("COMMIT");
+    db.exec(`RELEASE ${savepointName}`);
   } catch (err) {
-    db.exec("ROLLBACK");
+    db.exec(`ROLLBACK TO ${savepointName}`);
+    db.exec(`RELEASE ${savepointName}`);
     throw err;
   }
 
@@ -683,7 +740,47 @@ export function validateSummary(
   return { valid: reasons.length === 0, reasons };
 }
 
-// --- Auto-consolidation (no LLM needed) ---
+// --- LLM-powered consolidation summaries ---
+
+export interface LLMSummarizer {
+  /** Generate a consolidated summary from multiple memory contents */
+  summarize(contents: string[], topic: string): Promise<string>;
+}
+
+/**
+ * Generate an LLM-powered consolidation summary using a cheap model (Haiku-tier).
+ * Falls back to basic summary if the LLM call fails or is unavailable.
+ */
+export async function generateLLMSummary(
+  db: DatabaseSync,
+  memberIds: string[],
+  summarizer: LLMSummarizer,
+  topic: string,
+): Promise<string> {
+  const rows = db
+    .prepare(
+      `SELECT content FROM memories WHERE id IN (${memberIds.map(() => "?").join(",")})
+       ORDER BY created_at ASC`
+    )
+    .all(...memberIds) as Array<{ content: string }>;
+
+  const contents = rows.map(r => r.content);
+  if (contents.length === 0) return "";
+
+  // Match validateSummary's threshold: 80 for 2-member clusters, 100 for larger
+  const minLength = memberIds.length <= 2 ? 80 : 100;
+
+  try {
+    const summary = await summarizer.summarize(contents, topic);
+    if (summary && summary.length >= minLength) return summary;
+  } catch {
+    // Fall through to basic summary
+  }
+
+  return generateBasicSummary(db, memberIds);
+}
+
+// --- Auto-consolidation ---
 
 /**
  * Persistent cooldown for clusters that fail quality validation.
@@ -741,14 +838,19 @@ export interface AutoConsolidateResult {
 }
 
 /**
- * Automatically consolidate the top N clusters using basic summary generation.
- * Uses a higher similarity threshold (0.85) than manual consolidation to be conservative.
- * No LLM needed — uses generateBasicSummary for summaries.
+ * Automatically consolidate the top N clusters.
+ * When an LLM summarizer is provided, uses it for higher-quality summaries.
+ * Falls back to generateBasicSummary (no LLM needed) otherwise.
  */
 export async function autoConsolidate(
   db: DatabaseSync,
   embeddingProvider?: EmbeddingProvider,
-  opts?: { maxClusters?: number; minSimilarity?: number; minClusterSize?: number }
+  opts?: {
+    maxClusters?: number;
+    minSimilarity?: number;
+    minClusterSize?: number;
+    summarizer?: LLMSummarizer;
+  }
 ): Promise<AutoConsolidateResult> {
   const maxClusters = opts?.maxClusters ?? 5;
   const minSimilarity = opts?.minSimilarity ?? 0.80;
@@ -768,7 +870,9 @@ export async function autoConsolidate(
     // Skip clusters on cooldown from previous validation failures
     if (isClusterOnCooldown(db, cluster.memberIds)) continue;
 
-    const summary = generateBasicSummary(db, cluster.memberIds);
+    const summary = opts?.summarizer
+      ? await generateLLMSummary(db, cluster.memberIds, opts.summarizer, cluster.topic)
+      : generateBasicSummary(db, cluster.memberIds);
     if (!summary) continue;
 
     // Validate summary quality before consolidating
@@ -780,9 +884,6 @@ export async function autoConsolidate(
     const validation = validateSummary(summary, sourceContents.map((r) => r.content));
     if (!validation.valid) {
       recordClusterFailure(db, cluster.memberIds);
-      console.log(
-        `[consolidation] Skipping cluster (${cluster.memberIds.length} members): ${validation.reasons.join("; ")}`
-      );
       continue;
     }
 

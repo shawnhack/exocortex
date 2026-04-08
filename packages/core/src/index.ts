@@ -108,6 +108,7 @@ export {
   findClusters,
   consolidateCluster,
   generateBasicSummary,
+  generateLLMSummary,
   validateSummary,
   getConsolidations,
   autoConsolidate,
@@ -118,6 +119,7 @@ export type {
   ConsolidationResult,
   AutoConsolidateResult,
   CommunityAwareResult,
+  LLMSummarizer,
 } from "./intelligence/consolidation.js";
 export {
   detectContradictions,
@@ -297,6 +299,12 @@ export {
   getCounters,
 } from "./observability/counters.js";
 export type { CounterRow } from "./observability/counters.js";
+export {
+  recordJobOutcome,
+  getJobHealth,
+  getJobAlerts,
+} from "./observability/job-health.js";
+export type { JobOutcome, JobHealthSummary } from "./observability/job-health.js";
 
 // Backup
 export {

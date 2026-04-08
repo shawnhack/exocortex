@@ -108,14 +108,16 @@ const ORG_NAME_PREFIX_BLOCKLIST = new Set([
 export function extractEntities(text: string): ExtractedEntity[] {
   const entities = new Map<string, ExtractedEntity>();
 
-  function add(name: string, _type: EntityType, confidence: number) {
-    // All entities default to "concept" — users can reclassify in the dashboard.
-    // The extraction patterns still determine *what* to extract and confidence,
-    // but auto-typing was too unreliable (e.g. "React" as technology vs project).
+  function add(name: string, inferredType: EntityType, confidence: number) {
+    // Auto-categorize when confidence is high enough (>= 0.85).
+    // Below that threshold, default to "concept" — users can reclassify in the dashboard.
+    // Technology (0.9) and organization (0.85) are reliable enough for auto-typing.
+    // Person (0.75) and project (0.65) remain as "concept" since they're error-prone.
+    const type = confidence >= 0.85 ? inferredType : "concept";
     const key = name.toLowerCase();
     const existing = entities.get(key);
     if (!existing || existing.confidence < confidence) {
-      entities.set(key, { name, type: "concept", confidence });
+      entities.set(key, { name, type, confidence });
     }
   }
 

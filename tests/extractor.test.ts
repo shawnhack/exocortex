@@ -15,8 +15,8 @@ describe("Entity Extractor", () => {
     const names = entities.map((e) => e.name);
     expect(names).toContain("Google");
     expect(names).toContain("Microsoft");
-    // All entities default to "concept" — users reclassify in the dashboard
-    entities.forEach((e) => expect(e.type).toBe("concept"));
+    // High-confidence entities (>= 0.85) get auto-typed; orgs at 0.85 qualify
+    entities.forEach((e) => expect(e.type).toBe("organization"));
   });
 
   it("extracts organization names with suffixes", () => {
@@ -103,28 +103,28 @@ describe("Entity Extractor", () => {
     expect(names).toContain("Exocortex");
   });
 
-  // --- All entities default to "concept" — users reclassify in dashboard ---
+  // --- Auto-categorization: high-confidence entities get typed, low stay "concept" ---
 
-  it("extracts OpenAI as concept", () => {
+  it("extracts OpenAI as organization (high confidence)", () => {
     const entities = extractEntities("OpenAI released a new model today.");
     const openai = entities.find((e) => e.name === "OpenAI");
     expect(openai).toBeDefined();
-    expect(openai!.type).toBe("concept");
+    expect(openai!.type).toBe("organization");
   });
 
-  it("extracts Anthropic as concept", () => {
+  it("extracts Anthropic as organization (high confidence)", () => {
     const entities = extractEntities("Anthropic published their safety research.");
     const anthropic = entities.find((e) => e.name === "Anthropic");
     expect(anthropic).toBeDefined();
-    expect(anthropic!.type).toBe("concept");
+    expect(anthropic!.type).toBe("organization");
   });
 
-  it("extracts Claude and GPT as entities", () => {
+  it("extracts Claude and GPT as technology (high confidence)", () => {
     const entities = extractEntities("Using Claude and GPT for code generation.");
     const names = entities.map((e) => e.name);
     expect(names).toContain("Claude");
     expect(names).toContain("GPT");
-    entities.forEach((e) => expect(e.type).toBe("concept"));
+    entities.forEach((e) => expect(e.type).toBe("technology"));
   });
 
   // --- Fix 2: Case-sensitive tech matching ---

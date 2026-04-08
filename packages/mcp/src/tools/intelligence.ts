@@ -1,6 +1,6 @@
 import { z } from "zod";
 import path from "node:path";
-import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradiction, autoDismissContradictions } from "@exocortex/core";
+import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradiction, autoDismissContradictions, recordJobOutcome, getJobHealth, getJobAlerts } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
 export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
@@ -231,6 +231,64 @@ export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
 
         return {
           content: [{ type: "text", text: `${status} contradictions (${contradictions.length}):\n\n${lines.join("\n\n")}` }],
+        };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    }
+  );
+
+  // memory_job_health — record job outcomes and query health
+  server.tool(
+    "memory_job_health",
+    "Record job execution outcomes and query job health. Use record_outcome to log a job run, or omit it to get a health summary. Jobs below 70% success rate over 3+ runs are flagged as alerts.",
+    {
+      record_outcome: z.object({
+        job_name: z.string(),
+        success: z.boolean(),
+        duration_ms: z.number().optional(),
+        error: z.string().optional(),
+      }).optional().describe("Record a job execution outcome"),
+      alerts_only: z.boolean().optional().describe("Only return jobs in alert state (default false)"),
+      window_days: z.number().optional().describe("Lookback window in days (default 14)"),
+      alert_threshold: z.number().optional().describe("Success rate threshold for alerts (default 0.70)"),
+    },
+    async (args) => {
+      try {
+        if (args.record_outcome) {
+          recordJobOutcome(db, args.record_outcome);
+          return {
+            content: [{ type: "text", text: `Recorded ${args.record_outcome.success ? "success" : "failure"} for ${args.record_outcome.job_name}` }],
+          };
+        }
+
+        const opts = {
+          windowDays: args.window_days,
+          alertThreshold: args.alert_threshold,
+        };
+        const jobs = args.alerts_only
+          ? getJobAlerts(db, opts)
+          : getJobHealth(db, opts);
+
+        if (jobs.length === 0) {
+          return {
+            content: [{ type: "text", text: args.alerts_only ? "No job alerts." : "No job outcomes recorded." }],
+          };
+        }
+
+        const lines = jobs.map(j => {
+          const pct = (j.success_rate * 100).toFixed(0);
+          const status = j.alert ? "⚠ ALERT" : "OK";
+          return `${status} ${j.job_name}: ${pct}% success (${j.successes}/${j.total_runs}) — last: ${j.last_run.slice(0, 16)}${j.last_error ? `\n  Last error: ${j.last_error.slice(0, 120)}` : ""}`;
+        });
+
+        const alertCount = jobs.filter(j => j.alert).length;
+        const header = args.alerts_only
+          ? `Job alerts (${alertCount}):`
+          : `Job health (${jobs.length} jobs, ${alertCount} alerts):`;
+
+        return {
+          content: [{ type: "text", text: `${header}\n\n${lines.join("\n")}` }],
         };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
