@@ -1,6 +1,7 @@
 import { z } from "zod";
+import fs from "node:fs";
 import path from "node:path";
-import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradiction, autoDismissContradictions, recordJobOutcome, getJobHealth, getJobAlerts } from "@exocortex/core";
+import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradiction, autoDismissContradictions, recordJobOutcome, getJobHealth, getJobAlerts, runLint, refreshWiki, ingestUrl } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
 export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
@@ -290,6 +291,186 @@ export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
         return {
           content: [{ type: "text", text: `${header}\n\n${lines.join("\n")}` }],
         };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    }
+  );
+
+  // memory_lint — comprehensive knowledge-base health check
+  server.tool(
+    "memory_lint",
+    "Run a comprehensive knowledge-base health check. Returns contradictions, stale claims, orphan entities, unlinked memories, and suggested wiki topics. Use periodically to maintain knowledge quality.",
+    {},
+    async () => {
+      try {
+        const report = runLint(db);
+
+        const sections: string[] = [];
+        sections.push(`Overall: ${report.overall.toUpperCase()}`);
+        sections.push(`Memories: ${report.stats.total_memories} | Entities: ${report.stats.total_entities}`);
+
+        if (report.issues.length === 0) {
+          sections.push("\nNo issues found.");
+        } else {
+          sections.push(`\n${report.issues.length} issue(s):\n`);
+          for (const issue of report.issues) {
+            const icon = issue.severity === "critical" ? "!!" : issue.severity === "warn" ? "!" : "-";
+            sections.push(`${icon} [${issue.category}] ${issue.message}`);
+          }
+        }
+
+        if (report.stats.suggested_topics.length > 0) {
+          sections.push(`\nSuggested wiki topics:\n${report.stats.suggested_topics.map(t => `  - ${t}`).join("\n")}`);
+        }
+
+        return { content: [{ type: "text", text: sections.join("\n") }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    }
+  );
+
+  // memory_wiki_refresh — incrementally update stale wiki articles
+  server.tool(
+    "memory_wiki_refresh",
+    "Refresh wiki articles that have stale content (memories updated since last compile). Only recompiles affected articles instead of regenerating everything.",
+    {
+      wiki_path: z.string().optional().describe("Wiki output directory (default: EXOCORTEX_WIKI_PATH or vault/wiki)"),
+      since: z.string().optional().describe("Only refresh articles with memories updated after this ISO date"),
+      dry_run: z.boolean().optional().describe("Preview which articles would be refreshed without writing"),
+    },
+    async (args) => {
+      try {
+        const wikiPath = args.wiki_path
+          ?? process.env.EXOCORTEX_WIKI_PATH
+          ?? path.join(process.env.OBSIDIAN_VAULT ?? ".", "wiki");
+
+        const result = refreshWiki(db, {
+          wikiPath,
+          dryRun: args.dry_run,
+          since: args.since,
+        });
+
+        if (result.staleArticles.length === 0) {
+          return { content: [{ type: "text", text: "Wiki is up to date — no stale articles found." }] };
+        }
+
+        const lines = [
+          `Found ${result.staleArticles.length} stale article(s):`,
+          ...result.staleArticles.map(a => `  - ${a}`),
+          "",
+          args.dry_run
+            ? `Dry run — ${result.staleArticles.length} article(s) would be refreshed.`
+            : `Refreshed ${result.refreshed} article(s), skipped ${result.skipped}.`,
+        ];
+
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    }
+  );
+
+  // memory_promote — promote search results or analysis into a wiki article
+  server.tool(
+    "memory_promote",
+    "Promote a synthesis, analysis, or set of memories into a persistent wiki article. Use when a query result, comparison, or analysis is valuable enough to keep in the wiki rather than losing it to chat history.",
+    {
+      title: z.string().describe("Article title"),
+      content: z.string().describe("Full article content (markdown)"),
+      tags: z.array(z.string()).optional().describe("Tags for the article"),
+      wiki_path: z.string().optional().describe("Wiki output directory"),
+      source_memory_ids: z.array(z.string()).optional().describe("Memory IDs that contributed to this article"),
+    },
+    async (args) => {
+      try {
+        const wikiPath = args.wiki_path
+          ?? process.env.EXOCORTEX_WIKI_PATH
+          ?? path.join(process.env.OBSIDIAN_VAULT ?? ".", "wiki");
+
+        // Ensure wiki directory exists
+        if (!fs.existsSync(wikiPath)) {
+          fs.mkdirSync(wikiPath, { recursive: true });
+        }
+
+        const slug = args.title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 80);
+
+        // Build frontmatter
+        const fm = [
+          "---",
+          `title: "${args.title}"`,
+          `created: "${new Date().toISOString().slice(0, 10)}"`,
+          `source: promoted`,
+        ];
+        if (args.tags?.length) fm.push(`tags: [${args.tags.join(", ")}]`);
+        if (args.source_memory_ids?.length) fm.push(`sources: ${args.source_memory_ids.length}`);
+        fm.push("---\n");
+
+        const fullContent = fm.join("\n") + args.content;
+        const articlePath = path.join(wikiPath, `${slug}.md`);
+
+        // Store memory FIRST — if DB write fails, don't leave orphaned wiki files
+        const store = new MemoryStore(db);
+        await store.create({
+          content: args.content,
+          content_type: "summary",
+          source: "api",
+          source_uri: `wiki://${slug}`,
+          importance: 0.8,
+          tier: "semantic",
+          tags: [...(args.tags ?? []), "wiki-article", "promoted"],
+          metadata: {
+            wiki_slug: slug,
+            wiki_path: articlePath,
+            source_memory_ids: args.source_memory_ids,
+          },
+        });
+
+        // Write wiki file after DB success
+        fs.writeFileSync(articlePath, fullContent, "utf-8");
+
+        return {
+          content: [{ type: "text", text: `Article "${args.title}" written to ${articlePath} and stored as semantic memory.` }],
+        };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    }
+  );
+
+  // memory_clip — one-click web clipper: ingest a URL into the knowledge base
+  server.tool(
+    "memory_clip",
+    "Quick-ingest a URL into the knowledge base. Fetches the page, extracts content, chunks it, and stores with immutable source flag. Use when adding web articles, documentation, or research to your second brain.",
+    {
+      url: z.string().describe("URL to clip and ingest"),
+      tags: z.array(z.string()).optional().describe("Tags to apply"),
+      namespace: z.string().optional().describe("Project namespace"),
+      importance: z.number().min(0).max(1).optional().describe("Importance (default 0.6)"),
+    },
+    async (args) => {
+      try {
+        const result = await ingestUrl(db, {
+          url: args.url,
+          tags: args.tags,
+          namespace: args.namespace,
+          importance: args.importance,
+        });
+
+        const lines = [
+          `Clipped: ${result.title ?? args.url}`,
+          `Stored: ${result.chunks_stored} chunk(s), ${result.total_chars} chars`,
+          `Memory ID: ${result.parent_id}`,
+        ];
+        if (args.tags?.length) lines.push(`Tags: ${args.tags.join(", ")}`);
+        if (args.namespace) lines.push(`Namespace: ${args.namespace}`);
+
+        return { content: [{ type: "text", text: lines.join("\n") }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
       }

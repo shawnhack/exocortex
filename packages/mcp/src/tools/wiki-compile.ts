@@ -1,7 +1,7 @@
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { compileWiki, runBehavioralAudit } from "@exocortex/core";
+import { compileWiki, runBehavioralAudit, syncToObsidian } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
 const DEFAULT_WIKI_PATH = process.env.EXOCORTEX_WIKI_PATH
@@ -146,6 +146,48 @@ export function registerWikiCompileTools(ctx: ToolRegistrationContext): void {
         const msg = err instanceof Error ? err.message : String(err);
         return {
           content: [{ type: "text", text: `Security audit failed: ${msg}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // memory_obsidian_sync — incrementally sync memories to Obsidian vault
+  server.tool(
+    "memory_obsidian_sync",
+    "Incrementally sync memories to an Obsidian vault. Only writes files for memories created or updated since the last sync. Each memory becomes a .md file with frontmatter, organized by namespace and tier.",
+    {
+      vault_path: z.string().optional().describe("Obsidian vault path (default: OBSIDIAN_VAULT env)"),
+      dry_run: z.boolean().optional().describe("Preview changes without writing files"),
+    },
+    async (args) => {
+      try {
+        const vaultPath = args.vault_path
+          ?? process.env.OBSIDIAN_VAULT
+          ?? path.join(process.env.HOME ?? process.env.USERPROFILE ?? ".", "obsidian-vault");
+
+        const result = syncToObsidian(db, {
+          vaultPath,
+          dryRun: args.dry_run,
+        });
+
+        if (result.newMemories === 0) {
+          return { content: [{ type: "text", text: `Vault is up to date (last synced: ${result.lastSyncAt}).` }] };
+        }
+
+        const lines = [
+          `Sync ${args.dry_run ? "preview" : "complete"}:`,
+          `  Memories changed: ${result.newMemories}`,
+          `  Files ${args.dry_run ? "to write" : "written"}: ${result.updatedFiles}`,
+          `  Files ${args.dry_run ? "to delete" : "deleted"}: ${result.deletedFiles}`,
+          `  Vault: ${vaultPath}/exocortex/`,
+        ];
+
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text", text: `Sync failed: ${msg}` }],
           isError: true,
         };
       }

@@ -225,6 +225,7 @@ export async function ingestUrl(
       document_description: description,
       total_chars: content.length,
       ingested_at: new Date().toISOString(),
+      immutable: true, // Source documents are immutable — never modified by consolidation/decay
     },
   });
 

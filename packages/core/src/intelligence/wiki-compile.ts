@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { getSetting, setSetting } from "../db/schema.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -894,5 +895,84 @@ export function compileWiki(
     articles,
     indexUpdated: !dryRun && articles.length > 0,
     logEntry,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Incremental wiki refresh — only recompile articles with changed memories
+// ---------------------------------------------------------------------------
+
+export interface WikiRefreshResult {
+  staleArticles: string[];
+  refreshed: number;
+  skipped: number;
+}
+
+/**
+ * Find wiki articles that have stale content (memories updated since last compile)
+ * and recompile only those articles.
+ */
+export function refreshWiki(
+  db: DatabaseSync,
+  options: WikiCompileOptions & { since?: string }
+): WikiRefreshResult {
+  const { wikiPath, dryRun = false, maxMemories = 200 } = options;
+  const settingsKey = "wiki.last_compiled_at";
+  const lastCompiled = options.since ?? getSetting(db, settingsKey) ?? "2000-01-01";
+
+  // Find namespaces with memories updated since last compile
+  const staleNamespaces = db
+    .prepare(
+      `SELECT DISTINCT namespace FROM memories
+       WHERE is_active = 1 AND parent_id IS NULL
+         AND namespace IS NOT NULL AND namespace != ''
+         AND updated_at > ?`
+    )
+    .all(lastCompiled) as Array<{ namespace: string }>;
+
+  const staleArticles = staleNamespaces.map(r => r.namespace);
+
+  if (staleArticles.length === 0) {
+    return { staleArticles: [], refreshed: 0, skipped: 0 };
+  }
+
+  // Recompile only stale namespaces
+  const entityNsMap = buildEntityNamespaceMap(db);
+  const namespaceSlugs = new Map<string, string>();
+  let refreshed = 0;
+
+  for (const ns of staleNamespaces) {
+    const memories = gatherNamespaceMemories(db, ns.namespace, maxMemories);
+    if (memories.length === 0) continue;
+
+    const entities = findLinkedEntities(db, memories.map(m => m.id));
+    const title = titleCase(ns.namespace);
+    const slug = slugify(ns.namespace);
+    namespaceSlugs.set(ns.namespace, slug);
+
+    const articleContent = renderArticle(
+      title, slug, memories, entities,
+      entityNsMap, namespaceSlugs, ns.namespace,
+    );
+    const articlePath = path.join(wikiPath, `${slug}.md`);
+
+    if (!dryRun) {
+      ensureDir(wikiPath);
+      writeFile(articlePath, articleContent);
+    }
+    refreshed++;
+  }
+
+  // Update last-compiled timestamp
+  if (!dryRun && refreshed > 0) {
+    const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+    setSetting(db, settingsKey, now);
+    appendLog(wikiPath, `## [${now.slice(0, 10)}] refresh | ${refreshed} articles updated`);
+  }
+
+  return {
+    staleArticles,
+    refreshed,
+    skipped: staleArticles.length - refreshed,
   };
 }

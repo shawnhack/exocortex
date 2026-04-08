@@ -163,6 +163,8 @@ export type {
 } from "./intelligence/importance.js";
 export { runHealthChecks } from "./intelligence/health.js";
 export type { HealthCheck, HealthReport } from "./intelligence/health.js";
+export { runLint } from "./intelligence/lint.js";
+export type { LintIssue, LintReport } from "./intelligence/lint.js";
 export { generateSynthesis } from "./intelligence/synthesis.js";
 export type { SynthesisOptions } from "./intelligence/synthesis.js";
 export {
@@ -320,10 +322,12 @@ export type { BackupData, BackupDatabaseOptions, BackupDatabaseResult, VerifyBac
 // Obsidian export
 export { exportToObsidian } from "./export/obsidian.js";
 export type { ObsidianExportOptions, ObsidianExportResult } from "./export/obsidian.js";
+export { syncToObsidian } from "./export/obsidian-sync.js";
+export type { SyncOptions, SyncResult } from "./export/obsidian-sync.js";
 
 // Wiki compilation
-export { compileWiki } from "./intelligence/wiki-compile.js";
-export type { WikiCompileOptions, WikiCompileResult, WikiArticle } from "./intelligence/wiki-compile.js";
+export { compileWiki, refreshWiki } from "./intelligence/wiki-compile.js";
+export type { WikiCompileOptions, WikiCompileResult, WikiArticle, WikiRefreshResult } from "./intelligence/wiki-compile.js";
 
 // Hierarchical navigation
 export { buildPalace, compactPalace, buildWakeUpContext } from "./intelligence/hierarchy.js";

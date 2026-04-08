@@ -68,11 +68,12 @@ export function findClusters(
       ? ", strftime('%Y-%m', created_at) as bucket"
       : '';
 
-  // Get active memories with embeddings
+  // Get active memories with embeddings (skip immutable source documents)
   const rows = db
     .prepare(
       `SELECT id, content, embedding, created_at${bucketExpr} FROM memories
        WHERE is_active = 1 AND embedding IS NOT NULL AND parent_id IS NULL
+         AND (metadata IS NULL OR json_extract(metadata, '$.immutable') IS NOT 1)
        ORDER BY created_at DESC LIMIT ?`
     )
     .all(maxMemories) as unknown as (MemoryRow & { bucket?: string })[];

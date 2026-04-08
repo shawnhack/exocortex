@@ -257,4 +257,34 @@ library.delete("/api/library/documents/:id", async (c) => {
   return c.json({ ok: true, deleted: chunks.length + 1 });
 });
 
+// POST /api/library/clip — simplified web clipper endpoint (minimal params)
+library.post("/api/library/clip", async (c) => {
+  const clipSchema = z.object({
+    url: z.string().url(),
+    tags: z.array(z.string()).optional(),
+  });
+
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  const parsed = clipSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+
+  const db = getDb();
+  try {
+    const result = await ingestUrl(db, {
+      url: parsed.data.url,
+      tags: [...(parsed.data.tags ?? []), "clipped"],
+      importance: 0.6,
+    });
+    return c.json({
+      ok: true,
+      title: result.title,
+      chunks: result.chunks_stored,
+      parent_id: result.parent_id,
+    });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
 export default library;
