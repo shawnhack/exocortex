@@ -135,7 +135,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed Mermaid diagrams of the modu
 - **Hybrid retrieval** — vector similarity + BM25 full-text search, fused with RRF
 - **Graph-aware retrieval** — search results include 1-hop linked memories for richer context
 - **Usefulness feedback** — memories accessed after search get implicit quality signals, improving future ranking
-- **Automatic enrichment** — entity extraction, auto-tagging, and deduplication happen on every write
+- **Automatic enrichment** — entity extraction, auto-tagging, deduplication, and temporal expiry detection on every write
+- **Auto query expansion** — server-side domain synonym expansion for embedding (opt-out via `search.auto_expansion`)
+- **LLM re-ranking** — optional re-rank pass on top-N results after hybrid scoring (opt-in via `search.rerank_enabled`)
+- **Source immutability** — ingested URLs are flagged immutable and excluded from consolidation/decay
+- **Temporal expiry** — content with "tomorrow", "by Friday", "in 3 days" auto-sets `expires_at`
 - **Importance decay** — unused memories lose importance over time, frequently accessed ones gain it
 - **Privacy stripping** — `<private>` blocks are stripped before storage/embedding
 
@@ -183,6 +187,15 @@ The MCP server exposes all Exocortex tools over stdio. See [Quick Start](#connec
 | `memory_project_snapshot` | Quick project snapshot: recent activity, goals, decisions, techniques |
 | `memory_decay_preview` | Dry-run preview of what maintenance would archive |
 | `memory_ping` | Health check — memory counts, entity/tag stats, date range, uptime |
+| `memory_lint` | Comprehensive knowledge-base audit — contradictions, stale claims, orphan entities, suggested wiki topics |
+| `memory_wiki_refresh` | Incrementally recompile only wiki articles with stale memories |
+| `memory_promote` | Promote an analysis or synthesis into a persistent wiki article + semantic memory |
+| `memory_clip` | One-click URL ingest — fetch, chunk, and store with immutable source flag |
+| `memory_correct` | Correct a wrong memory — creates replacement, supersedes old, preserves history |
+| `memory_job_health` | Record job outcomes and query fleet health with alert thresholds |
+| `memory_obsidian_sync` | Incrementally sync changed memories to an Obsidian vault as .md files |
+| `memory_compile` | Compile the memory system into a browsable wiki of interlinked markdown articles |
+| `wiki_write_article` | Write or update a synthesized wiki article |
 | `goal_create` | Create a persistent goal |
 | `goal_list` | List goals by status |
 | `goal_get` | Get goal details with milestones and progress |
@@ -254,7 +267,7 @@ pnpm exec exo <command> [options]
 |---------|-------------|
 | `add <content>` | Add a new memory. Options: `-t/--tags`, `-i/--importance`, `--type`, `--source` |
 | `search <query>` | Hybrid retrieval search. Options: `-l/--limit`, `--after`, `--before`, `-t/--tags`, `--type`, `-v/--verbose` |
-| `import <file>` | Import from file. Options: `-f/--format` (json\|markdown\|chatexport), `--dry-run`, `-d/--decrypt`. Structured Exocortex backup JSON is auto-detected and restored directly. |
+| `import <file>` | Import from file. Options: `-f/--format` (json\|markdown\|chatexport\|chatgpt\|claude\|obsidian), `--dry-run`, `-d/--decrypt`. Structured Exocortex backup JSON is auto-detected. Obsidian format walks a vault directory, parses YAML frontmatter and wikilinks, infers tiers from folder structure. |
 | `stats` | Show memory statistics — counts, breakdowns by type/source, date range |
 | `serve` | Start HTTP server + dashboard. Options: `-p/--port` (default 3210), `-H/--host` (default 127.0.0.1) |
 | `mcp` | Start MCP server on stdio |
@@ -375,6 +388,17 @@ POST   /api/predictions        — Create prediction (claim, confidence, deadlin
 GET    /api/predictions/stats  — Calibration stats (Brier score, curve, bias, domain breakdown)
 GET    /api/predictions/:id    — Get prediction by ID
 PATCH  /api/predictions/:id/resolve — Resolve as true/false/partial
+```
+
+### Library
+
+```
+GET    /api/library/documents           — List ingested documents
+GET    /api/library/documents/:id       — Get document with chunks
+POST   /api/library/ingest              — Ingest a URL (full options)
+POST   /api/library/clip                — Quick web clipper (URL + optional tags)
+POST   /api/library/research            — Research a topic and ingest sources
+DELETE /api/library/documents/:id       — Delete document and chunks
 ```
 
 ### Data
@@ -509,7 +533,7 @@ Memory writes apply three enrichment behaviors. Extraction/tagging are non-block
 
 Regex-based extraction scans memory content with keyword/context heuristics (an optional LLM-based extractor exists at `packages/core/src/entities/llm-extractor.ts`, but is not integrated by default).
 
-Automatic category assignment is disabled: extracted entities are stored as type `concept` by default. The `type` field is manual/editable metadata (API/dashboard), not an automatic classifier at ingest time.
+High-confidence extractions are auto-categorized: technologies (confidence ≥0.9) and organizations (≥0.85) get their inferred type. Lower-confidence extractions (person names, projects) default to `concept` — users can reclassify in the dashboard. Existing `concept` entities are automatically upgraded when re-extracted at higher confidence.
 
 Entities below 0.5 confidence are filtered out at extraction time, removing noisy single-mention concepts.
 
@@ -610,6 +634,16 @@ All settings are stored in the `settings` table and can be changed via the REST 
 | `scoring.valence_weight` | `0.05` | Valence (emotional significance) weight |
 | `scoring.quality_weight` | `0.10` | Composite quality score weight |
 | `scoring.goal_gated_weight` | `0.15` | Active goal relevance weight |
+
+### Search
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `search.auto_expansion` | `true` | Auto-generate domain synonym expansions for embedding queries |
+| `search.rerank_enabled` | `false` | Enable LLM re-ranking of top-N search results (requires `RerankerProvider`) |
+| `search.rerank_max_candidates` | `10` | Max results to re-rank (1-50) |
+| `search.query_expansion` | `true` | Enable entity graph query expansion |
+| `search.expansion_max_terms` | `15` | Max expansion terms from entity graph |
 
 ### Embedding
 
