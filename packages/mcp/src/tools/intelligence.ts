@@ -443,6 +443,64 @@ export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
     }
   );
 
+  // memory_correct — correct a memory with updated information
+  server.tool(
+    "memory_correct",
+    "Correct a memory that contains wrong or outdated information. Creates a new memory with the corrected content, supersedes the old one, and links them. Use when a fact, decision, or technique has changed and the old memory would mislead future retrieval.",
+    {
+      memory_id: z.string().describe("ID of the memory to correct"),
+      corrected_content: z.string().describe("The corrected content that replaces the old memory"),
+      reason: z.string().optional().describe("Why the correction was needed (stored in metadata)"),
+      preserve_tags: z.boolean().optional().describe("Copy tags from the old memory (default true)"),
+    },
+    async (args) => {
+      try {
+        const store = new MemoryStore(db);
+        const old = await store.getById(args.memory_id);
+        if (!old) {
+          return { content: [{ type: "text", text: `Memory ${args.memory_id} not found.` }], isError: true };
+        }
+
+        // Preserve tags from old memory unless told not to
+        const preserveTags = args.preserve_tags !== false;
+        const oldTags = preserveTags ? (old.tags ?? []) : [];
+
+        // Create corrected memory
+        const result = await store.create({
+          content: args.corrected_content,
+          content_type: old.content_type,
+          source: old.source,
+          source_uri: old.source_uri ?? undefined,
+          importance: Math.max(old.importance, 0.7), // corrections are at least moderately important
+          tier: old.tier,
+          namespace: old.namespace ?? undefined,
+          tags: [...oldTags, "corrected"],
+          metadata: {
+            corrects: args.memory_id,
+            correction_reason: args.reason,
+            original_content_preview: old.content.slice(0, 200),
+          },
+        });
+
+        // Supersede the old memory
+        db.prepare(
+          "UPDATE memories SET superseded_by = ?, is_active = 0, updated_at = ? WHERE id = ?"
+        ).run(result.memory.id, new Date().toISOString().replace("T", " ").replace("Z", ""), args.memory_id);
+
+        const lines = [
+          `Corrected memory ${args.memory_id}`,
+          `New memory: ${result.memory.id}`,
+          `Old memory superseded and deactivated.`,
+        ];
+        if (args.reason) lines.push(`Reason: ${args.reason}`);
+
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    }
+  );
+
   // memory_clip — one-click web clipper: ingest a URL into the knowledge base
   server.tool(
     "memory_clip",

@@ -23,6 +23,8 @@ import { MemoryLinkStore } from "./links.js";
 import { getTagAliasMap, normalizeTags } from "./tag-normalization.js";
 import { getMetadataTags } from "./metadata-classification.js";
 import { incrementCounter } from "../observability/counters.js";
+import type { RerankerProvider } from "./reranker.js";
+import { isRerankEnabled, getRerankLimit, rerankResults } from "./reranker.js";
 
 interface FtsMatch {
   rowid: number;
@@ -62,7 +64,7 @@ export function getSearchMisses(
 export class MemorySearch {
   constructor(private db: DatabaseSync) {}
 
-  async search(query: SearchQuery): Promise<SearchResult[]> {
+  async search(query: SearchQuery, reranker?: RerankerProvider): Promise<SearchResult[]> {
     const limit = query.limit ?? 20;
     const offset = query.offset ?? 0;
     const weights = getWeights(this.db);
@@ -569,6 +571,29 @@ export class MemorySearch {
     if (topScore > 0) {
       const minAllowed = topScore * gapRatio;
       scored = scored.filter(s => s.score >= minAllowed && s.quality >= qualityFloor);
+    }
+
+    // Optional LLM re-ranking (qmd-inspired)
+    // Only runs when enabled in settings AND a reranker provider is supplied
+    if (reranker && isRerankEnabled(this.db) && scored.length > 1) {
+      try {
+        const rerankLimit = getRerankLimit(this.db);
+        const toRerank = scored.slice(0, rerankLimit);
+        const contents = toRerank.map(s => s.row.content);
+        const reranked = await rerankResults(query.query, contents, reranker, rerankLimit);
+
+        // Blend rerank scores with existing scores (60% original, 40% rerank)
+        for (const rr of reranked) {
+          if (rr.index < toRerank.length) {
+            toRerank[rr.index].score = toRerank[rr.index].score * 0.6 + rr.rerankScore * 0.4;
+          }
+        }
+
+        // Re-sort after blending
+        scored.sort((a, b) => b.score - a.score || a.row.id.localeCompare(b.row.id));
+      } catch {
+        // Re-ranking failure is non-critical — fall through to original order
+      }
     }
 
     // Apply offset + limit

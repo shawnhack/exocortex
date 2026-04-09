@@ -45,6 +45,9 @@ export { MemoryLinkStore } from "./memory/links.js";
 export type { LinkType, MemoryLink, LinkedMemoryRef } from "./memory/links.js";
 export { splitIntoChunks } from "./memory/chunking.js";
 export type { ChunkOptions } from "./memory/chunking.js";
+export { detectTemporalExpiry } from "./memory/temporal-expiry.js";
+export { rerankResults, isRerankEnabled, getRerankLimit } from "./memory/reranker.js";
+export type { RerankerProvider, RerankedResult } from "./memory/reranker.js";
 export {
   splitMarkdownSections,
   ingestMarkdownFile,

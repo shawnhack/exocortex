@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cosineSimilarity, getRRFConfig, searchFacts, getCachedProfiles, stripPrivateContent, validateStorageGate, deepContext, sanitizeContent, validateContent, redactSensitiveData, classifyTrust, detectInfluence } from "@exocortex/core";
+import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cosineSimilarity, getRRFConfig, searchFacts, getCachedProfiles, stripPrivateContent, validateStorageGate, deepContext, sanitizeContent, validateContent, redactSensitiveData, classifyTrust, detectInfluence, detectTemporalExpiry } from "@exocortex/core";
 import type { SearchResult } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "../utils.js";
 import { expandViaLinks, buildFactsSection, buildEntityProfileSection } from "./helpers.js";
@@ -66,6 +66,12 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           if (hasTransientTag) {
             expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
           }
+        }
+
+        // Auto-detect temporal language and set expiry (Supermemory-inspired)
+        if (!expiresAt) {
+          const detected = detectTemporalExpiry(contentToStore);
+          if (detected) expiresAt = detected;
         }
 
         // Security: detect behavioral influence
