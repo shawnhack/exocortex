@@ -240,6 +240,17 @@ export type {
 } from "./goals/types.js";
 export { GoalStore } from "./goals/store.js";
 
+// Agent Tasks
+export type {
+  AgentTask,
+  AgentTaskStatus,
+  AgentTaskPriority,
+  CreateAgentTaskInput,
+  UpdateAgentTaskInput,
+  AgentTaskFilter,
+} from "./tasks/types.js";
+export { AgentTaskStore } from "./tasks/store.js";
+
 // Predictions
 export type {
   Prediction,
