@@ -4,7 +4,7 @@ import type { LinkType } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
 export function registerLinkTools(ctx: ToolRegistrationContext): void {
-  const { server, db } = ctx;
+  const { server, db, checkAndSignalUsefulness } = ctx;
 
   // memory_link
   server.tool(
@@ -42,6 +42,9 @@ export function registerLinkTools(ctx: ToolRegistrationContext): void {
         const linkType = (args.link_type ?? "related") as LinkType;
         const strength = args.strength ?? 0.5;
         linkStore.link(args.source_id, args.target_id, linkType, strength);
+
+        // Linking memories implies both were useful enough to relate
+        checkAndSignalUsefulness([args.source_id, args.target_id], db);
 
         const srcPreview = source.content.substring(0, 60) + (source.content.length > 60 ? "..." : "");
         const tgtPreview = target.content.substring(0, 60) + (target.content.length > 60 ? "..." : "");

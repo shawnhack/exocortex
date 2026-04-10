@@ -691,6 +691,18 @@ export function initializeSchema(db: DatabaseSync): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace)");
   }
 
+  // Upgrade dedup UNIQUE index to be namespace-scoped (identical content allowed across namespaces).
+  // COALESCE handles SQLite's NULL-is-distinct-in-UNIQUE behavior — without it,
+  // two rows with namespace=NULL would never conflict.
+  db.exec(`DROP INDEX IF EXISTS uq_memories_active_root_hash_type`);
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_memories_active_root_hash_type
+      ON memories(COALESCE(namespace, ''), content_type, content_hash)
+      WHERE is_active = 1
+        AND parent_id IS NULL
+        AND content_hash IS NOT NULL
+  `);
+
   if (!colNames.has("embedding_model")) {
     db.exec("ALTER TABLE memories ADD COLUMN embedding_model TEXT");
   }

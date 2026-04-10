@@ -456,9 +456,9 @@ export class MemorySearch {
           }
         }
 
-        // Post-RRF multiplicative boost from recency + frequency + usefulness + valence + quality + tier
+        // Post-RRF multiplicative boost from recency + frequency + usefulness + valence + quality + importance + tier
         const memTier = c.row.tier ?? "episodic";
-        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.quality * c.quality + weights.goalGated * c.goalRelevance + tierBoost(memTier);
+        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.quality * c.quality + weights.goalGated * c.goalRelevance + weights.importance * c.row.importance + tierBoost(memTier);
         let score = baseRrf * boostMultiplier;
 
         // Superseded memories get 80% demotion (before tag boost so tags can't undo it)
@@ -497,10 +497,11 @@ export class MemorySearch {
           weights
         );
 
-        // Additive usefulness + valence + quality + goal + tier boosts
+        // Additive usefulness + valence + quality + importance + goal + tier boosts
         score += weights.usefulness * c.usefulness;
         score += weights.valence * c.valence;
         score += weights.quality * c.quality;
+        score += weights.importance * c.row.importance;
         score += weights.goalGated * c.goalRelevance;
         const memTierLegacy = c.row.tier ?? "episodic";
         score *= (1 + tierBoost(memTierLegacy));
@@ -664,6 +665,7 @@ export class MemorySearch {
           usefulness: p.usefulness,
           valence: p.valence,
           quality: p.quality,
+          importance: p.row.importance,
           goal_relevance: p.goalRelevance,
           graph: graphScores.get(p.row.id) ?? 0,
         },

@@ -5,7 +5,7 @@ import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradi
 import type { ToolRegistrationContext } from "./types.js";
 
 export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
-  const { server, db } = ctx;
+  const { server, db, checkAndSignalUsefulness } = ctx;
 
   // memory_project_snapshot
   server.tool(
@@ -486,6 +486,9 @@ export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
         db.prepare(
           "UPDATE memories SET superseded_by = ?, is_active = 0, updated_at = ? WHERE id = ?"
         ).run(result.memory.id, new Date().toISOString().replace("T", " ").replace("Z", ""), args.memory_id);
+
+        // Correcting a memory implies the original was useful enough to warrant correction
+        checkAndSignalUsefulness([args.memory_id], db);
 
         const lines = [
           `Corrected memory ${args.memory_id}`,

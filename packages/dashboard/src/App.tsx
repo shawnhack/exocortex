@@ -20,6 +20,8 @@ const Skills = lazy(() => import("./pages/Skills").then((m) => ({ default: m.Ski
 const Analytics = lazy(() => import("./pages/Analytics").then((m) => ({ default: m.Analytics })));
 const Timeline = lazy(() => import("./pages/Timeline").then((m) => ({ default: m.Timeline })));
 const Library = lazy(() => import("./pages/Library").then((m) => ({ default: m.Library })));
+const Predictions = lazy(() => import("./pages/Predictions").then((m) => ({ default: m.Predictions })));
+const Diary = lazy(() => import("./pages/Diary").then((m) => ({ default: m.Diary })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -51,6 +53,8 @@ export default function App() {
                 <Route path="/entities/:id" element={<EntityDetail />} />
                 <Route path="/graph" element={<Graph />} />
                 <Route path="/goals" element={<Goals />} />
+                <Route path="/predictions" element={<Predictions />} />
+                <Route path="/diary" element={<Diary />} />
                 <Route path="/analytics" element={<Analytics />} />
                 <Route path="/timeline" element={<Timeline />} />
                 <Route path="/library" element={<Library />} />

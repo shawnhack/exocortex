@@ -482,12 +482,13 @@ export async function consolidateCluster(
     );
 
     // Link source memories via parent_id and archive them (is_active = 0)
-    // so they don't compete with their summary in search results
+    // so they don't compete with their summary in search results.
+    // Also set superseded_by so search demotion (80% penalty) applies if archived memories are queried.
     const updateSource = db.prepare(
-      "UPDATE memories SET parent_id = ?, is_active = 0 WHERE id = ?"
+      "UPDATE memories SET parent_id = ?, superseded_by = ?, is_active = 0 WHERE id = ?"
     );
     for (const memberId of cluster.memberIds) {
-      updateSource.run(summaryId, memberId);
+      updateSource.run(summaryId, summaryId, memberId);
     }
 
     db.exec(`RELEASE ${savepointName}`);

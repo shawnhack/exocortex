@@ -143,6 +143,7 @@ export interface SearchResult {
     usefulness: number;
     valence: number;
     quality: number;
+    importance: number;
     goal_relevance: number;
     graph: number;
   };

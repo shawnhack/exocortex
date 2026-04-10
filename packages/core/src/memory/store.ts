@@ -646,6 +646,7 @@ export class MemoryStore {
     if (!contentHash) return null;
 
     const contentType = input.content_type ?? "text";
+    const namespace = input.namespace ?? null;
     const row = this.db
       .prepare(
         `SELECT id
@@ -654,10 +655,11 @@ export class MemoryStore {
            AND parent_id IS NULL
            AND content_type = ?
            AND content_hash = ?
+           AND namespace IS ?
          ORDER BY created_at DESC
          LIMIT 1`
       )
-      .get(contentType, contentHash) as { id: string } | undefined;
+      .get(contentType, contentHash, namespace) as { id: string } | undefined;
 
     return row?.id ?? null;
   }
@@ -817,8 +819,9 @@ export class MemoryStore {
       10
     );
 
-    // Scan recent active non-chunk memories of same content_type
+    // Scan recent active non-chunk memories of same content_type and namespace
     const contentType = input.content_type ?? "text";
+    const namespace = input.namespace ?? null;
     const candidates = this.db
       .prepare(
         `SELECT id, embedding FROM memories
@@ -826,9 +829,10 @@ export class MemoryStore {
            AND embedding IS NOT NULL
            AND parent_id IS NULL
            AND content_type = ?
+           AND namespace IS ?
          ORDER BY created_at DESC LIMIT ?`
       )
-      .all(contentType, candidatePool) as unknown as Array<{ id: string; embedding: Uint8Array }>;
+      .all(contentType, namespace, candidatePool) as unknown as Array<{ id: string; embedding: Uint8Array }>;
 
     for (const candidate of candidates) {
       const bytes = candidate.embedding as unknown as Uint8Array;

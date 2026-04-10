@@ -6,7 +6,7 @@ import { expandViaLinks, buildFactsSection, buildEntityProfileSection } from "./
 import type { ToolRegistrationContext } from "./types.js";
 
 export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
-  const { server, db, defaultAttribution: DEFAULT_ATTRIBUTION, recordSearchResults, checkAndSignalUsefulness } = ctx;
+  const { server, db, defaultAttribution: DEFAULT_ATTRIBUTION, recordSearchResults, checkAndSignalUsefulness, autoMarkSearchUseful } = ctx;
 
   // memory_store
   server.tool(
@@ -329,7 +329,9 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           return { content: [{ type: "text", text: "No memories found matching the query." }] };
         }
 
-        recordSearchResults(results.map((r) => r.memory.id));
+        const resultIds = results.map((r) => r.memory.id);
+        recordSearchResults(resultIds);
+        autoMarkSearchUseful(resultIds, db);
 
         const scoringMode = getRRFConfig(db).enabled ? "rrf" : "legacy";
         const modeLabel = scoringMode;
@@ -382,7 +384,6 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
 
         const lines = results.map(formatFull);
 
-        const resultIds = results.map((r) => r.memory.id);
         const linked = expandViaLinks(db, resultIds, 3);
         let linkSection = "";
         if (linked.length > 0) {
@@ -474,7 +475,9 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           return { content: [{ type: "text", text: `No context found for "${args.topic}".` }] };
         }
 
-        recordSearchResults(results.map((r) => r.memory.id));
+        const contextIds = results.map((r) => r.memory.id);
+        recordSearchResults(contextIds);
+        autoMarkSearchUseful(contextIds, db);
 
         if (args.compact) {
           const formatCompact = (r: typeof results[number]) => {
@@ -528,8 +531,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
 
         const lines = results.map(formatFull);
 
-        const resultIds = results.map((r) => r.memory.id);
-        const linked = expandViaLinks(db, resultIds, 3);
+        const linked = expandViaLinks(db, contextIds, 3);
         let linkSection = "";
         if (linked.length > 0) {
           recordSearchResults(linked.map((l) => l.id));
@@ -540,7 +542,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           linkSection = `\n\n--- Linked ---\n${linkLines.join("\n")}`;
         }
 
-        const entityProfileSection = buildEntityProfileSection(db, resultIds);
+        const entityProfileSection = buildEntityProfileSection(db, contextIds);
         const factsSection = buildFactsSection(db, args.topic);
 
         // Surface related goals
@@ -908,6 +910,9 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
         if (!updated) {
           return { content: [{ type: "text", text: `Memory ${id} not found.` }] };
         }
+
+        // Updating a memory implies it was useful enough to modify
+        checkAndSignalUsefulness([id], db);
 
         const preview = updated.content.substring(0, 80) + (updated.content.length > 80 ? "..." : "");
         const meta: string[] = [];

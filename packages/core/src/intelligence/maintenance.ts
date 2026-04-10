@@ -447,6 +447,7 @@ export function tuneWeights(
     frequency: parseFloat(getSetting(db, "scoring.frequency_weight") ?? "0.10"),
     graph: parseFloat(getSetting(db, "scoring.graph_weight") ?? "0.10"),
     usefulness: parseFloat(getSetting(db, "scoring.usefulness_weight") ?? "0.05"),
+    importance: parseFloat(getSetting(db, "scoring.importance_weight") ?? "0.10"),
   };
 
   // Compute nudges based on property differences
@@ -467,6 +468,10 @@ export function tuneWeights(
   // Usefulness: self-reinforcing — if feedback is accumulating, slightly boost
   const usefulnessNudge = useful.length > 20 ? maxNudge : 0;
 
+  // Importance: if useful memories have higher importance, boost importance weight
+  const importanceDiff = usefulAvgImportance - notUsefulAvgImportance;
+  const importanceNudge = importanceDiff > 0.1 ? maxNudge : importanceDiff < -0.1 ? -maxNudge : 0;
+
   // Apply nudges with bounds [0.02, 0.50] (upper must accommodate default vector=0.45)
   const clamp = (v: number) => Math.round(Math.max(0.02, Math.min(0.50, v)) * 100) / 100;
 
@@ -475,6 +480,7 @@ export function tuneWeights(
     frequency: clamp(currentWeights.frequency + freqNudge),
     graph: clamp(currentWeights.graph + graphNudge),
     usefulness: clamp(currentWeights.usefulness + usefulnessNudge),
+    importance: clamp(currentWeights.importance + importanceNudge),
   };
 
   for (const key of Object.keys(newWeights) as Array<keyof typeof newWeights>) {
@@ -500,6 +506,7 @@ export function tuneWeights(
       frequency: "scoring.frequency_weight",
       graph: "scoring.graph_weight",
       usefulness: "scoring.usefulness_weight",
+      importance: "scoring.importance_weight",
     };
 
     for (const [key, { new: val }] of Object.entries(adjustments)) {

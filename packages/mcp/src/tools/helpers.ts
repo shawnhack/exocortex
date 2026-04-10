@@ -2,10 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { MemoryStore, MemoryLinkStore, searchFacts, getCachedProfiles } from "@exocortex/core";
 
 // --- Per-session state: retrieval feedback tracking ---
-export const SEARCH_RESULT_TTL = 5 * 60 * 1000; // 5 minutes
+export const SEARCH_RESULT_TTL = 30 * 60 * 1000; // 30 minutes
+const SEARCH_USEFULNESS_COOLDOWN = 24 * 60 * 60 * 1000; // 24 hours per memory
 
 export function createSessionState() {
   const recentSearchIds = new Map<string, number>(); // memory_id -> timestamp
+  const usefulCooldown = new Map<string, number>(); // memory_id -> last useful_count increment timestamp
 
   function recordSearchResults(ids: string[]): void {
     const now = Date.now();
@@ -30,7 +32,35 @@ export function createSessionState() {
     return useful;
   }
 
-  return { recordSearchResults, checkAndSignalUsefulness };
+  /**
+   * Auto-mark top search results as useful with a 24h per-memory cooldown.
+   * This addresses the cold-start problem: agents read search results inline
+   * without calling memory_get, so the search→get implicit signal rarely fires.
+   * Being returned by search IS a usefulness signal — the memory was relevant
+   * enough to surface for the query.
+   */
+  function autoMarkSearchUseful(ids: string[], db: DatabaseSync, maxMark: number = 3): void {
+    if (ids.length === 0) return;
+    const now = Date.now();
+    const store = new MemoryStore(db);
+    let marked = 0;
+    for (const id of ids) {
+      if (marked >= maxMark) break;
+      const lastMarked = usefulCooldown.get(id);
+      if (lastMarked && now - lastMarked < SEARCH_USEFULNESS_COOLDOWN) continue;
+      try {
+        store.incrementUsefulCount(id);
+        usefulCooldown.set(id, now);
+        marked++;
+      } catch { /* non-critical */ }
+    }
+    // Prune expired cooldown entries
+    for (const [id, ts] of usefulCooldown) {
+      if (now - ts > SEARCH_USEFULNESS_COOLDOWN) usefulCooldown.delete(id);
+    }
+  }
+
+  return { recordSearchResults, checkAndSignalUsefulness, autoMarkSearchUseful };
 }
 
 // --- Multi-hop context expansion ---

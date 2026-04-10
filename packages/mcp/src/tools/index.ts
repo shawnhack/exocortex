@@ -28,7 +28,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
   const DEFAULT_ATTRIBUTION = options?.attribution ?? {};
   const startTime = options?.startTime ?? Date.now();
 
-  const { recordSearchResults, checkAndSignalUsefulness } = createSessionState();
+  const { recordSearchResults, checkAndSignalUsefulness, autoMarkSearchUseful } = createSessionState();
 
   const ctx: ToolRegistrationContext = {
     server,
@@ -37,6 +37,7 @@ export function registerAllTools(server: McpServer, options?: RegisterToolsOptio
     startTime,
     recordSearchResults,
     checkAndSignalUsefulness,
+    autoMarkSearchUseful,
   };
 
   registerMemoryCoreTools(ctx);

@@ -203,6 +203,47 @@ export interface GoalWithProgress extends Goal {
   milestones: Milestone[];
 }
 
+export interface Prediction {
+  id: string;
+  claim: string;
+  confidence: number;
+  domain: string;
+  status: "open" | "resolved" | "voided";
+  resolution: "true" | "false" | "partial" | null;
+  resolution_notes: string | null;
+  source: string;
+  goal_id: string | null;
+  deadline: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+}
+
+export interface CalibrationStats {
+  total_predictions: number;
+  resolved_count: number;
+  brier_score: number;
+  overconfidence_bias: number;
+  calibration_curve: Array<{ range_start: number; range_end: number; predicted_avg: number; actual_freq: number; count: number }>;
+  domain_breakdown: Array<{ domain: string; brier_score: number; accuracy: number; count: number }>;
+  trend: Array<{ month: string; brier_score: number; count: number }>;
+}
+
+export interface DiaryAgent {
+  agent: string;
+  entries: number;
+  lastEntry: string;
+}
+
+export interface DiaryEntry {
+  id: string;
+  agent: string;
+  entry: string;
+  topic: string;
+  created_at: string;
+}
+
 export interface AnalyticsSummary {
   totalActive: number;
   neverAccessedPct: number;
@@ -534,6 +575,60 @@ export const api = {
     return request<{ ok: boolean }>(`/api/goals/${id}`, {
       method: "DELETE",
     });
+  },
+
+  // Predictions
+  getPredictions(filters?: { status?: string; domain?: string; overdue?: boolean }) {
+    const params = new URLSearchParams();
+    if (filters?.status && filters.status !== "all") params.set("status", filters.status);
+    if (filters?.domain && filters.domain !== "all") params.set("domain", filters.domain);
+    if (filters?.overdue) params.set("overdue", "true");
+    const qs = params.toString() ? `?${params}` : "";
+    return request<{ predictions: Prediction[]; count: number }>(`/api/predictions${qs}`);
+  },
+
+  getPredictionStats() {
+    return request<CalibrationStats>("/api/predictions/stats");
+  },
+
+  createPrediction(data: { claim: string; confidence: number; domain?: string; deadline?: string }) {
+    return request<Prediction>("/api/predictions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  resolvePrediction(id: string, data: { resolution: string; resolution_notes?: string }) {
+    return request<Prediction>(`/api/predictions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+
+  voidPrediction(id: string, reason?: string) {
+    return request<Prediction>(`/api/predictions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ void: true, reason }),
+    });
+  },
+
+  deletePrediction(id: string) {
+    return request<{ ok: boolean }>(`/api/predictions/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  // Diary
+  getDiaryAgents() {
+    return request<{ agents: DiaryAgent[] }>("/api/diary/agents");
+  },
+
+  getDiaryEntries(agent: string, opts?: { topic?: string; limit?: number }) {
+    const params = new URLSearchParams();
+    if (opts?.topic) params.set("topic", opts.topic);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    const qs = params.toString() ? `?${params}` : "";
+    return request<{ entries: DiaryEntry[]; count: number }>(`/api/diary/${encodeURIComponent(agent)}${qs}`);
   },
 
   getEntityGraph() {

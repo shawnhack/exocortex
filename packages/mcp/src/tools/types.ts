@@ -13,4 +13,5 @@ export interface ToolRegistrationContext {
   startTime: number;
   recordSearchResults: (ids: string[]) => void;
   checkAndSignalUsefulness: (ids: string[], db: DatabaseSync) => string[];
+  autoMarkSearchUseful: (ids: string[], db: DatabaseSync, maxMark?: number) => void;
 }

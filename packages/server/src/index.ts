@@ -14,6 +14,7 @@ import intelligenceRoutes from "./routes/intelligence.js";
 import chatRoutes from "./routes/chat.js";
 import goalsRoutes from "./routes/goals.js";
 import predictionsRoutes from "./routes/predictions.js";
+import diaryRoutes from "./routes/diary.js";
 import linksRoutes from "./routes/links.js";
 import healthRoutes from "./routes/health.js";
 import analyticsRoutes from "./routes/analytics.js";
@@ -115,6 +116,7 @@ export function createApp(): Hono {
   app.route("/", chatRoutes);
   app.route("/", goalsRoutes);
   app.route("/", predictionsRoutes);
+  app.route("/", diaryRoutes);
   app.route("/", linksRoutes);
   app.route("/", analyticsRoutes);
   app.route("/", retrievalRoutes);
