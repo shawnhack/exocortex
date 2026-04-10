@@ -44,7 +44,7 @@ export function registerReembed(program: Command): void {
           console.log(chalk.bold("\n  Re-embed All Results\n"));
           console.log(`  Processed: ${result.processed}`);
           console.log(`  Failed:    ${result.failed}`);
-          console.log(`  Skipped:   ${result.skipped}`);
+          console.log(`  Total:     ${result.total}`);
           if (dryRun) {
             console.log(chalk.yellow("\n  (dry run — no changes made)"));
           }

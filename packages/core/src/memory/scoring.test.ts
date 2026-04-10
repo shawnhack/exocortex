@@ -265,6 +265,7 @@ describe("scoring", () => {
         valence: 0.05,
         quality: 0.10,
         goalGated: 0.10,
+        importance: 0.10,
       };
 
       const score = computeHybridScore(1.0, 1.0, 1.0, 1.0, weights);
@@ -283,6 +284,7 @@ describe("scoring", () => {
         valence: 0.05,
         quality: 0.10,
         goalGated: 0.10,
+        importance: 0.10,
       };
 
       const score = computeHybridScore(0, 0, 0, 0, weights);
