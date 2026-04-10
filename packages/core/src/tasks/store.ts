@@ -215,23 +215,39 @@ export class AgentTaskStore {
 
   /**
    * Claim the next available task for an agent.
-   * Finds highest-priority pending/assigned task for this agent and marks it in_progress.
+   * Atomic SELECT+UPDATE in a transaction to prevent two agents claiming the same task.
    */
   claim(assignee: string): AgentTask | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM agent_tasks
-         WHERE assignee = ? AND status IN ('pending', 'assigned')
-         ORDER BY
-           CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END,
-           created_at ASC
-         LIMIT 1`
-      )
-      .get(assignee) as AgentTaskRow | undefined;
+    let claimedId: string | null = null;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT id FROM agent_tasks
+           WHERE assignee = ? AND status IN ('pending', 'assigned')
+           ORDER BY
+             CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END,
+             created_at ASC
+           LIMIT 1`
+        )
+        .get(assignee) as { id: string } | undefined;
 
-    if (!row) return null;
-
-    return this.update(row.id, { status: "in_progress" });
+      if (row) {
+        const ts = now();
+        this.db
+          .prepare(
+            `UPDATE agent_tasks SET status = 'in_progress', started_at = ?, updated_at = ?
+             WHERE id = ? AND status IN ('pending', 'assigned')`
+          )
+          .run(ts, ts, row.id);
+        claimedId = row.id;
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+    return claimedId ? this.getById(claimedId) : null;
   }
 
   /**

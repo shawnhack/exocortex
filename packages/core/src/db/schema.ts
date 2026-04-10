@@ -226,6 +226,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "scoring.usefulness_weight": "0.05",
   "scoring.valence_weight": "0.05",
   "scoring.quality_weight": "0.10",
+  "scoring.importance_weight": "0.10",
   "scoring.goal_gated_weight": "0.10",
   "dedup.merge_enabled": "false",
   "dedup.merge_threshold": "0.75",

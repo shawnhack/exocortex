@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { getDb, AgentTaskStore } from "@exocortex/core";
+import type { AgentTaskStatus, AgentTaskPriority } from "@exocortex/core";
 
 const tasks = new Hono();
 
@@ -11,9 +12,9 @@ tasks.get("/api/tasks", (c) => {
   const store = new AgentTaskStore(db);
 
   const assignee = c.req.query("assignee") ?? undefined;
-  const status = c.req.query("status") as any ?? undefined;
+  const status = c.req.query("status") as AgentTaskStatus | undefined;
   const goal_id = c.req.query("goal_id") ?? undefined;
-  const priority = c.req.query("priority") as any ?? undefined;
+  const priority = c.req.query("priority") as AgentTaskPriority | undefined;
   const limit = c.req.query("limit") ? parseInt(c.req.query("limit")!, 10) : undefined;
 
   const list = store.list({ assignee, status, goal_id, priority, limit });

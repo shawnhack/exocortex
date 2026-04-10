@@ -33,13 +33,13 @@ export function createSessionState() {
   }
 
   /**
-   * Auto-mark top search results as useful with a 24h per-memory cooldown.
-   * This addresses the cold-start problem: agents read search results inline
-   * without calling memory_get, so the search→get implicit signal rarely fires.
-   * Being returned by search IS a usefulness signal — the memory was relevant
-   * enough to surface for the query.
+   * Auto-mark search results as useful with a 24h per-memory cooldown.
+   * Only triggers on high-precision searches (≤5 results) to avoid inflating
+   * scores for memories that appear in every broad query.
    */
   function autoMarkSearchUseful(ids: string[], db: DatabaseSync, maxMark: number = 3): void {
+    // Skip broad searches — only mark when results are focused
+    if (ids.length > 5) return;
     if (ids.length === 0) return;
     const now = Date.now();
     const store = new MemoryStore(db);

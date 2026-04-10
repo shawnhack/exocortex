@@ -630,10 +630,7 @@ export class MemoryStore {
     const msg = err.message;
     return (
       msg.includes("SQLITE_CONSTRAINT_UNIQUE") &&
-      (
-        msg.includes("uq_memories_active_root_hash_type") ||
-        msg.includes("memories.content_type, memories.content_hash")
-      )
+      msg.includes("uq_memories_active_root_hash_type")
     );
   }
 
