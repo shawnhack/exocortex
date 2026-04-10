@@ -22,6 +22,7 @@ const Timeline = lazy(() => import("./pages/Timeline").then((m) => ({ default: m
 const Library = lazy(() => import("./pages/Library").then((m) => ({ default: m.Library })));
 const Predictions = lazy(() => import("./pages/Predictions").then((m) => ({ default: m.Predictions })));
 const Diary = lazy(() => import("./pages/Diary").then((m) => ({ default: m.Diary })));
+const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -55,6 +56,7 @@ export default function App() {
                 <Route path="/goals" element={<Goals />} />
                 <Route path="/predictions" element={<Predictions />} />
                 <Route path="/diary" element={<Diary />} />
+                <Route path="/tasks" element={<Tasks />} />
                 <Route path="/analytics" element={<Analytics />} />
                 <Route path="/timeline" element={<Timeline />} />
                 <Route path="/library" element={<Library />} />

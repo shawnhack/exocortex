@@ -230,6 +230,27 @@ export interface CalibrationStats {
   trend: Array<{ month: string; brier_score: number; count: number }>;
 }
 
+export interface AgentTaskItem {
+  id: string;
+  title: string;
+  description: string | null;
+  assignee: string | null;
+  created_by: string;
+  status: "pending" | "assigned" | "in_progress" | "completed" | "failed" | "blocked";
+  priority: "low" | "medium" | "high" | "critical";
+  goal_id: string | null;
+  parent_task_id: string | null;
+  dependencies: string[];
+  result: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  assigned_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  deadline: string | null;
+}
+
 export interface DiaryAgent {
   agent: string;
   entries: number;
@@ -614,6 +635,34 @@ export const api = {
 
   deletePrediction(id: string) {
     return request<{ ok: boolean }>(`/api/predictions/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  // Agent Tasks
+  getTasks(filters?: { assignee?: string; status?: string; goal_id?: string; priority?: string }) {
+    const params = new URLSearchParams();
+    if (filters?.assignee) params.set("assignee", filters.assignee);
+    if (filters?.status && filters.status !== "all") params.set("status", filters.status);
+    if (filters?.goal_id) params.set("goal_id", filters.goal_id);
+    if (filters?.priority && filters.priority !== "all") params.set("priority", filters.priority);
+    const qs = params.toString() ? `?${params}` : "";
+    return request<{ tasks: AgentTaskItem[]; count: number }>(`/api/tasks${qs}`);
+  },
+
+  getTaskStats() {
+    return request<{ total: number; by_status: Record<string, number>; by_assignee: Record<string, number> }>("/api/tasks/stats");
+  },
+
+  updateTask(id: string, data: Record<string, unknown>) {
+    return request<AgentTaskItem>(`/api/tasks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteTask(id: string) {
+    return request<{ ok: boolean }>(`/api/tasks/${id}`, {
       method: "DELETE",
     });
   },
