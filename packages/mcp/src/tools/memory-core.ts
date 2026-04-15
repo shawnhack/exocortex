@@ -135,6 +135,9 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
             meta.push(`superseded ${result.superseded_id} — ${pct}% similar`);
           }
         }
+        if (result.warnings?.length) {
+          for (const w of result.warnings) meta.push(`⚠ ${w}`);
+        }
 
         // Auto-detect goal progress
         if (!args.benchmark && result.dedup_action !== "skipped") {
@@ -591,18 +594,25 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
     async (args) => {
       try {
         const store = new MemoryStore(db);
-        const results: string[] = [];
 
         checkAndSignalUsefulness(args.ids, db);
 
+        // Batch fetch all memories in a single query
+        const memories = await store.getByIds(args.ids);
+        const memoryMap = new Map(memories.map((m) => [m.id, m]));
+
+        // Record access for all found memories
+        for (const memory of memories) {
+          await store.recordAccess(memory.id);
+        }
+
+        const results: string[] = [];
         for (const id of args.ids) {
-          const memory = await store.getById(id);
+          const memory = memoryMap.get(id);
           if (!memory) {
             results.push(`[${id}] Not found`);
             continue;
           }
-
-          await store.recordAccess(id);
 
           const meta: string[] = [];
           meta.push(`source: ${memory.source}`);

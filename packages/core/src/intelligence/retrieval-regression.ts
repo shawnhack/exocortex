@@ -42,6 +42,7 @@ export interface RetrievalRegressionResult {
   initialized: number;
   alerts: number;
   rebaselined: number;
+  stale_baselines: number;
   limit: number;
   min_overlap_at_10: number;
   max_avg_rank_shift: number;
@@ -433,6 +434,7 @@ export async function runRetrievalRegression(
       initialized: 0,
       alerts: 0,
       rebaselined: 0,
+      stale_baselines: 0,
       limit: thresholds.limit,
       min_overlap_at_10: thresholds.minOverlap,
       max_avg_rank_shift: thresholds.maxAvgShift,
@@ -466,6 +468,20 @@ export async function runRetrievalRegression(
   let initialized = 0;
   let alerts = 0;
   let rebaselined = 0;
+
+  // Detect stale baselines (>30 days old by default)
+  const staleThresholdDays = parseInt(
+    getSetting(db, "retrieval_regression.stale_baseline_days") ?? "30", 10
+  );
+  const staleDate = new Date();
+  staleDate.setDate(staleDate.getDate() - staleThresholdDays);
+  const staleDateStr = staleDate.toISOString().slice(0, 19).replace("T", " ");
+  const staleRows = db
+    .prepare(
+      "SELECT query, updated_at FROM retrieval_regression_baselines WHERE updated_at < ?"
+    )
+    .all(staleDateStr) as Array<{ query: string; updated_at: string }>;
+  const staleQueries = new Set(staleRows.map((r) => r.query));
 
   for (const queryDef of queries) {
     const searchQuery: SearchQuery = {
@@ -574,6 +590,7 @@ export async function runRetrievalRegression(
     initialized,
     alerts,
     rebaselined,
+    stale_baselines: staleQueries.size,
     limit: thresholds.limit,
     min_overlap_at_10: thresholds.minOverlap,
     max_avg_rank_shift: thresholds.maxAvgShift,
@@ -589,7 +606,7 @@ export async function runRetrievalRegression(
     incrementCounter(db, "retrieval_regression.alerts", alerts);
   }
 
-  if ((alerts > 0 || rebaselined > 0) && createAlertMemory) {
+  if ((alerts > 0 || rebaselined > 0 || staleQueries.size > 0) && createAlertMemory) {
     const alertLines = results
       .filter((r) => r.alert)
       .map(
@@ -616,7 +633,12 @@ export async function runRetrievalRegression(
       "",
       ...alertLines,
       ...(rebaselinedLines.length > 0
-        ? ["", "Auto-rebaselined (>50% baseline churn):", ...rebaselinedLines]
+        ? ["", "Auto-rebaselined (>30% baseline churn):", ...rebaselinedLines]
+        : []),
+      ...(staleQueries.size > 0
+        ? ["", `Stale baselines (>${staleThresholdDays} days):`, ...staleRows.map(
+            (r) => `- ${r.query}: last updated ${r.updated_at}`
+          )]
         : []),
     ].join("\n");
 

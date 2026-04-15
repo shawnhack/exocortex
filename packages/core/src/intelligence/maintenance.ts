@@ -692,7 +692,7 @@ export interface TierPromotionResult {
 
 /**
  * Auto-promote memories between tiers based on usage signals:
- * - episodic → semantic: useful_count >= 3 (proven valuable knowledge)
+ * - episodic → semantic: useful_count >= 2 (proven valuable knowledge)
  * - episodic → procedural: tagged technique/learning/how-to/procedure
  * - working → episodic: accessed or marked useful (survived past session)
  */
@@ -705,7 +705,7 @@ export function promoteMemoryTiers(
 
   if (dryRun) {
     const toSemantic = (db.prepare(
-      "SELECT COUNT(*) as c FROM memories WHERE tier = 'episodic' AND is_active = 1 AND useful_count >= 3"
+      "SELECT COUNT(*) as c FROM memories WHERE tier = 'episodic' AND is_active = 1 AND useful_count >= 2"
     ).get() as { c: number }).c;
     const toProcedural = (db.prepare(
       `SELECT COUNT(*) as c FROM memories WHERE tier = 'episodic' AND is_active = 1
@@ -719,7 +719,7 @@ export function promoteMemoryTiers(
   }
 
   const r1 = db.prepare(
-    "UPDATE memories SET tier = 'semantic', updated_at = ? WHERE tier = 'episodic' AND is_active = 1 AND useful_count >= 3"
+    "UPDATE memories SET tier = 'semantic', updated_at = ? WHERE tier = 'episodic' AND is_active = 1 AND useful_count >= 2"
   ).run(now) as { changes: number };
 
   const r2 = db.prepare(

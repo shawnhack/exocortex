@@ -953,4 +953,22 @@ export const api = {
       `/api/analytics/query-outcomes?limit=${limit}&min_searches=${minSearches}&sort_by=${sortBy}`
     );
   },
+
+  getHealthChecks() {
+    return request<{ overall: string; checks: Array<{ name: string; status: string; message: string; value?: number }> }>(
+      "/api/health-checks"
+    );
+  },
+
+  getLintReport() {
+    return request<{ overall: string; issues: Array<{ category: string; severity: string; message: string; count?: number }>; stats: Record<string, unknown> }>(
+      "/api/lint"
+    );
+  },
+
+  getRegressionHistory(limit = 30) {
+    return request<{ runs: Array<{ run_id: string; avg_overlap: number; query_count: number; alerts: number; created_at: string }> }>(
+      `/api/retrieval-regression/history?limit=${limit}`
+    );
+  },
 };

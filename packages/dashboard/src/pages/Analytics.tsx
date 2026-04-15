@@ -250,6 +250,18 @@ export function Analytics() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: regressionHistory } = useQuery({
+    queryKey: ["regression-history"],
+    queryFn: () => api.getRegressionHistory(30),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: healthChecks } = useQuery({
+    queryKey: ["health-checks"],
+    queryFn: () => api.getHealthChecks(),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: queryOutcomes } = useQuery({
     queryKey: ["analytics-query-outcomes"],
     queryFn: () => api.getQueryOutcomes(),
@@ -291,6 +303,30 @@ export function Analytics() {
       <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24 }}>
         Memory quality and usage insights
       </p>
+
+      {/* System Health */}
+      {healthChecks && (
+        <Section title="System Health">
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {healthChecks.checks.map((check, i) => (
+              <div
+                key={i}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  background: check.status === "ok" ? "rgba(52,211,153,0.08)" : check.status === "warn" ? "rgba(251,191,36,0.08)" : "rgba(239,68,68,0.08)",
+                  color: check.status === "ok" ? "var(--emerald)" : check.status === "warn" ? "var(--warning)" : "var(--red)",
+                  border: `1px solid ${check.status === "ok" ? "rgba(52,211,153,0.2)" : check.status === "warn" ? "rgba(251,191,36,0.2)" : "rgba(239,68,68,0.2)"}`,
+                }}
+              >
+                <span style={{ fontWeight: 600 }}>{check.name}</span>
+                <span style={{ marginLeft: 8, opacity: 0.8 }}>{check.message}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {/* Trend charts */}
       {trend && trend.length > 1 && (() => {
@@ -721,6 +757,28 @@ export function Analytics() {
       {/* Retrieval Regression */}
       {regressionLatest && (
         <Section title="Retrieval Regression">
+          {regressionHistory && regressionHistory.runs.length > 1 && (
+            <div style={{ marginBottom: 16 }}>
+              <LineChart
+                periods={regressionHistory.runs.map((r) => r.created_at.slice(5, 10))}
+                lines={[
+                  {
+                    data: regressionHistory.runs.map((r) => r.avg_overlap * 100),
+                    color: "var(--cyan)",
+                    label: "Avg Overlap %",
+                    format: (v) => `${v.toFixed(0)}%`,
+                  },
+                ]}
+                leftLabel={(max) => `${max.toFixed(0)}%`}
+                rightLine={{
+                  data: regressionHistory.runs.map((r) => r.alerts),
+                  color: "var(--red)",
+                  label: "Alerts",
+                  format: (v) => String(Math.round(v)),
+                }}
+              />
+            </div>
+          )}
           <div
             style={{
               display: "grid",

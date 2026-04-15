@@ -345,11 +345,21 @@ export function startScheduler(): void {
     }
   });
 
-  // Trash purge — every day at 4:30 AM
+  // Orphan chunk cleanup + trash purge — every day at 4:30 AM
   schedule("30 4 * * *", () => {
     try {
-      console.log("[scheduler] Running trash purge...");
+      // Deactivate active chunks whose parent has been trashed
       const db = getDb();
+      const orphanResult = db.prepare(
+        `UPDATE memories SET is_active = 0, updated_at = datetime('now')
+         WHERE parent_id IS NOT NULL AND is_active = 1
+         AND EXISTS (SELECT 1 FROM memories p WHERE p.id = memories.parent_id AND p.is_active = 0)`
+      ).run() as { changes: number };
+      if (orphanResult.changes > 0) {
+        console.log(`[scheduler] Deactivated ${orphanResult.changes} orphaned chunks`);
+      }
+
+      console.log("[scheduler] Running trash purge...");
       const result = purgeTrash(db);
       console.log(`[scheduler] Trash purge complete: ${result.purged} memories permanently deleted`);
     } catch (err) {

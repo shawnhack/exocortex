@@ -124,7 +124,28 @@ export function runLint(db: DatabaseSync): LintReport {
     }
   } catch { /* skip on error */ }
 
-  // 6. Suggested wiki topics — high-frequency tags without wiki articles
+  // 6. Orphaned chunks — active children of inactive parents
+  let orphanChunks = 0;
+  try {
+    const orphanChunkRow = db
+      .prepare(
+        `SELECT COUNT(*) as cnt FROM memories c
+         WHERE c.parent_id IS NOT NULL AND c.is_active = 1
+         AND EXISTS (SELECT 1 FROM memories p WHERE p.id = c.parent_id AND p.is_active = 0)`
+      )
+      .get() as { cnt: number };
+    orphanChunks = orphanChunkRow.cnt;
+    if (orphanChunks > 0) {
+      issues.push({
+        category: "orphan-chunks",
+        severity: orphanChunks > 50 ? "warn" : "info",
+        message: `${orphanChunks} active chunk(s) under inactive parents — will be cleaned up by nightly maintenance`,
+        count: orphanChunks,
+      });
+    }
+  } catch { /* skip */ }
+
+  // 7. Suggested wiki topics — high-frequency tags without wiki articles
   const suggestedTopics: string[] = [];
   try {
     const topTags = db
@@ -168,7 +189,7 @@ export function runLint(db: DatabaseSync): LintReport {
     }
   } catch { /* skip */ }
 
-  // 7. Total stats
+  // 8. Total stats
   let totalMemories = 0;
   try {
     totalMemories = (db.prepare("SELECT COUNT(*) as cnt FROM memories WHERE is_active = 1").get() as { cnt: number }).cnt;

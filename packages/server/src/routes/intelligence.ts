@@ -20,6 +20,8 @@ import {
   reembedMissing,
   getEmbeddingProvider,
   autoConsolidate,
+  runHealthChecks,
+  runLint,
 } from "@exocortex/core";
 
 import { parseIntQuery } from "../utils.js";
@@ -269,6 +271,51 @@ intelligence.post("/api/auto-consolidate", async (c) => {
   const provider = await getEmbeddingProvider();
   const result = await autoConsolidate(db, provider);
   return c.json(result);
+});
+
+// GET /api/health-checks — run health checks
+intelligence.get("/api/health-checks", (c) => {
+  const db = getDb();
+  return c.json(runHealthChecks(db));
+});
+
+// GET /api/lint — comprehensive knowledge-base lint
+intelligence.get("/api/lint", (c) => {
+  const db = getDb();
+  return c.json(runLint(db));
+});
+
+// GET /api/retrieval-regression/history — overlap history for chart
+intelligence.get("/api/retrieval-regression/history", (c) => {
+  const limit = parseIntQuery(c.req.query("limit"), 30, 1, 100);
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT run_group_id, AVG(overlap_at_10) as avg_overlap,
+              COUNT(*) as query_count, SUM(alert) as alerts,
+              MAX(created_at) as created_at
+       FROM retrieval_regression_runs
+       WHERE run_group_id != ''
+       GROUP BY run_group_id
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(limit) as Array<{
+    run_group_id: string;
+    avg_overlap: number;
+    query_count: number;
+    alerts: number;
+    created_at: string;
+  }>;
+  return c.json({
+    runs: rows.reverse().map((r) => ({
+      run_id: r.run_group_id,
+      avg_overlap: Math.round(r.avg_overlap * 1000) / 1000,
+      query_count: r.query_count,
+      alerts: r.alerts,
+      created_at: r.created_at,
+    })),
+  });
 });
 
 export default intelligence;
