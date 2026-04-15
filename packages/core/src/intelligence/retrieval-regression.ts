@@ -185,6 +185,7 @@ function getThresholds(
   limit: number;
   minOverlap: number;
   maxAvgShift: number;
+  rebaselineChurnPct: number;
 } {
   return {
     limit:
@@ -200,6 +201,9 @@ function getThresholds(
       parseFloat(
         getSetting(db, "retrieval_regression.max_avg_rank_shift") ?? "3"
       ),
+    rebaselineChurnPct: parseFloat(
+      getSetting(db, "retrieval_regression.rebaseline_churn_pct") ?? "0.30"
+    ),
   };
 }
 
@@ -520,9 +524,9 @@ export async function runRetrievalRegression(
       liveIds
     );
 
-    // Auto-rebaseline if >50% of baseline IDs have been churned
+    // Auto-rebaseline if churned IDs exceed threshold (default 30%)
     const shouldRebaseline =
-      comparison.churned > thresholds.limit / 2 && !updateBaselines;
+      comparison.churned > thresholds.limit * thresholds.rebaselineChurnPct && !updateBaselines;
     if (shouldRebaseline) {
       baselineUpsert.run(queryDef.query, JSON.stringify(currentIds), now, now);
       rebaselined++;
