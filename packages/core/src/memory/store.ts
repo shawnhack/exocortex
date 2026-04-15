@@ -1276,6 +1276,47 @@ export class MemoryStore {
       .filter((m): m is Memory => Boolean(m));
   }
 
+  /**
+   * Fetch temporally adjacent memories for context.
+   * Returns up to `count` memories created within `windowHours` of the target,
+   * excluding chunks and the target itself.
+   */
+  getTemporalContext(
+    targetId: string,
+    targetCreatedAt: string,
+    opts?: { count?: number; windowHours?: number }
+  ): Memory[] {
+    const count = opts?.count ?? 2;
+    const hours = opts?.windowHours ?? 1;
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memories
+         WHERE is_active = 1 AND parent_id IS NULL AND id != ?
+           AND created_at BETWEEN datetime(?, '-${hours} hours') AND datetime(?, '+${hours} hours')
+         ORDER BY ABS(julianday(created_at) - julianday(?))
+         LIMIT ?`
+      )
+      .all(targetId, targetCreatedAt, targetCreatedAt, targetCreatedAt, count) as unknown as MemoryRow[];
+
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((r) => r.id);
+    const placeholders = ids.map(() => "?").join(", ");
+    const tagRows = this.db
+      .prepare(`SELECT memory_id, tag FROM memory_tags WHERE memory_id IN (${placeholders})`)
+      .all(...ids) as Array<{ memory_id: string; tag: string }>;
+
+    const tagMap = new Map<string, string[]>();
+    for (const { memory_id, tag } of tagRows) {
+      const arr = tagMap.get(memory_id);
+      if (arr) arr.push(tag);
+      else tagMap.set(memory_id, [tag]);
+    }
+
+    return rows.map((row) => rowToMemory(row, tagMap.get(row.id) ?? []));
+  }
+
   async update(id: string, input: UpdateMemoryInput): Promise<Memory | null> {
     const existing = await this.getById(id);
     if (!existing) return null;

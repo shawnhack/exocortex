@@ -590,6 +590,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
     "Fetch full content for specific memory IDs. Implicitly signals usefulness for future ranking.",
     {
       ids: z.array(z.string()).min(1).max(10).describe("Memory IDs to fetch (max 10)"),
+      context: z.boolean().optional().describe("Include ±2 temporally adjacent memories for each result (progressive disclosure — shows what was happening around each memory)"),
     },
     async (args) => {
       try {
@@ -631,6 +632,15 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           if (memory.importance !== 0.5) meta.push(`importance: ${memory.importance}`);
           if (memory.valence !== 0) meta.push(`valence: ${memory.valence}`);
           results.push(`[${memory.id}] ${memory.content}\n  (${meta.join(" | ")})`);
+
+          // Append temporal context if requested
+          if (args.context) {
+            const neighbors = store.getTemporalContext(memory.id, memory.created_at);
+            for (const n of neighbors) {
+              const nTags = n.tags?.length ? ` | tags: ${n.tags.join(", ")}` : "";
+              results.push(`  ↳ [${n.id}] ${n.content.slice(0, 200)}${n.content.length > 200 ? "…" : ""}\n    (nearby: ${n.created_at}${nTags})`);
+            }
+          }
         }
 
         return { content: [{ type: "text", text: results.join("\n\n") }] };
