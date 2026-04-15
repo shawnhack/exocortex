@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { getEmbeddingProvider } from "../embedding/manager.js";
 import type { SearchQuery, SearchResult, MemoryRow } from "./types.js";
-import { getSetting } from "../db/schema.js";
+import { getSetting, safeJsonParse } from "../db/schema.js";
 import {
   cosineSimilarity,
   recencyScore,
@@ -269,11 +269,13 @@ export class MemorySearch {
 
     // Get query embedding (use expanded text if available)
     let queryEmbedding: Float32Array | null = null;
+    let searchMode: "hybrid" | "fts_only" = "hybrid";
     try {
       const provider = await getEmbeddingProvider();
       queryEmbedding = await provider.embed(embeddingText);
     } catch {
       // Fall back to FTS-only if embedding fails
+      searchMode = "fts_only";
     }
 
     // Configurable min_score threshold (query param overrides setting)
@@ -576,6 +578,7 @@ export class MemorySearch {
 
     // Optional LLM re-ranking (qmd-inspired)
     // Only runs when enabled in settings AND a reranker provider is supplied
+    let rerankApplied = false;
     if (reranker && isRerankEnabled(this.db) && scored.length > 1) {
       try {
         const rerankLimit = getRerankLimit(this.db);
@@ -592,6 +595,7 @@ export class MemorySearch {
 
         // Re-sort after blending
         scored.sort((a, b) => b.score - a.score || a.row.id.localeCompare(b.row.id));
+        rerankApplied = true;
       } catch {
         // Re-ranking failure is non-critical — fall through to original order
       }
@@ -652,7 +656,7 @@ export class MemorySearch {
           superseded_by: row.superseded_by ?? null,
           chunk_index: row.chunk_index ?? null,
           keywords: row.keywords ?? undefined,
-          metadata: rawMeta ? JSON.parse(rawMeta) : undefined,
+          metadata: safeJsonParse<Record<string, unknown> | undefined>(rawMeta, undefined),
           tier: (p.row.tier ?? "episodic") as import("./types.js").MemoryTier,
           tags: tagMap.get(row.id) ?? [],
         },
@@ -661,6 +665,8 @@ export class MemorySearch {
         fts_score: p.ftsScore,
         recency_score: p.recency,
         frequency_score: p.freq,
+        search_mode: searchMode,
+        reranked: rerankApplied,
         score_breakdown: {
           usefulness: p.usefulness,
           valence: p.valence,

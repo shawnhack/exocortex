@@ -213,7 +213,7 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
           }
         }
 
-        if (args.recompute_quality !== false) {
+        if (args.recompute_quality === true) {
           try {
             const qualityResult = recomputeQualityScores(db);
             parts.push(`\nQuality scores: ${qualityResult.updated} updated out of ${qualityResult.total} active memories`);

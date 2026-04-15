@@ -139,6 +139,8 @@ export interface SearchResult {
   fts_score: number;
   recency_score: number;
   frequency_score: number;
+  search_mode?: "hybrid" | "fts_only";
+  reranked?: boolean;
   score_breakdown?: {
     usefulness: number;
     valence: number;
@@ -166,6 +168,7 @@ export interface CreateMemoryResult {
   superseded_id?: string;
   dedup_similarity?: number;
   dedup_action?: "superseded" | "skipped" | "merged" | "near_duplicate";
+  warnings?: string[];
 }
 
 /** Raw row shape from SQLite (embedding as Buffer, is_active as integer) */

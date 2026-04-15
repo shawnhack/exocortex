@@ -202,13 +202,13 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
                     db.prepare("UPDATE memories SET keywords = ? WHERE id = ?").run(newKeywords, linkedId);
                   }
                 }
-              } catch {
-                // Keyword refresh is non-critical
+              } catch (err) {
+                console.error("memory_store: keyword refresh failed:", err instanceof Error ? err.message : String(err));
               }
             }
           }
-        } catch {
-          // Relation discovery is non-critical
+        } catch (err) {
+          console.error("memory_store: relation discovery failed:", err instanceof Error ? err.message : String(err));
         }
 
         // Temporal auto-linking: narratives and epochs link to high-importance episodes

@@ -18,20 +18,19 @@ interface AnthropicResponse {
 
 const chat = new Hono();
 
-// Simple sliding window rate limiter (20 req/min global)
+// Per-IP sliding window rate limiter (20 req/min)
 const RATE_LIMIT = 20;
 const RATE_WINDOW_MS = 60_000;
-const requestTimestamps: number[] = [];
+const requestTimestamps = new Map<string, number[]>();
 
-function isRateLimited(): boolean {
+function checkRateLimit(ip: string): boolean {
   const now = Date.now();
-  // Remove timestamps outside the window
-  while (requestTimestamps.length > 0 && requestTimestamps[0] <= now - RATE_WINDOW_MS) {
-    requestTimestamps.shift();
-  }
-  if (requestTimestamps.length >= RATE_LIMIT) return true;
-  requestTimestamps.push(now);
-  return false;
+  const timestamps = requestTimestamps.get(ip) ?? [];
+  const recent = timestamps.filter((t) => now - t < RATE_WINDOW_MS);
+  if (recent.length >= RATE_LIMIT) return false;
+  recent.push(now);
+  requestTimestamps.set(ip, recent);
+  return true;
 }
 
 const chatMessageSchema = z.object({
@@ -47,7 +46,8 @@ const chatSchema = z.object({
 
 // POST /api/chat — RAG chat endpoint
 chat.post("/api/chat", async (c) => {
-  if (isRateLimited()) {
+  const ip = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
+  if (!checkRateLimit(ip)) {
     return c.json({ error: "Too many requests. Try again later." }, 429);
   }
 
@@ -73,6 +73,7 @@ chat.post("/api/chat", async (c) => {
   // Search for relevant memories
   const search = new MemorySearch(db);
   let sources: Memory[] = [];
+  let contextWarning: string | undefined;
   try {
     const results = await search.search({
       query: parsed.data.message,
@@ -81,6 +82,7 @@ chat.post("/api/chat", async (c) => {
     sources = results.map((r) => r.memory);
   } catch {
     // Search may fail if no embeddings; continue without context
+    contextWarning = "Memory search failed; response is not based on your stored knowledge.";
   }
 
   // Build context from sources
@@ -168,6 +170,7 @@ ${context || "(No relevant memories found)"}`;
       response: responseText,
       sources: sources.map(stripEmbedding),
       conversation_id: parsed.data.conversation_id ?? crypto.randomUUID(),
+      ...(contextWarning ? { warning: contextWarning } : {}),
     });
   } catch (err) {
     return c.json(

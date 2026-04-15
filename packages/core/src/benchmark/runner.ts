@@ -204,6 +204,11 @@ export async function runQuestions(
     );
     const withoutScores = parseJudgeResponse(judgeWithoutRes.text);
 
+    if (!withScores || !withoutScores) {
+      console.warn(`[benchmark] Judge parse failed for question ${question.id}, skipping`);
+      continue;
+    }
+
     results.push({
       question,
       with_memory: {

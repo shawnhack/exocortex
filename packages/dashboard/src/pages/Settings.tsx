@@ -59,6 +59,7 @@ export function Settings() {
   const { data: settings, isLoading } = useQuery({
     queryKey: ["settings"],
     queryFn: () => api.getSettings(),
+    gcTime: 0,
   });
 
   const { data: embeddingHealth } = useQuery({

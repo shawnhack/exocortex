@@ -13,6 +13,8 @@ interface Message {
 export function Chat() {
   const { toast } = useToast();
   const [messages, setMessages] = useState<Message[]>([]);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | undefined>();
@@ -40,7 +42,7 @@ export function Chat() {
 
     try {
       // Send prior messages as history for multi-turn context
-      const history = messages.map((m) => ({ role: m.role, content: m.content }));
+      const history = messagesRef.current.map((m) => ({ role: m.role, content: m.content }));
       const response = await api.chat(msg, history, conversationId);
       setConversationId(response.conversation_id);
       setMessages((prev) => [

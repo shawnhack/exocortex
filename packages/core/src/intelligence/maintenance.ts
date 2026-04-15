@@ -71,6 +71,11 @@ export async function reembedMissing(
         console.warn(`[maintenance] Re-embed failed for ${row.id}:`, (err as Error).message);
         failed++;
       }
+      // Circuit breaker: if >50% of first 10 attempts fail, abort early
+      if (processed + failed >= 10 && failed > (processed + failed) * 0.5) {
+        console.warn(`[exocortex] Re-embed circuit breaker: ${failed}/${processed + failed} failed, aborting`);
+        return { processed, failed, skipped: rows.length - processed - failed, dry_run: false };
+      }
     }
   }
 
@@ -132,6 +137,11 @@ export async function reembedAll(
       } catch (err) {
         console.warn(`[maintenance] Re-embed failed for ${row.id}:`, (err as Error).message);
         failed++;
+      }
+      // Circuit breaker: if >50% of first 10 attempts fail, abort early
+      if (processed + failed >= 10 && failed > (processed + failed) * 0.5) {
+        console.warn(`[exocortex] Re-embed circuit breaker: ${failed}/${processed + failed} failed, aborting`);
+        return { processed, failed, total: rows.length, dry_run: false };
       }
     }
   }
@@ -315,8 +325,15 @@ export function recalibrateImportance(
       "UPDATE memories SET importance = ?, updated_at = ? WHERE id = ?"
     );
     const now = new Date().toISOString().replace("T", " ").replace("Z", "");
-    for (const { id, newImportance } of newValues) {
-      update.run(newImportance, now, id);
+    db.exec("BEGIN");
+    try {
+      for (const { id, newImportance } of newValues) {
+        update.run(newImportance, now, id);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
     }
   }
 

@@ -389,6 +389,13 @@ export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
           ?? process.env.EXOCORTEX_WIKI_PATH
           ?? path.join(process.env.OBSIDIAN_VAULT ?? ".", "wiki");
 
+        // Root-confinement check: prevent arbitrary filesystem writes
+        const allowedRoot = path.resolve(process.env.EXOCORTEX_WIKI_PATH ?? path.join(process.env.OBSIDIAN_VAULT ?? ".", "wiki"));
+        const resolvedWikiPath = path.resolve(wikiPath);
+        if (!resolvedWikiPath.startsWith(allowedRoot)) {
+          return { content: [{ type: "text", text: `Error: wiki_path outside allowed root` }], isError: true };
+        }
+
         // Ensure wiki directory exists
         if (!fs.existsSync(wikiPath)) {
           fs.mkdirSync(wikiPath, { recursive: true });

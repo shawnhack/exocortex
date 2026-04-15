@@ -1,12 +1,13 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Context, Next } from "hono";
 import { getDb, getSetting } from "@exocortex/core";
 import { isX402Enabled, build402Response, verifyX402Payment, getPrice } from "./x402.js";
 
-/** Constant-time string comparison to prevent timing attacks */
+/** Constant-time string comparison using HMAC to avoid length-dependent timing leaks */
 function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  const ha = createHmac("sha256", "exocortex").update(a).digest();
+  const hb = createHmac("sha256", "exocortex").update(b).digest();
+  return timingSafeEqual(ha, hb);
 }
 
 export async function authMiddleware(c: Context, next: Next) {

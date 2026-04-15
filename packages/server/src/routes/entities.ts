@@ -74,9 +74,15 @@ entities.get("/api/entities/tags", (c) => {
   return c.json({ tags });
 });
 
+const VALID_ENTITY_TYPES = new Set<string>(["person", "project", "technology", "organization", "concept"]);
+
 // GET /api/entities
 entities.get("/api/entities", (c) => {
-  const type = c.req.query("type") as EntityType | undefined;
+  const rawType = c.req.query("type");
+  if (rawType && !VALID_ENTITY_TYPES.has(rawType)) {
+    return c.json({ error: `Invalid entity type: ${rawType}. Must be one of: ${[...VALID_ENTITY_TYPES].join(", ")}` }, 400);
+  }
+  const type = rawType as EntityType | undefined;
   const tagsParam = c.req.query("tags");
   const tags = tagsParam ? tagsParam.split(",").filter(Boolean) : undefined;
   const db = getDb();

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { compress } from "hono/compress";
+import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { serve } from "@hono/node-server";
@@ -90,20 +91,37 @@ export function createApp(): Hono {
   app.get("/a2a.json", (c) => {
     const file = path.join(publicDir, "a2a.json");
     if (!fs.existsSync(file)) return c.json({ error: "Not found" }, 404);
-    return c.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+    try {
+      return c.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+    } catch {
+      return c.json({ error: "Malformed config file: a2a.json" }, 500);
+    }
   });
   app.get("/.well-known/a2a.json", (c) => {
     const file = path.join(publicDir, "a2a.json");
     if (!fs.existsSync(file)) return c.json({ error: "Not found" }, 404);
-    return c.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+    try {
+      return c.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+    } catch {
+      return c.json({ error: "Malformed config file: a2a.json" }, 500);
+    }
   });
   app.get("/openapi.json", (c) => {
     const file = path.join(publicDir, "openapi.json");
     if (!fs.existsSync(file)) return c.json({ error: "Not found" }, 404);
-    return c.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+    try {
+      return c.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+    } catch {
+      return c.json({ error: "Malformed config file: openapi.json" }, 500);
+    }
   });
 
-  // MCP route (before auth — MCP protocol handles its own sessions)
+  // Body size limits
+  app.use("/api/*", bodyLimit({ maxSize: 5 * 1024 * 1024 }));
+  app.use("/mcp", bodyLimit({ maxSize: 5 * 1024 * 1024 }));
+
+  // MCP route (auth required, MCP sessions validated after)
+  app.use("/mcp", authMiddleware);
   app.route("/", mcpRoutes);
 
   // Auth middleware on API routes (health exempt above)

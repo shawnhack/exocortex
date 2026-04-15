@@ -13,6 +13,7 @@ import { computeContentHashForDb } from "./content-hash.js";
 import { getMetadataTags, inferIsMetadata } from "./metadata-classification.js";
 import { incrementCounter } from "../observability/counters.js";
 import { MemoryLinkStore } from "./links.js";
+import { sanitizeContent } from "../security/sanitize.js";
 import type {
   Memory,
   MemoryRow,
@@ -235,10 +236,14 @@ export class MemoryStore {
     const skipInsertOnDedup = getSetting(this.db, "dedup.skip_insert_on_match") !== "false";
 
     // Strip <private> blocks before any processing
-    const content = stripPrivateContent(input.content);
+    let content = stripPrivateContent(input.content);
     if (content.length === 0) {
       throw new Error("Memory content is empty after stripping private blocks");
     }
+
+    // Sanitize content to neutralize prompt injection patterns
+    const sanitized = sanitizeContent(content);
+    content = sanitized.content;
 
     const isBenchmark = input.benchmark === true;
     const canonicalMap = getCanonicalMap(this.db);
@@ -318,6 +323,7 @@ export class MemoryStore {
     // Generate embedding (or fallback to no embedding for benchmark artifacts)
     let embeddingBlob: Uint8Array | null = null;
     let embeddingFloat: Float32Array | null = null;
+    const warnings: string[] = [];
     if (benchmarkIndexed) {
       try {
         const provider = await getEmbeddingProvider();
@@ -330,7 +336,9 @@ export class MemoryStore {
         );
       } catch (err) {
         // Embedding may fail on first run while model downloads; store without
-        console.error(`[exocortex] Embedding failed, storing memory without vector index: ${err instanceof Error ? err.message : err}`);
+        const msg = `Embedding failed, storing memory without vector index: ${err instanceof Error ? err.message : err}`;
+        console.error(`[exocortex] ${msg}`);
+        warnings.push(msg);
       }
     }
 
@@ -382,6 +390,7 @@ export class MemoryStore {
         throw err;
       }
       const result: CreateMemoryResult = { memory };
+      if (warnings.length > 0) result.warnings = warnings;
       if (hashDedupId && !skipInsertOnDedup) {
         incrementCounter(this.db, "memory.dedup_superseded");
         incrementCounter(this.db, "memory.dedup_superseded.hash");
@@ -611,6 +620,7 @@ export class MemoryStore {
 
     const memory = await this.getById(id) as Memory;
     const result: CreateMemoryResult = { memory };
+    if (warnings.length > 0) result.warnings = warnings;
     if (dedupInfo) {
       incrementCounter(this.db, "memory.dedup_superseded");
       if (dedupInfo.similarity >= 0.999) {
@@ -831,6 +841,26 @@ export class MemoryStore {
       )
       .all(contentType, namespace, candidatePool) as unknown as Array<{ id: string; embedding: Uint8Array }>;
 
+    // Pre-fetch all tags for candidate pool to avoid N+1 queries
+    let candidateTagMap: Map<string, Set<string>> | null = null;
+    if (input.tags && input.tags.length > 0 && candidates.length > 0) {
+      candidateTagMap = new Map();
+      const candidateIds = candidates.map((c) => c.id);
+      const batchSize = 500;
+      for (let i = 0; i < candidateIds.length; i += batchSize) {
+        const batch = candidateIds.slice(i, i + batchSize);
+        const placeholders = batch.map(() => "?").join(", ");
+        const tagRows = this.db
+          .prepare(`SELECT memory_id, tag FROM memory_tags WHERE memory_id IN (${placeholders})`)
+          .all(...batch) as Array<{ memory_id: string; tag: string }>;
+        for (const t of tagRows) {
+          let s = candidateTagMap.get(t.memory_id);
+          if (!s) { s = new Set(); candidateTagMap.set(t.memory_id, s); }
+          s.add(t.tag);
+        }
+      }
+    }
+
     for (const candidate of candidates) {
       const bytes = candidate.embedding as unknown as Uint8Array;
       const candidateEmbedding = new Float32Array(new Uint8Array(bytes).buffer);
@@ -838,11 +868,8 @@ export class MemoryStore {
 
       if (similarity >= threshold) {
         // Check tag overlap if tags are provided
-        if (input.tags && input.tags.length > 0) {
-          const existingTags = this.db
-            .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
-            .all(candidate.id) as Array<{ tag: string }>;
-          const existingTagSet = new Set(existingTags.map((t) => t.tag));
+        if (input.tags && input.tags.length > 0 && candidateTagMap) {
+          const existingTagSet = candidateTagMap.get(candidate.id) ?? new Set();
           const hasOverlap = input.tags.some((t) =>
             existingTagSet.has(t.toLowerCase().trim())
           );
@@ -860,11 +887,8 @@ export class MemoryStore {
         );
         if (similarity >= mergeThreshold && similarity < threshold) {
           // Check tag overlap
-          if (input.tags && input.tags.length > 0) {
-            const existingTags = this.db
-              .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
-              .all(candidate.id) as Array<{ tag: string }>;
-            const existingTagSet = new Set(existingTags.map((t) => t.tag));
+          if (input.tags && input.tags.length > 0 && candidateTagMap) {
+            const existingTagSet = candidateTagMap.get(candidate.id) ?? new Set();
             const hasOverlap = input.tags.some((t) =>
               existingTagSet.has(t.toLowerCase().trim())
             );
@@ -987,6 +1011,31 @@ export class MemoryStore {
       "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)"
     );
 
+    // Pre-compute chunk embeddings outside the transaction (async I/O)
+    const insertChunk = this.db.prepare(`
+      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, chunk_index, metadata, tier, expires_at, namespace, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const chunkProvider = isIndexed ? await getEmbeddingProvider().catch(() => null) : null;
+    const chunkData: Array<{ id: string; embedding: Uint8Array | null; hash: string }> = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const chunkId = ulid();
+      let chunkEmbeddingBlob: Uint8Array | null = null;
+
+      if (chunkProvider) {
+        try {
+          const embedding = await chunkProvider.embed(chunks[i]);
+          chunkEmbeddingBlob = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
+        } catch {
+          // Skip embedding for this chunk
+        }
+      }
+
+      chunkData.push({ id: chunkId, embedding: chunkEmbeddingBlob, hash: computeContentHashForDb(this.db, chunks[i]) });
+    }
+
+    // Single transaction for parent + all chunks
     this.db.exec("BEGIN");
     try {
       if (supersedeExistingId) {
@@ -1029,36 +1078,10 @@ export class MemoryStore {
           insertTag.run(parentId, tag);
         }
       }
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
 
-    // Insert chunks with individual embeddings
-    const insertChunk = this.db.prepare(`
-      INSERT INTO memories (id, content, content_type, source, source_uri, provider, model_id, model_name, agent, session_id, conversation_id, embedding, content_hash, is_indexed, is_metadata, importance, valence, parent_id, chunk_index, metadata, tier, expires_at, namespace, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const provider = isIndexed ? await getEmbeddingProvider().catch(() => null) : null;
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkId = ulid();
-      let chunkEmbeddingBlob: Uint8Array | null = null;
-
-      if (provider) {
-        try {
-          const embedding = await provider.embed(chunks[i]);
-          chunkEmbeddingBlob = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
-        } catch {
-          // Skip embedding for this chunk
-        }
-      }
-
-      this.db.exec("BEGIN");
-      try {
+      for (let i = 0; i < chunks.length; i++) {
         insertChunk.run(
-          chunkId,
+          chunkData[i].id,
           chunks[i],
           input.content_type ?? "text",
           input.source ?? "manual",
@@ -1069,8 +1092,8 @@ export class MemoryStore {
           attribution.agent,
           attribution.session_id,
           attribution.conversation_id,
-          chunkEmbeddingBlob,
-          computeContentHashForDb(this.db, chunks[i]),
+          chunkData[i].embedding,
+          chunkData[i].hash,
           isIndexed ? 1 : 0,
           isMetadata ? 1 : 0,
           input.importance ?? 0.5,
@@ -1088,14 +1111,15 @@ export class MemoryStore {
         // Copy tags to chunks so tag filtering works
         if (input.tags) {
           for (const tag of input.tags) {
-            insertTag.run(chunkId, tag);
+            insertTag.run(chunkData[i].id, tag);
           }
         }
-        this.db.exec("COMMIT");
-      } catch (err) {
-        this.db.exec("ROLLBACK");
-        throw err;
       }
+
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
     }
 
     if (isIndexed) {
@@ -1620,14 +1644,22 @@ export class MemoryStore {
       .prepare("SELECT * FROM memories WHERE is_active = 0 ORDER BY updated_at DESC LIMIT ? OFFSET ?")
       .all(limit, offset) as unknown as MemoryRow[];
 
-    return Promise.all(
-      rows.map(async (row) => {
-        const tags = this.db
-          .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
-          .all(row.id) as Array<{ tag: string }>;
-        return rowToMemory(row, tags.map((t) => t.tag));
-      })
-    );
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((r) => r.id);
+    const placeholders = ids.map(() => "?").join(", ");
+    const tagRows = this.db
+      .prepare(`SELECT memory_id, tag FROM memory_tags WHERE memory_id IN (${placeholders})`)
+      .all(...ids) as Array<{ memory_id: string; tag: string }>;
+
+    const tagMap = new Map<string, string[]>();
+    for (const { memory_id, tag } of tagRows) {
+      const arr = tagMap.get(memory_id);
+      if (arr) arr.push(tag);
+      else tagMap.set(memory_id, [tag]);
+    }
+
+    return rows.map((row) => rowToMemory(row, tagMap.get(row.id) ?? []));
   }
 
   async restore(id: string): Promise<boolean> {
@@ -1658,17 +1690,22 @@ export class MemoryStore {
 
     const rows = this.db.prepare(sql).all(...params) as unknown as MemoryRow[];
 
-    return Promise.all(
-      rows.map(async (row) => {
-        const rowTags = this.db
-          .prepare("SELECT tag FROM memory_tags WHERE memory_id = ?")
-          .all(row.id) as Array<{ tag: string }>;
-        return rowToMemory(
-          row,
-          rowTags.map((t) => t.tag)
-        );
-      })
-    );
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((r) => r.id);
+    const tagPlaceholders = ids.map(() => "?").join(", ");
+    const tagRows = this.db
+      .prepare(`SELECT memory_id, tag FROM memory_tags WHERE memory_id IN (${tagPlaceholders})`)
+      .all(...ids) as Array<{ memory_id: string; tag: string }>;
+
+    const tagMap = new Map<string, string[]>();
+    for (const { memory_id, tag } of tagRows) {
+      const arr = tagMap.get(memory_id);
+      if (arr) arr.push(tag);
+      else tagMap.set(memory_id, [tag]);
+    }
+
+    return rows.map((row) => rowToMemory(row, tagMap.get(row.id) ?? []));
   }
 
   async recordAccess(memoryId: string, query?: string): Promise<void> {

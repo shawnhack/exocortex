@@ -42,7 +42,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       ...prev,
       { id, message, type: "info", confirm: { onAccept } },
     ]);
-  }, []);
+    setTimeout(() => removeToast(id), 15000);
+  }, [removeToast]);
 
   return (
     <ToastContext.Provider value={{ toast, confirmToast }}>

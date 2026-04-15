@@ -42,6 +42,9 @@ export function registerMemoryIngestTools(ctx: ToolRegistrationContext): void {
           return { content: [{ type: "text", text: "path is required for source: text" }], isError: true };
         }
 
+        const INGEST_ROOT = process.env.EXOCORTEX_INGEST_ROOT ?? process.cwd();
+        const resolvedRoot = path.resolve(INGEST_ROOT);
+
         const inputPaths = Array.isArray(args.path) ? args.path : [args.path];
 
         const resolvedPaths: string[] = [];
@@ -54,6 +57,9 @@ export function registerMemoryIngestTools(ctx: ToolRegistrationContext): void {
             );
             try {
               const absDir = path.resolve(dir);
+              if (!absDir.startsWith(resolvedRoot)) {
+                return { content: [{ type: "text" as const, text: `Error: Path outside allowed root: ${absDir}` }], isError: true };
+              }
               const entries = fs.readdirSync(absDir);
               for (const entry of entries) {
                 if (regex.test(entry)) {
@@ -66,7 +72,11 @@ export function registerMemoryIngestTools(ctx: ToolRegistrationContext): void {
               };
             }
           } else {
-            resolvedPaths.push(path.resolve(p));
+            const absPath = path.resolve(p);
+            if (!absPath.startsWith(resolvedRoot)) {
+              return { content: [{ type: "text" as const, text: `Error: Path outside allowed root: ${absPath}` }], isError: true };
+            }
+            resolvedPaths.push(absPath);
           }
         }
 

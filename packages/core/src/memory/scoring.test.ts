@@ -344,8 +344,10 @@ describe("scoring", () => {
       expect(usefulnessScore(-1)).toBe(0);
     });
 
-    it("should saturate at 1.0 around count=8", () => {
-      expect(usefulnessScore(8)).toBeCloseTo(1.0, 1);
+    it("should approach saturation around count=8", () => {
+      // Formula: log(1+n)/log(1+16) — saturates at 16, not 8
+      // usefulnessScore(8) = log(9)/log(17) ≈ 0.776
+      expect(usefulnessScore(8)).toBeCloseTo(0.78, 1);
     });
 
     it("should increase monotonically", () => {

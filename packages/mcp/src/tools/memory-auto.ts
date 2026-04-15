@@ -141,7 +141,7 @@ export function registerMemoryAutoTool(ctx: ToolRegistrationContext): void {
             }
 
             const store = new MemoryStore(db);
-            store.delete(results[0]!.memory.id);
+            await store.delete(results[0]!.memory.id);
             const preview = results[0]!.memory.content.slice(0, 100);
 
             return { content: [{ type: "text" as const, text: `Forgot memory ${results[0]!.memory.id}: ${preview}...` }] };

@@ -30,6 +30,23 @@ import {
 } from "@exocortex/core";
 import type { RetrievalRegressionResult } from "@exocortex/core";
 
+/** Tracks scheduler job failures for health monitoring */
+const jobErrors: Map<string, { count: number; lastError: string; lastAt: string }> = new Map();
+
+function recordJobError(jobName: string, err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  const existing = jobErrors.get(jobName);
+  jobErrors.set(jobName, {
+    count: (existing?.count ?? 0) + 1,
+    lastError: msg.slice(0, 200),
+    lastAt: new Date().toISOString(),
+  });
+}
+
+export function getJobErrors(): Map<string, { count: number; lastError: string; lastAt: string }> {
+  return jobErrors;
+}
+
 /**
  * Run importance adjustment + archival + auto-consolidation immediately.
  * Called on startup and after every N memory stores.
@@ -179,6 +196,7 @@ export function startScheduler(): void {
       // Secondary copy handled externally by nexus backup-exocortex script
     } catch (err) {
       console.error("[scheduler] Backup error:", err);
+      recordJobError("backup", err);
     }
   });
 
@@ -215,6 +233,7 @@ export function startScheduler(): void {
       console.log(`[scheduler] Consolidation complete: ${consolidated}/${clusters.length} clusters consolidated${skipped > 0 ? `, ${skipped} skipped (quality check)` : ""}`);
     } catch (err) {
       console.error("[scheduler] Consolidation error:", err);
+      recordJobError("consolidation", err);
     }
   });
 
@@ -243,6 +262,7 @@ export function startScheduler(): void {
       }
     } catch (err) {
       console.error("[scheduler] Contradiction detection error:", err);
+      recordJobError("contradiction_detection", err);
     }
   });
 
@@ -257,6 +277,7 @@ export function startScheduler(): void {
       );
     } catch (err) {
       console.error("[scheduler] Entity backfill error:", err);
+      recordJobError("entity_backfill", err);
     }
   });
 
@@ -280,6 +301,7 @@ export function startScheduler(): void {
       }
     } catch (err) {
       console.error("[scheduler] Importance adjustment error:", err);
+      recordJobError("importance_adjustment", err);
     }
   });
 
@@ -319,6 +341,7 @@ export function startScheduler(): void {
       }
     } catch (err) {
       console.error("[scheduler] Archival error:", err);
+      recordJobError("archival", err);
     }
   });
 
@@ -331,6 +354,7 @@ export function startScheduler(): void {
       console.log(`[scheduler] Trash purge complete: ${result.purged} memories permanently deleted`);
     } catch (err) {
       console.error("[scheduler] Trash purge error:", err);
+      recordJobError("trash_purge", err);
     }
   });
 
@@ -343,6 +367,7 @@ export function startScheduler(): void {
       console.log(`[scheduler] Graph densification complete: ${result.pairsAnalyzed} pairs, ${result.relationshipsCreated} relationships created`);
     } catch (err) {
       console.error("[scheduler] Graph densification error:", err);
+      recordJobError("graph_densification", err);
     }
   });
 
@@ -367,6 +392,7 @@ export function startScheduler(): void {
       }
     } catch (err) {
       console.error("[scheduler] Co-retrieval link building error:", err);
+      recordJobError("co_retrieval_links", err);
     }
   });
 
@@ -377,6 +403,7 @@ export function startScheduler(): void {
       await runScheduledRetrievalRegression();
     } catch (err) {
       console.error("[scheduler] Retrieval regression error:", err);
+      recordJobError("retrieval_regression", err);
     }
   });
 

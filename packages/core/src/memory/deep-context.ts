@@ -21,11 +21,14 @@ export interface DeepContextResult {
   queries: string[];
   /** Remaining gaps identified in final iteration (empty = fully converged) */
   gaps: string[];
+  /** True if the codex LLM call for gap analysis failed */
+  deepRetrievalFailed?: boolean;
 }
 
 interface GapAnalysis {
   gaps: string[];
   queries: string[];
+  deepRetrievalFailed?: boolean;
 }
 
 interface CodexJsonEvent {
@@ -144,7 +147,7 @@ Respond with ONLY valid JSON, no markdown fences:
     };
   } catch {
     // codex call failed — degrade gracefully to no follow-up
-    return { gaps: [], queries: [] };
+    return { gaps: [], queries: [], deepRetrievalFailed: true };
   }
 }
 
@@ -182,6 +185,7 @@ export async function deepContext(
   }
 
   // Iterative deepening via LLM gap detection
+  let deepRetrievalFailed = false;
   for (let i = 0; i < maxIterations; i++) {
     if (resultMap.size >= maxResults) break;
 
@@ -190,6 +194,11 @@ export async function deepContext(
 
     const analysis = await analyzeGaps(options.topic, currentResults, allQueries);
     iterationCount++;
+
+    if (analysis.deepRetrievalFailed) {
+      deepRetrievalFailed = true;
+      break;
+    }
 
     if (analysis.queries.length === 0) break; // Converged
 
@@ -233,5 +242,6 @@ export async function deepContext(
     iterations: iterationCount,
     queries: allQueries,
     gaps: lastGaps,
+    ...(deepRetrievalFailed ? { deepRetrievalFailed: true } : {}),
   };
 }

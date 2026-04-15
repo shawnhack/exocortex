@@ -54,13 +54,13 @@ Respond with ONLY a JSON object, no other text:
 
 /**
  * Parse the judge's JSON response into dimension scores.
- * Falls back to zeros if parsing fails.
+ * Returns null if parsing fails — callers should handle null as "judge failed".
  */
-export function parseJudgeResponse(response: string): DimensionScores {
+export function parseJudgeResponse(response: string): DimensionScores | null {
   try {
     // Extract JSON from the response (in case there's extra text)
     const match = response.match(/\{[^}]+\}/);
-    if (!match) return { accuracy: 0, specificity: 0, continuity: 0, hallucination: 0 };
+    if (!match) return null;
 
     const parsed = JSON.parse(match[0]);
     return {
@@ -70,7 +70,7 @@ export function parseJudgeResponse(response: string): DimensionScores {
       hallucination: clamp(parsed.hallucination ?? 0),
     };
   } catch {
-    return { accuracy: 0, specificity: 0, continuity: 0, hallucination: 0 };
+    return null;
   }
 }
 

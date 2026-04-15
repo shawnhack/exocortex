@@ -38,7 +38,8 @@ export function getWeights(db: DatabaseSync): ScoringWeights {
 }
 
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  const len = Math.min(a.length, b.length);
+  if (a.length !== b.length) return 0;
+  const len = a.length;
   let dot = 0;
   let normA = 0;
   let normB = 0;

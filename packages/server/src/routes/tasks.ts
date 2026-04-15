@@ -1,6 +1,31 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import { getDb, AgentTaskStore } from "@exocortex/core";
 import type { AgentTaskStatus, AgentTaskPriority } from "@exocortex/core";
+
+const createTaskSchema = z.object({
+  title: z.string().min(1).max(500),
+  description: z.string().max(10000).optional(),
+  assignee: z.string().max(200).optional(),
+  created_by: z.string().min(1).max(200),
+  priority: z.enum(["low", "medium", "high", "critical"]).optional(),
+  goal_id: z.string().optional(),
+  parent_task_id: z.string().optional(),
+  dependencies: z.array(z.string()).max(50).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  deadline: z.string().optional(),
+});
+
+const updateTaskSchema = z.object({
+  title: z.string().min(1).max(500).optional(),
+  description: z.string().max(10000).optional(),
+  assignee: z.string().max(200).nullable().optional(),
+  status: z.enum(["pending", "assigned", "in_progress", "completed", "failed", "blocked"]).optional(),
+  priority: z.enum(["low", "medium", "high", "critical"]).optional(),
+  result: z.string().max(50000).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  deadline: z.string().nullable().optional(),
+});
 
 const tasks = new Hono();
 
@@ -58,12 +83,12 @@ tasks.post("/api/tasks", async (c) => {
   const db = getDb();
   const store = new AgentTaskStore(db);
   const body = await c.req.json();
-
-  if (!body.title || !body.created_by) {
-    return c.json({ error: "title and created_by are required" }, 400);
+  const parsed = createTaskSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten() }, 400);
   }
 
-  const task = store.create(body);
+  const task = store.create(parsed.data);
   return c.json(task, 201);
 });
 
@@ -74,8 +99,12 @@ tasks.patch("/api/tasks/:id", async (c) => {
   const db = getDb();
   const store = new AgentTaskStore(db);
   const body = await c.req.json();
+  const parsed = updateTaskSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten() }, 400);
+  }
 
-  const updated = store.update(c.req.param("id"), body);
+  const updated = store.update(c.req.param("id"), parsed.data);
   if (!updated) return c.json({ error: "Task not found" }, 404);
   return c.json(updated);
 });

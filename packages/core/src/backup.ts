@@ -518,6 +518,16 @@ export function backupDatabase(
     .slice(0, 19);
   const backupPath = path.join(backupDir, `exocortex-${timestamp}.db`);
 
+  // Validate backup path before interpolation into SQL
+  if (/[;\x00-\x1f]/.test(backupPath)) {
+    throw new Error(`Invalid backup path: contains disallowed characters`);
+  }
+  const resolvedBackup = path.resolve(backupPath);
+  const resolvedDir = path.resolve(backupDir);
+  if (!resolvedBackup.startsWith(resolvedDir)) {
+    throw new Error(`Invalid backup path: must be within backup directory`);
+  }
+
   // VACUUM INTO creates an atomic, compact copy of the database.
   // Use forward slashes — SQLite handles them on all platforms.
   const sqlPath = backupPath.replace(/\\/g, "/").replace(/'/g, "''");

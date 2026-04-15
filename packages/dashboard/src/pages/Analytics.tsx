@@ -33,8 +33,9 @@ function LineChart({
   const rightMax = rightLine ? Math.max(...rightLine.data, 1) : 0;
 
   function pts(data: number[], max: number) {
+    const divisor = n <= 1 ? 1 : n - 1;
     return data.map((v, i) => ({
-      x: padL + (i / (n - 1)) * chartW,
+      x: padL + (i / divisor) * chartW,
       y: padT + chartH - (v / max) * chartH,
       v,
     }));

@@ -204,15 +204,19 @@ export function Search() {
     confirmToast(`Delete ${selectedIds.size} selected memories?`, async () => {
       setDeleting(true);
       try {
-        await Promise.all([...selectedIds].map((id) => api.deleteMemory(id)));
-        toast(`Deleted ${selectedIds.size} memories`, "success");
+        const ids = [...selectedIds];
+        const results = await Promise.allSettled(ids.map((id) => api.deleteMemory(id)));
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (failed > 0) {
+          toast(`Deleted ${ids.length - failed} memories, ${failed} failed`, "error");
+        } else {
+          toast(`Deleted ${ids.length} memories`, "success");
+        }
         setSelectedIds(new Set());
         setSelectMode(false);
         queryClient.invalidateQueries({ queryKey: ["search"] });
         queryClient.invalidateQueries({ queryKey: ["browse-tags"] });
         queryClient.invalidateQueries({ queryKey: ["stats"] });
-      } catch {
-        toast("Failed to delete memories", "error");
       } finally {
         setDeleting(false);
       }

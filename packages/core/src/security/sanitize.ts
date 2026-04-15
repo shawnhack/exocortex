@@ -177,8 +177,8 @@ export function sanitizeContent(content: string): SanitizeResult {
 export function hasHighSeverityThreats(content: string): boolean {
   for (const def of THREAT_PATTERNS) {
     if (def.severity !== "high") continue;
+    def.pattern.lastIndex = 0;
     if (def.pattern.test(content)) {
-      // Reset lastIndex for global regex
       def.pattern.lastIndex = 0;
       return true;
     }

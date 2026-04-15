@@ -5,6 +5,8 @@
  */
 
 import type { Context } from "hono";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
@@ -18,10 +20,33 @@ const PRICES: Record<string, number> = {
   "GET /api/context/export": 2_000,    // context sync
 };
 
-// Replay protection — track spent transaction signatures
-const spentSignatures = new Set<string>();
+// Replay protection — persist spent signatures across restarts
+const SPENT_FILE = join(process.env.EXOCORTEX_DATA_DIR ?? ".", ".spent-signatures.json");
 const MAX_SPENT_CACHE = 10_000;
 const TX_MAX_AGE_S = 300; // reject transactions older than 5 minutes
+
+function loadSpentSignatures(): Set<string> {
+  try {
+    const data = readFileSync(SPENT_FILE, "utf-8");
+    const arr = JSON.parse(data);
+    if (Array.isArray(arr)) return new Set<string>(arr.slice(-MAX_SPENT_CACHE));
+  } catch {
+    // File doesn't exist yet or is corrupt — start fresh
+  }
+  return new Set<string>();
+}
+
+function persistSpentSignature(sig: string): void {
+  try {
+    mkdirSync(dirname(SPENT_FILE), { recursive: true });
+    const arr = [...spentSignatures];
+    writeFileSync(SPENT_FILE, JSON.stringify(arr), "utf-8");
+  } catch (err) {
+    console.warn(`[x402] Failed to persist spent signature: ${(err as Error).message}`);
+  }
+}
+
+const spentSignatures = loadSpentSignatures();
 
 function getPaymentWallet(): string {
   return process.env.EXOCORTEX_PAYMENT_WALLET || "";
@@ -135,6 +160,7 @@ export async function verifyX402Payment(
           if (oldest) spentSignatures.delete(oldest);
         }
         spentSignatures.add(txSignature);
+        persistSpentSignature(txSignature);
         return true;
       }
     }

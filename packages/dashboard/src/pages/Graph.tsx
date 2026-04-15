@@ -142,10 +142,11 @@ export function Graph() {
     }
 
     let hoveredNodeId: string | null = null;
+    let mountedRef = true;
 
     // Init graph
     import("force-graph").then((fg2d) => {
-      if (!containerRef.current) return;
+      if (!mountedRef || !containerRef.current) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ForceGraph = (fg2d.default as any);
 
@@ -356,6 +357,7 @@ export function Graph() {
     });
 
     return () => {
+      mountedRef = false;
       if (graphRef.current) {
         graphRef.current.__manualCleanup?.();
         graphRef.current._destructor?.();

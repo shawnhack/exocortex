@@ -112,7 +112,8 @@ async function main() {
   try {
     db = new DatabaseSync(DB_PATH);
     db.exec("PRAGMA busy_timeout = 1000");
-  } catch {
+  } catch (err) {
+    process.stderr.write("session-orient: DB connection failed: " + (err instanceof Error ? err.message : String(err)) + "\n");
     return;
   }
 
@@ -530,8 +531,8 @@ async function main() {
         });
       }
     }
-  } catch {
-    // Query failures are non-critical — just skip
+  } catch (err) {
+    process.stderr.write("session-orient: " + (err instanceof Error ? err.message : String(err)) + "\n");
   }
 
   // Record access for surfaced memories (non-critical — failures don't affect output)

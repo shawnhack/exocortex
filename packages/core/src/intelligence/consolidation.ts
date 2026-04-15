@@ -776,7 +776,7 @@ export async function generateLLMSummary(
     const summary = await summarizer.summarize(contents, topic);
     if (summary && summary.length >= minLength) return summary;
   } catch {
-    // Fall through to basic summary
+    console.warn("[exocortex] AI summarizer failed, falling back to basic summary");
   }
 
   return generateBasicSummary(db, memberIds);

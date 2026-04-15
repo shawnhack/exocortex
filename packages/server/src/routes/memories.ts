@@ -15,7 +15,7 @@ import { parseIntQuery, stripEmbedding } from "../utils.js";
 const memories = new Hono();
 
 const createSchema = z.object({
-  content: z.string().min(1),
+  content: z.string().min(1).max(100000),
   content_type: z
     .enum(["text", "conversation", "note", "summary"])
     .optional(),
@@ -483,7 +483,7 @@ memories.patch("/api/settings", async (c) => {
 
 // POST /api/memories/bulk-tag — Bulk add/remove tags
 const bulkTagSchema = z.object({
-  ids: z.array(z.string()).min(1),
+  ids: z.array(z.string()).min(1).max(1000),
   add_tags: z.array(z.string()).optional(),
   remove_tags: z.array(z.string()).optional(),
 });

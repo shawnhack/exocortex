@@ -106,7 +106,7 @@ function checkConsolidationBacklog(db: DatabaseSync): HealthCheck {
     const clusters = findClusters(db);
     clusterCount = clusters.length;
   } catch {
-    return { name: "Consolidation backlog", status: "ok", message: "Could not compute clusters", value: 0, threshold: 5 };
+    return { name: "Consolidation backlog", status: "warn", message: "Could not compute clusters", value: 0, threshold: 5 };
   }
 
   if (clusterCount > 15) return { name: "Consolidation backlog", status: "critical", message: `${clusterCount} clusters awaiting consolidation`, value: clusterCount, threshold: 15 };

@@ -16,7 +16,7 @@ const importSchema = z.object({
       importance: z.number().min(0).max(1).optional(),
       tags: z.array(z.string()).optional(),
     })
-  ),
+  ).max(500),
 });
 
 // POST /api/memories/import

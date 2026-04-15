@@ -415,8 +415,12 @@ export function initializeSchema(db: DatabaseSync): void {
   db.exec("CREATE INDEX IF NOT EXISTS idx_memories_provider ON memories(provider)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_memories_session_id ON memories(session_id)");
 
-  // Backfill first-class attribution columns from legacy metadata keys.
-  backfillMemoryAttributionColumns(db);
+  // Backfill first-class attribution columns from legacy metadata keys (once).
+  const backfillDone = db.prepare("SELECT value FROM settings WHERE key = 'migrations.attribution_backfill_done'").get() as { value: string } | undefined;
+  if (!backfillDone) {
+    backfillMemoryAttributionColumns(db);
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('migrations.attribution_backfill_done', '1');
+  }
 
   // Backfill metadata flag for known system/benchmark classes.
   const metadataTagList = (
