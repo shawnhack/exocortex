@@ -91,11 +91,19 @@ export function purgeTrash(
   }
 
   const stmt = db.prepare("DELETE FROM memories WHERE id = ?");
+  const skipped: Array<{ id: string; error: string }> = [];
 
   db.exec("BEGIN");
   try {
     for (const candidate of candidates) {
-      stmt.run(candidate.id);
+      try {
+        stmt.run(candidate.id);
+      } catch (err) {
+        skipped.push({
+          id: candidate.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     db.exec("COMMIT");
   } catch (err) {
@@ -103,5 +111,13 @@ export function purgeTrash(
     throw err;
   }
 
-  return { purged: candidates.length, candidates, dry_run: false };
+  if (skipped.length > 0) {
+    console.error(
+      `[purge] ${skipped.length} candidate(s) skipped due to errors:`,
+      skipped
+    );
+  }
+
+  const purged = candidates.length - skipped.length;
+  return { purged, candidates, dry_run: false };
 }
