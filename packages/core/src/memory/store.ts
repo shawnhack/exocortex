@@ -452,6 +452,11 @@ export class MemoryStore {
         ) as { changes: number };
         if (dedupResult.changes === 0) {
           dedupInfo = null;
+        } else {
+          // Cascade deactivation to child chunks
+          this.db.prepare(
+            "UPDATE memories SET is_active = 0, updated_at = ? WHERE parent_id = ? AND is_active = 1"
+          ).run(now, dedupInfo.superseded_id);
         }
       }
 
@@ -1044,6 +1049,12 @@ export class MemoryStore {
             "UPDATE memories SET is_active = 0, superseded_by = ?, updated_at = ? WHERE id = ? AND is_active = 1"
           )
           .run(parentId, now, supersedeExistingId);
+        // Cascade deactivation to child chunks of superseded memory
+        this.db
+          .prepare(
+            "UPDATE memories SET is_active = 0, updated_at = ? WHERE parent_id = ? AND is_active = 1"
+          )
+          .run(now, supersedeExistingId);
       }
 
       insertMemory.run(
