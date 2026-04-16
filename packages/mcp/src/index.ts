@@ -10,9 +10,13 @@ const suppressProtocolNoise = process.env.EXOCORTEX_MCP_ALLOW_STDIO_LOGS !== "1"
 
 if (suppressProtocolNoise) {
   // MCP stdio transport requires stdout to be JSON-RPC only.
+  // Node's console.error writes to stderr, but core hot paths can call console.error
+  // and any stray write to stdout would corrupt the JSON-RPC stream — suppress all
+  // four console methods to be safe. Set EXOCORTEX_MCP_ALLOW_STDIO_LOGS=1 to debug.
   console.log = () => {};
   console.info = () => {};
   console.warn = () => {};
+  console.error = () => {};
 }
 
 // Eagerly initialize DB + schema + embedding model at startup

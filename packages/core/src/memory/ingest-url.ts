@@ -155,8 +155,38 @@ export async function ingestUrl(
       throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
     }
 
+    // Cap response size at 5 MB. Prevents accidentally ingesting a giant page
+    // into the DB (and OOM'ing the Node process). Stream-read with a running
+    // byte counter so we abort before buffering the whole body.
+    const MAX_BYTES = 5 * 1024 * 1024;
+    const declaredLength = parseInt(response.headers.get("content-length") ?? "", 10);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BYTES) {
+      throw new Error(`Response too large: ${declaredLength} bytes (cap ${MAX_BYTES}). URL: ${url}`);
+    }
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error(`No response body from ${url}`);
+    }
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_BYTES) {
+        await reader.cancel();
+        throw new Error(`Response exceeded ${MAX_BYTES} bytes while streaming. URL: ${url}`);
+      }
+      chunks.push(value);
+    }
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const c of chunks) {
+      merged.set(c, offset);
+      offset += c.byteLength;
+    }
     const contentType = response.headers.get("content-type") ?? "";
-    content = await response.text();
+    content = new TextDecoder("utf-8", { fatal: false }).decode(merged);
     isHtml = contentType.includes("html");
   } else {
     // Check if provided content looks like HTML

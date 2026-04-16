@@ -57,7 +57,7 @@ export function registerMemoryIngestTools(ctx: ToolRegistrationContext): void {
             );
             try {
               const absDir = path.resolve(dir);
-              if (!absDir.startsWith(resolvedRoot)) {
+              if (absDir !== resolvedRoot && !absDir.startsWith(resolvedRoot + path.sep)) {
                 return { content: [{ type: "text" as const, text: `Error: Path outside allowed root: ${absDir}` }], isError: true };
               }
               const entries = fs.readdirSync(absDir);
@@ -73,7 +73,7 @@ export function registerMemoryIngestTools(ctx: ToolRegistrationContext): void {
             }
           } else {
             const absPath = path.resolve(p);
-            if (!absPath.startsWith(resolvedRoot)) {
+            if (absPath !== resolvedRoot && !absPath.startsWith(resolvedRoot + path.sep)) {
               return { content: [{ type: "text" as const, text: `Error: Path outside allowed root: ${absPath}` }], isError: true };
             }
             resolvedPaths.push(absPath);
