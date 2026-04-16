@@ -10,9 +10,11 @@ export {
 } from "./db/schema.js";
 
 // Memory
+// MemoryRow is intentionally NOT re-exported — it models raw SQLite rows
+// (is_active: number, embedding: Uint8Array, metadata: JSON string) and should
+// only flow through rowToMemory/MemoryStore. External callers want Memory.
 export type {
   Memory,
-  MemoryRow,
   CreateMemoryInput,
   CreateMemoryResult,
   UpdateMemoryInput,

@@ -32,7 +32,7 @@ export function getWeights(db: DatabaseSync): ScoringWeights {
     usefulness: safeFloat(getSetting(db, "scoring.usefulness_weight"), 0.05),
     valence: safeFloat(getSetting(db, "scoring.valence_weight"), 0.05),
     quality: safeFloat(getSetting(db, "scoring.quality_weight"), 0.10),
-    goalGated: safeFloat(getSetting(db, "scoring.goal_gated_weight"), 0.15),
+    goalGated: safeFloat(getSetting(db, "scoring.goal_gated_weight"), 0.10),
     importance: safeFloat(getSetting(db, "scoring.importance_weight"), 0.10),
   };
 }
