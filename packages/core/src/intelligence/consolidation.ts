@@ -355,15 +355,16 @@ export async function consolidateCluster(
   const consolidationId = ulid();
   const now = new Date().toISOString().replace("T", " ").replace("Z", "");
 
-  // Embed the summary if provider available
+  // Embed the summary if provider available.
+  // Critical: if a provider is given but embedding fails, ABORT the consolidation.
+  // Without an embedding the summary is invisible to vector search, but the
+  // source memories would be archived anyway — silently making the consolidated
+  // knowledge unfindable. Better to fail loudly and retry on the next run.
+  // (No provider passed = caller explicitly opted out of embedding; that's fine.)
   let embeddingBlob: Uint8Array | null = null;
   if (embeddingProvider) {
-    try {
-      const embedding = await embeddingProvider.embed(summaryContent);
-      embeddingBlob = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
-    } catch {
-      // Non-critical — store without embedding
-    }
+    const embedding = await embeddingProvider.embed(summaryContent);
+    embeddingBlob = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
   }
 
   // Collect tags from source memories, filtering out identity tags that

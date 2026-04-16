@@ -619,8 +619,11 @@ export class MemoryStore {
       this.db
         .prepare("UPDATE memories SET quality_score = ? WHERE id = ?")
         .run(Math.round(initialQuality * 1000) / 1000, id);
-    } catch {
-      // Non-critical — quality_score can be backfilled later
+    } catch (err) {
+      // Non-critical — quality_score can be backfilled later — but track it
+      // so a recurring schema/DB issue is observable instead of silent ranking decay.
+      console.error(`[exocortex] quality_score init failed: ${err instanceof Error ? err.message : err}`);
+      incrementCounter(this.db, "memory.quality_score_init_failed");
     }
 
     const memory = await this.getById(id) as Memory;
@@ -1022,8 +1025,20 @@ export class MemoryStore {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const chunkProvider = isIndexed ? await getEmbeddingProvider().catch(() => null) : null;
+    let chunkProvider: Awaited<ReturnType<typeof getEmbeddingProvider>> | null = null;
+    if (isIndexed) {
+      try {
+        chunkProvider = await getEmbeddingProvider();
+      } catch (err) {
+        // Provider unavailable — log loudly and track. The chunks below will
+        // store with NULL embeddings, but the failure is now observable via
+        // the embedding subsystem health check + counter, instead of silent.
+        console.error(`[exocortex] Embedding provider unavailable for chunked memory: ${err instanceof Error ? err.message : err}`);
+        incrementCounter(this.db, "memory.chunk_provider_unavailable");
+      }
+    }
     const chunkData: Array<{ id: string; embedding: Uint8Array | null; hash: string }> = [];
+    let chunkEmbedFailed = 0;
     for (let i = 0; i < chunks.length; i++) {
       const chunkId = ulid();
       let chunkEmbeddingBlob: Uint8Array | null = null;
@@ -1032,12 +1047,22 @@ export class MemoryStore {
         try {
           const embedding = await chunkProvider.embed(chunks[i]);
           chunkEmbeddingBlob = new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
-        } catch {
-          // Skip embedding for this chunk
+        } catch (err) {
+          chunkEmbedFailed++;
+          console.error(`[exocortex] Chunk ${i + 1}/${chunks.length} embedding failed: ${err instanceof Error ? err.message : err}`);
+          incrementCounter(this.db, "memory.chunk_embed_failed");
         }
       }
 
       chunkData.push({ id: chunkId, embedding: chunkEmbeddingBlob, hash: computeContentHashForDb(this.db, chunks[i]) });
+    }
+    // Hard fail if every chunk failed to embed when we expected embeddings —
+    // the resulting memory would be unfindable by vector search and silently
+    // excluded from dedup candidate pools.
+    if (isIndexed && chunkProvider && chunks.length > 0 && chunkEmbedFailed === chunks.length) {
+      throw new Error(
+        `All ${chunks.length} chunks failed to embed; refusing to store an unindexable chunked memory. Check embedding provider health.`
+      );
     }
 
     // Single transaction for parent + all chunks
@@ -1387,7 +1412,13 @@ export class MemoryStore {
                 )
               );
             } catch {
-              // Skip re-embedding on failure
+              // Embedding failed during update — NULL the existing embedding
+              // rather than keep the stale one (which would point vector search
+              // at the OLD content's neighborhood, actively misleading).
+              // Maintenance pass (reembedMissing) will re-embed.
+              sets.push("embedding = ?");
+              params.push(null);
+              incrementCounter(this.db, "memory.reembed_failed");
             }
           }
         }
@@ -1406,7 +1437,11 @@ export class MemoryStore {
               )
             );
           } catch {
-            // Skip re-embedding on failure
+            // Embedding failed during update — NULL the existing embedding
+            // rather than keep the stale one. See note above.
+            sets.push("embedding = ?");
+            params.push(null);
+            incrementCounter(this.db, "memory.reembed_failed");
           }
         }
       }
