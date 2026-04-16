@@ -76,6 +76,28 @@ class CachedEmbeddingProvider implements EmbeddingProvider {
 let provider: EmbeddingProvider | null = null;
 let initPromise: Promise<EmbeddingProvider> | null = null;
 
+// Health telemetry — observable via getEmbeddingHealth() so memory_ping/health
+// checks can surface "embedding subsystem is wedged" without scraping logs.
+let initFailureCount = 0;
+let lastInitFailureAt: number | null = null;
+let lastInitFailureMessage: string | null = null;
+
+export interface EmbeddingHealth {
+  ready: boolean;
+  consecutive_init_failures: number;
+  last_failure_at: number | null;
+  last_failure_message: string | null;
+}
+
+export function getEmbeddingHealth(): EmbeddingHealth {
+  return {
+    ready: provider !== null,
+    consecutive_init_failures: initFailureCount,
+    last_failure_at: lastInitFailureAt,
+    last_failure_message: lastInitFailureMessage,
+  };
+}
+
 export async function getEmbeddingProvider(
   model?: string,
   dimensions?: number,
@@ -115,10 +137,19 @@ export async function getEmbeddingProvider(
       await p.embed("warmup");
       console.log("[exocortex] Embedding model ready.");
       provider = new CachedEmbeddingProvider(p);
+      // Reset failure tracking on successful init
+      initFailureCount = 0;
+      lastInitFailureAt = null;
+      lastInitFailureMessage = null;
       return provider;
     })().catch((err) => {
-      // Reset so next call retries instead of returning a rejected promise forever
+      // Reset so next call retries instead of returning a rejected promise forever.
+      // Track failure so health checks can surface "subsystem wedged" before the
+      // user notices retrieval quality has fallen.
       initPromise = null;
+      initFailureCount++;
+      lastInitFailureAt = Date.now();
+      lastInitFailureMessage = err instanceof Error ? err.message : String(err);
       throw err;
     });
   }
@@ -129,9 +160,15 @@ export async function getEmbeddingProvider(
 export function setEmbeddingProvider(p: EmbeddingProvider): void {
   provider = p;
   initPromise = null;
+  initFailureCount = 0;
+  lastInitFailureAt = null;
+  lastInitFailureMessage = null;
 }
 
 export function resetEmbeddingProvider(): void {
   provider = null;
   initPromise = null;
+  initFailureCount = 0;
+  lastInitFailureAt = null;
+  lastInitFailureMessage = null;
 }

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { findClusters } from "./consolidation.js";
+import { getEmbeddingHealth } from "../embedding/manager.js";
 
 export interface HealthCheck {
   name: string;
@@ -132,6 +133,25 @@ function checkGrowthStall(db: DatabaseSync): HealthCheck {
   return { name: "Growth stall", status: "ok", message: `Last memory: ${daysSince} day(s) ago`, value: daysSince, threshold: 14 };
 }
 
+function checkEmbeddingSubsystem(_db: DatabaseSync): HealthCheck {
+  const h = getEmbeddingHealth();
+  // ready=true means a provider is loaded and serving requests.
+  if (h.ready) {
+    return { name: "Embedding subsystem", status: "ok", message: "Provider ready" };
+  }
+  // Not ready, but no failures yet = warming up / never used.
+  if (h.consecutive_init_failures === 0) {
+    return { name: "Embedding subsystem", status: "ok", message: "Not yet initialized (lazy)" };
+  }
+  // Repeated init failures = wedged. Surface loud rather than silent retrieval decay.
+  const ageSec = h.last_failure_at ? Math.floor((Date.now() - h.last_failure_at) / 1000) : 0;
+  const msg = `${h.consecutive_init_failures} consecutive init failures (last ${ageSec}s ago: ${h.last_failure_message ?? "unknown"})`;
+  if (h.consecutive_init_failures >= 3) {
+    return { name: "Embedding subsystem", status: "critical", message: msg, value: h.consecutive_init_failures, threshold: 3 };
+  }
+  return { name: "Embedding subsystem", status: "warn", message: msg, value: h.consecutive_init_failures, threshold: 3 };
+}
+
 function checkStaleAccess(db: DatabaseSync): HealthCheck {
   const row = db.prepare("SELECT MAX(accessed_at) as latest FROM access_log").get() as { latest: string | null };
 
@@ -152,6 +172,7 @@ function checkStaleAccess(db: DatabaseSync): HealthCheck {
 
 export function runHealthChecks(db: DatabaseSync): HealthReport {
   const checks: HealthCheck[] = [
+    checkEmbeddingSubsystem(db),
     checkEmbeddingGap(db),
     checkTagSparsity(db),
     checkEntityOrphans(db),
