@@ -199,7 +199,7 @@ export class MemorySearch {
     const entityExpandBase = query.expanded_query
       ? `${query.query} ${query.expanded_query}`
       : query.query;
-    const expansion = this.expandQuery(entityExpandBase);
+    const expansion = this.expandQuery(entityExpandBase, aliasMap);
 
     // Build embedding text: original query + all expansion sources
     const expansionParts = [query.query];
@@ -624,10 +624,12 @@ export class MemorySearch {
       }
     }
 
-    // Log search miss if no results after scoring
-    if (page.length === 0) {
-      const maxScore = scored.length > 0 ? scored[0].score : null;
-      this.logSearchMiss(query.query, scored.length, maxScore, query);
+    // Log search miss only when scoring produced zero results.
+    // (Previously checked `page.length === 0`, which fires false positives when
+    // offset > scored.length — a paginated query that actually found results.
+    // The sentinel friction signal degrades when polluted with these.)
+    if (scored.length === 0) {
+      this.logSearchMiss(query.query, scored.length, null, query);
     }
 
     // Track co-retrieval for link building
@@ -875,7 +877,8 @@ export class MemorySearch {
   }
 
   private expandQuery(
-    query: string
+    query: string,
+    aliasMapInjected?: Record<string, string>
   ): { expandedText: string; expandedTerms: string[] } | null {
     const enabled = getSetting(this.db, "search.query_expansion");
     if (enabled !== "true") return null;
@@ -948,7 +951,9 @@ export class MemorySearch {
     }
 
     // (b) Bidirectional tag alias expansion
-    const aliasMap = getTagAliasMap(this.db);
+    // Reuse caller's aliasMap when provided to avoid a redundant DB read +
+    // JSON.parse on every search. Falls back to a fresh fetch for direct callers.
+    const aliasMap = aliasMapInjected ?? getTagAliasMap(this.db);
     const reverseMap = this.buildReverseTagAliasMap(aliasMap);
     for (const word of words) {
       // alias -> canonical
@@ -1117,19 +1122,22 @@ export class MemorySearch {
    */
   private twoPassFts(query: string, keywordBoost: number): { matches: Map<string, number>; rowids: number[] } {
     const matches = new Map<string, number>();
-    const rowids: number[] = [];
+    // Use a Set for O(1) dedup checks; the consumer wants an array for `IN (...)`,
+    // so we convert at the end. Previously this was an array with .includes() per
+    // OR result — quadratic in worst case (200 OR x 100 AND = 20k comparisons).
+    const rowidSet = new Set<number>();
 
     const cleaned = query
       .replace(/['"(){}[\]*:^~!@#$%&\\]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    if (!cleaned) return { matches, rowids };
+    if (!cleaned) return { matches, rowids: [] };
 
     const terms = cleaned.split(" ")
       .filter(Boolean)
       .filter((t) => !MemorySearch.FTS_STOPWORDS.has(t.toLowerCase()));
 
-    if (terms.length === 0) return { matches, rowids };
+    if (terms.length === 0) return { matches, rowids: [] };
 
     // Pass 1: AND query (all content words must appear)
     if (terms.length >= 3) {
@@ -1149,7 +1157,7 @@ export class MemorySearch {
             // AND matches get 1.3x precision bonus
             const score = ((maxRank - row.rank) / range) * 1.3;
             matches.set(String(row.rowid), score);
-            rowids.push(Number(row.rowid));
+            rowidSet.add(Number(row.rowid));
           }
         }
       } catch {
@@ -1174,13 +1182,13 @@ export class MemorySearch {
           const score = (maxRank - row.rank) / range;
           const existing = matches.get(String(row.rowid)) ?? 0;
           matches.set(String(row.rowid), Math.max(existing, score));
-          if (!rowids.includes(Number(row.rowid))) rowids.push(Number(row.rowid));
+          rowidSet.add(Number(row.rowid));
         }
       }
     } catch {
       // FTS can fail on unusual input
     }
 
-    return { matches, rowids };
+    return { matches, rowids: Array.from(rowidSet) };
   }
 }

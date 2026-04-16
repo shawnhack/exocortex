@@ -257,23 +257,56 @@ export class EntityStore {
   }
 
   getRelatedEntities(entityId: string): Array<{ entity: Entity; relationship: string; direction: "outgoing" | "incoming"; context: string | null }> {
-    const rels = this.getRelationships(entityId);
-    const results: Array<{ entity: Entity; relationship: string; direction: "outgoing" | "incoming"; context: string | null }> = [];
+    // Single JOIN replaces N+1 (1 query for relationships + N for related entities).
+    // Hot path: called by expandQuery() during every search and by memory_entities
+    // tool per row (50 entities x 3 rels = 150 round-trips → 1).
+    // Tags are fetched in a separate batch query, then attached.
+    const rows = this.db.prepare(`
+      SELECT
+        r.relationship,
+        r.context,
+        CASE WHEN r.source_entity_id = ? THEN 'outgoing' ELSE 'incoming' END as direction,
+        e.id, e.name, e.type, e.aliases, e.metadata, e.created_at, e.updated_at
+      FROM entity_relationships r
+      INNER JOIN entities e ON e.id = CASE WHEN r.source_entity_id = ? THEN r.target_entity_id ELSE r.source_entity_id END
+      WHERE r.source_entity_id = ? OR r.target_entity_id = ?
+    `).all(entityId, entityId, entityId, entityId) as unknown as Array<EntityRow & {
+      relationship: string;
+      context: string | null;
+      direction: "outgoing" | "incoming";
+    }>;
 
-    for (const rel of rels) {
-      if (rel.source_entity_id === entityId) {
-        const target = this.getById(rel.target_entity_id);
-        if (target) {
-          results.push({ entity: target, relationship: rel.relationship, direction: "outgoing", context: rel.context });
-        }
-      } else {
-        const source = this.getById(rel.source_entity_id);
-        if (source) {
-          results.push({ entity: source, relationship: rel.relationship, direction: "incoming", context: rel.context });
-        }
-      }
+    if (rows.length === 0) return [];
+
+    // Batch-fetch tags for all related entities in one query
+    const ids = rows.map((r) => r.id);
+    const placeholders = ids.map(() => "?").join(",");
+    const tagRows = this.db
+      .prepare(`SELECT entity_id, tag FROM entity_tags WHERE entity_id IN (${placeholders})`)
+      .all(...ids) as Array<{ entity_id: string; tag: string }>;
+    const tagMap = new Map<string, string[]>();
+    for (const { entity_id, tag } of tagRows) {
+      const arr = tagMap.get(entity_id);
+      if (arr) arr.push(tag);
+      else tagMap.set(entity_id, [tag]);
     }
 
-    return results;
+    return rows.map((row) => ({
+      entity: rowToEntity(
+        {
+          id: row.id,
+          name: row.name,
+          type: row.type,
+          aliases: row.aliases,
+          metadata: row.metadata,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+        },
+        tagMap.get(row.id) ?? []
+      ),
+      relationship: row.relationship,
+      direction: row.direction,
+      context: row.context,
+    }));
   }
 }
