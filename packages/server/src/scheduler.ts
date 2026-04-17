@@ -361,7 +361,12 @@ export function startScheduler(): void {
 
       console.log("[scheduler] Running trash purge...");
       const result = purgeTrash(db);
-      console.log(`[scheduler] Trash purge complete: ${result.purged} memories permanently deleted`);
+      // Report cascade rows separately — the parent count alone hides the
+      // real disk impact (a single parent with N chunks deletes N+1 rows).
+      const cascadeNote = result.cascaded > 0
+        ? ` (+${result.cascaded} child rows via FK cascade = ${result.total_deleted} total)`
+        : "";
+      console.log(`[scheduler] Trash purge complete: ${result.purged} parent memories permanently deleted${cascadeNote}`);
     } catch (err) {
       console.error("[scheduler] Trash purge error:", err);
       recordJobError("trash_purge", err);

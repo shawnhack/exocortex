@@ -16,7 +16,17 @@ export interface PurgeCandidate {
 }
 
 export interface PurgeResult {
+  /** Number of trash candidates directly DELETEd. */
   purged: number;
+  /**
+   * Number of additional rows removed by SQLite ON DELETE CASCADE
+   * (most commonly chunks whose parent was in the candidate set).
+   * Without this field the log line under-reports total disk impact —
+   * a single parent with 70 chunks looks like "1 purged" but is actually 71.
+   */
+  cascaded: number;
+  /** purged + cascaded — true number of memory rows removed. */
+  total_deleted: number;
   candidates: PurgeCandidate[];
   dry_run: boolean;
 }
@@ -87,8 +97,14 @@ export function purgeTrash(
   const candidates = getPurgeCandidates(db, opts);
 
   if (dryRun || candidates.length === 0) {
-    return { purged: 0, candidates, dry_run: dryRun };
+    return { purged: 0, cascaded: 0, total_deleted: 0, candidates, dry_run: dryRun };
   }
+
+  // Snapshot total row count before deletes so we can measure FK cascades
+  // (ON DELETE CASCADE on parent_id removes child chunks transparently —
+  // those rows never pass through the JS DELETE loop).
+  const countStmt = db.prepare("SELECT COUNT(*) as n FROM memories");
+  const beforeCount = (countStmt.get() as { n: number }).n;
 
   const stmt = db.prepare("DELETE FROM memories WHERE id = ?");
   const skipped: Array<{ id: string; error: string }> = [];
@@ -119,5 +135,10 @@ export function purgeTrash(
   }
 
   const purged = candidates.length - skipped.length;
-  return { purged, candidates, dry_run: false };
+  const afterCount = (countStmt.get() as { n: number }).n;
+  const total_deleted = beforeCount - afterCount;
+  // total_deleted should equal purged + cascaded; clamp at 0 to avoid weird
+  // negatives if some other process also wrote between snapshots.
+  const cascaded = Math.max(0, total_deleted - purged);
+  return { purged, cascaded, total_deleted, candidates, dry_run: false };
 }
