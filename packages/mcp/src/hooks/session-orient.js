@@ -30,7 +30,34 @@ function estimateTokens(text) {
   return Math.ceil(text.length / 4);
 }
 
-function buildContextKeywords(cwd) {
+/**
+ * ISO timestamp of the previous session-orient invocation, or null if none.
+ * Used by the cross-session diff section to scope "what changed since last
+ * time you were here." Reads from access_log entries this hook itself wrote
+ * during prior runs.
+ */
+function getLastSessionTimestamp(db) {
+  try {
+    const row = db
+      .prepare(
+        "SELECT MAX(accessed_at) as ts FROM access_log WHERE query = 'session-orient'"
+      )
+      .get();
+    return row?.ts || null;
+  } catch {
+    return null;
+  }
+}
+
+// Tags that show up in session-summary memory dumps but are too generic to
+// be useful keywords for relevance scoring (they'd match almost everything).
+const NOISE_TAGS = new Set([
+  "session-summary", "summary", "outcome", "operations",
+  "goal-progress", "goal-progress-implicit", "task-summary",
+  "run-summary", "audit-record", "bridging-memory",
+]);
+
+function buildContextKeywords(cwd, db) {
   const keywords = new Map();
   const projectName = path.basename(cwd).toLowerCase();
   keywords.set(projectName, 5);
@@ -73,6 +100,38 @@ function buildContextKeywords(cwd) {
       }
     }
   } catch {}
+
+  // Pull tags from memories created in the last 7 days. This widens the
+  // keyword pool beyond the current cwd — important for cross-repo agentic
+  // work where the cwd is just a launching pad and the actual session topic
+  // (security, clerk, auth, etc.) lives in tags from prior memories.
+  if (db) {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0];
+      const tagRows = db
+        .prepare(
+          `SELECT mt.tag, COUNT(*) as n FROM memory_tags mt
+           INNER JOIN memories m ON mt.memory_id = m.id
+           WHERE m.is_active = 1 AND m.created_at >= ?
+           GROUP BY mt.tag
+           ORDER BY n DESC
+           LIMIT 50`
+        )
+        .all(sevenDaysAgo);
+      for (const { tag, n } of tagRows) {
+        if (NOISE_TAGS.has(tag)) continue;
+        if (n < 2) continue; // require at least 2 occurrences to be a "topic"
+        const lower = tag.toLowerCase();
+        if (lower.length < 3) continue;
+        if (!keywords.has(lower)) {
+          // Weight 1-3 based on frequency, capped to not dominate cwd-derived signals
+          keywords.set(lower, Math.min(3, Math.ceil(n / 5)));
+        }
+      }
+    } catch {}
+  }
 
   return keywords;
 }
@@ -123,7 +182,125 @@ async function main() {
   const surfacedIds = new Set();
 
   try {
-    const contextKeywords = buildContextKeywords(cwd);
+    const contextKeywords = buildContextKeywords(cwd, db);
+    // Capture last-session timestamp BEFORE this run logs new access entries.
+    const lastSessionTs = getLastSessionTimestamp(db);
+
+    // -1. Action items (priority 0, pushed FIRST so it always lands at top).
+    // Surfaces memories the user explicitly tagged as needing attention next
+    // session — pending/in-progress/blocked/next-action/waiting-on. Larger
+    // excerpt cap (300 chars vs 120) because action items lose meaning when
+    // truncated to "Pending CVE fixes — STATUS UPDATE 2026-04-18 ~13:10 ET..."
+    try {
+      const actionThirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0];
+      const actionRows = db
+        .prepare(
+          `SELECT DISTINCT m.id, m.content, m.created_at,
+             GROUP_CONCAT(DISTINCT mt2.tag) as tags
+           FROM memories m
+           INNER JOIN memory_tags mt ON m.id = mt.memory_id
+           LEFT JOIN memory_tags mt2 ON m.id = mt2.memory_id
+           WHERE mt.tag IN ('pending', 'blocked', 'next-action', 'waiting-on')
+             AND m.is_active = 1
+             AND m.parent_id IS NULL
+             AND m.created_at >= ?
+           GROUP BY m.id
+           ORDER BY m.importance DESC, m.created_at DESC
+           LIMIT 5`
+        )
+        .all(actionThirtyDaysAgo);
+
+      if (actionRows.length > 0) {
+        for (const m of actionRows) surfacedIds.add(m.id);
+        const lines = actionRows.map((m) => {
+          // Pull only the action-relevant tags from the comma-separated list
+          const actionTagSet = new Set(["pending", "blocked", "next-action", "waiting-on"]);
+          const tags = (m.tags || "").split(",").filter((t) => actionTagSet.has(t));
+          const tagStr = tags.length > 0 ? ` [${tags.join(",")}]` : "";
+          const excerpt = truncate(m.content, 300);
+          const date = m.created_at.split("T")[0];
+          return `- ${excerpt}${tagStr} (${date})`;
+        });
+        candidateSections.push({
+          name: "action-items",
+          priority: 0,
+          content: `**Action items waiting on you:**\n${lines.join("\n")}`,
+        });
+      }
+    } catch {}
+
+    // -0.5. Cross-session diff (priority 0). "Since you were last here" —
+    // counts memories created since lastSessionTs, surfaces top tags + alert
+    // count + sentinel run count. Only renders if last session was 2h+ ago
+    // (otherwise it's the same session, nothing meaningful changed).
+    if (lastSessionTs) {
+      try {
+        const lastTs = new Date(lastSessionTs.replace(" ", "T") + "Z");
+        const hoursSince = (Date.now() - lastTs.getTime()) / (1000 * 60 * 60);
+        if (hoursSince >= 2) {
+          const newCountRow = db
+            .prepare(
+              `SELECT COUNT(*) as n FROM memories m
+               WHERE m.created_at > ? AND m.is_active = 1`
+            )
+            .get(lastSessionTs);
+          const newCount = newCountRow?.n || 0;
+
+          if (newCount > 0) {
+            // Top non-noise tags among the new memories
+            const topTagRows = db
+              .prepare(
+                `SELECT mt.tag, COUNT(*) as n FROM memory_tags mt
+                 INNER JOIN memories m ON mt.memory_id = m.id
+                 WHERE m.created_at > ? AND m.is_active = 1
+                 GROUP BY mt.tag ORDER BY n DESC LIMIT 10`
+              )
+              .all(lastSessionTs);
+            const topTags = topTagRows
+              .filter((r) => !NOISE_TAGS.has(r.tag) && r.n >= 2)
+              .slice(0, 5)
+              .map((r) => `${r.tag} (${r.n})`);
+
+            // Alert-tagged memories among the new ones — surface specifically
+            const alertRow = db
+              .prepare(
+                `SELECT COUNT(DISTINCT m.id) as n FROM memories m
+                 INNER JOIN memory_tags mt ON m.id = mt.memory_id
+                 WHERE mt.tag = 'alert' AND m.created_at > ? AND m.is_active = 1`
+              )
+              .get(lastSessionTs);
+            const alertCount = alertRow?.n || 0;
+
+            // Sentinel runs — count memories with sentinel:* tags
+            const sentinelRow = db
+              .prepare(
+                `SELECT COUNT(DISTINCT m.id) as n FROM memories m
+                 INNER JOIN memory_tags mt ON m.id = mt.memory_id
+                 WHERE mt.tag LIKE 'sentinel%' AND m.created_at > ? AND m.is_active = 1`
+              )
+              .get(lastSessionTs);
+            const sentinelCount = sentinelRow?.n || 0;
+
+            const hoursLabel =
+              hoursSince < 24
+                ? `${Math.round(hoursSince)}h ago`
+                : `${Math.round(hoursSince / 24)}d ago`;
+            const lines = [`- ${newCount} new memories`];
+            if (topTags.length > 0) lines.push(`- top tags: ${topTags.join(", ")}`);
+            if (alertCount > 0) lines.push(`- ⚠ ${alertCount} alert${alertCount === 1 ? "" : "s"}`);
+            if (sentinelCount > 0) lines.push(`- ${sentinelCount} sentinel job report${sentinelCount === 1 ? "" : "s"}`);
+
+            candidateSections.push({
+              name: "diff",
+              priority: 0,
+              content: `**Since last session (${hoursLabel}):**\n${lines.join("\n")}`,
+            });
+          }
+        }
+      } catch {}
+    }
 
     // 0. Soul + Identity (priority 0 — always included, never filtered by relevance)
     try {
@@ -421,39 +598,10 @@ async function main() {
       }
     }
 
-    // 6. Key entity profiles (priority 5)
-    try {
-      const entityRows = db
-        .prepare(
-          `SELECT e.id, e.name, e.metadata, COUNT(*) as link_count
-           FROM entities e
-           JOIN memory_entities me ON e.id = me.entity_id
-           JOIN memories m ON me.memory_id = m.id AND m.is_active = 1
-           GROUP BY e.id
-           HAVING COUNT(*) >= 3
-           ORDER BY link_count DESC
-           LIMIT 6`
-        )
-        .all();
-
-      if (entityRows.length > 0) {
-        const scored = entityRows.map((row) => {
-          let meta = {};
-          try { meta = JSON.parse(row.metadata || "{}"); } catch {}
-          const profile = meta.profile;
-          if (!profile) return null;
-          const relevance = scoreRelevance(`${row.name} ${profile}`, contextKeywords);
-          return { name: row.name, profile, relevance };
-        }).filter(Boolean);
-
-        scored.sort((a, b) => b.relevance - a.relevance);
-        const top = scored.filter((e) => e.relevance > 0).slice(0, 3);
-        if (top.length > 0) {
-          const lines = top.map((e) => `- **${e.name}**: ${e.profile}`);
-          candidateSections.push({ name: "entities", priority: 6, content: `**Key entities:**\n${lines.join("\n")}` });
-        }
-      }
-    } catch {}
+    // 6. Key entity profiles section — REMOVED (2026-04-18). Surfaced
+    // generic high-volume entities (Claude/React/GitHub) that were never
+    // observably consulted during sessions. Kept the entity graph intact for
+    // dashboard usage; just stopped paying its session-orient context cost.
 
     // 7. Pending contradictions count (priority 6)
     try {
@@ -471,7 +619,10 @@ async function main() {
 
     // 8. Known facts (priority 7)
     try {
-      const topKeywords = [...buildContextKeywords(cwd).entries()]
+      // Reuse already-computed contextKeywords (was double-computing without
+      // the db-derived recent-tag pool, which made facts queries less aligned
+      // with the same relevance signals decisions/threads use).
+      const topKeywords = [...contextKeywords.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
         .map(([k]) => k);
