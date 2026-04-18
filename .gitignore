@@ -21,3 +21,5 @@ benchmarks/convomem/*.json
 benchmarks/memoryagentbench/*.parquet
 benchmarks/results_*.json
 benchmarks/_bench*.db
+reports/
+wiki/
