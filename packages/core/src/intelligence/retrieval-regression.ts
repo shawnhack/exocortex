@@ -127,6 +127,56 @@ function parseIdList(raw: string | null | undefined): string[] {
  * Check which memory IDs still exist and are active in the database.
  * Handles both archived (is_active=0) and purged (fully deleted) IDs.
  */
+/**
+ * Per-query adaptive thresholds based on rolling history.
+ *
+ * Some queries are inherently volatile — high-velocity content topics where
+ * new memories naturally push out older ones every day (e.g. anything tied
+ * to active project work). Strict 80% overlap thresholds alert daily on
+ * these without indicating any real regression.
+ *
+ * For each query, we look at the last 7 runs and compute the rolling median
+ * overlap + median rank shift. If a query's historical median is meaningfully
+ * below the strict default (~95%), we treat it as volatile and adapt the
+ * thresholds to its observed pattern. A "real" regression would now alert
+ * only when today's metrics are materially worse than the rolling median.
+ *
+ * Returns null if there isn't enough history yet (<3 prior runs); caller
+ * falls back to the base thresholds.
+ */
+function getAdaptiveThresholds(
+  db: DatabaseSync,
+  query: string,
+  base: { minOverlap: number; maxAvgShift: number }
+): { minOverlap: number; maxAvgShift: number } | null {
+  const rows = db
+    .prepare(
+      `SELECT overlap_at_10, avg_rank_shift FROM retrieval_regression_runs
+       WHERE query = ?
+       ORDER BY created_at DESC
+       LIMIT 7`
+    )
+    .all(query) as Array<{ overlap_at_10: number; avg_rank_shift: number }>;
+  if (rows.length < 3) return null;
+
+  const overlaps = rows.map((r) => r.overlap_at_10).sort((a, b) => a - b);
+  const shifts = rows.map((r) => r.avg_rank_shift).sort((a, b) => a - b);
+  const medianOverlap = overlaps[Math.floor(overlaps.length / 2)];
+  const medianShift = shifts[Math.floor(shifts.length / 2)];
+
+  // Stable query — use the strict default unchanged. A regression here is
+  // unambiguous (sudden drop from a reliably-100% baseline).
+  if (medianOverlap >= 0.95) return base;
+
+  // Volatile query — adapt to observed pattern. Floor at 0.5 (half overlap is
+  // the absolute floor regardless of how chaotic the query is); add 1.5 rank
+  // shift tolerance over the rolling median (small variance expected).
+  return {
+    minOverlap: Math.max(0.5, medianOverlap - 0.15),
+    maxAvgShift: medianShift + 1.5,
+  };
+}
+
 function getLiveBaselineIds(db: DatabaseSync, ids: string[]): Set<string> {
   if (ids.length === 0) return new Set();
   const placeholders = ids.map(() => "?").join(", ");
@@ -548,10 +598,24 @@ export async function runRetrievalRegression(
       rebaselined++;
     }
 
+    // Per-query adaptive thresholds: high-velocity content topics (e.g.
+    // "PM2 process orchestration", "crypto alpha predictions") consistently
+    // see ~20% churn from new memories naturally pushing out older ones.
+    // Strict 80% overlap thresholds alert daily on these without indicating
+    // any real regression. Adapting to each query's rolling median lets us
+    // alert ONLY when today is materially worse than the query's historical
+    // pattern — actual regression — instead of normal churn for that topic.
+    const adaptive = getAdaptiveThresholds(db, queryDef.query, {
+      minOverlap: thresholds.minOverlap,
+      maxAvgShift: thresholds.maxAvgShift,
+    });
+    const effectiveMinOverlap = adaptive?.minOverlap ?? thresholds.minOverlap;
+    const effectiveMaxShift = adaptive?.maxAvgShift ?? thresholds.maxAvgShift;
+
     const isAlert =
       !shouldRebaseline &&
-      (comparison.overlap < thresholds.minOverlap ||
-        comparison.avgShift > thresholds.maxAvgShift);
+      (comparison.overlap < effectiveMinOverlap ||
+        comparison.avgShift > effectiveMaxShift);
     if (isAlert) alerts++;
 
     runInsert.run(
