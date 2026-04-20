@@ -33,19 +33,19 @@ export function createSessionState() {
   }
 
   /**
-   * Auto-mark search results as useful with a 24h per-memory cooldown.
-   * Only triggers on high-precision searches (≤5 results) to avoid inflating
-   * scores for memories that appear in every broad query.
+   * Auto-mark top-ranked search results as useful with a 24h per-memory cooldown.
+   * Only the top-N results (by rank) are credited regardless of total result count —
+   * broad queries don't inflate every hit, but focused signal still lands on the
+   * top of the result list. 24h cooldown prevents spam from repeated searches.
    */
   function autoMarkSearchUseful(ids: string[], db: DatabaseSync, maxMark: number = 3): void {
-    // Skip broad searches — only mark when results are focused
-    if (ids.length > 5) return;
     if (ids.length === 0) return;
     const now = Date.now();
     const store = new MemoryStore(db);
     let marked = 0;
-    for (const id of ids) {
-      if (marked >= maxMark) break;
+    // Only consider the top-N results — the highest-ranked matches
+    const topIds = ids.slice(0, maxMark);
+    for (const id of topIds) {
       const lastMarked = usefulCooldown.get(id);
       if (lastMarked && now - lastMarked < SEARCH_USEFULNESS_COOLDOWN) continue;
       try {

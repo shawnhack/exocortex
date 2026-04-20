@@ -703,9 +703,20 @@ export function promoteMemoryTiers(
   const dryRun = opts?.dryRun ?? false;
   const now = new Date().toISOString().slice(0, 19).replace("T", " ");
 
+  // Episodic -> Semantic: either explicit usefulness signal (useful_count >= 2)
+  // OR sustained retrieval pattern (access_count >= 5 AND age >= 7 days).
+  // The access-based path catches durable memories that weren't caught by the
+  // implicit search->get usefulness signal (e.g. surfaced via memory_context,
+  // memory_browse, or broad searches where the implicit signal doesn't credit).
+  const SEMANTIC_WHERE = `tier = 'episodic' AND is_active = 1
+    AND (
+      useful_count >= 2
+      OR (access_count >= 5 AND datetime(created_at) <= datetime('now', '-7 days'))
+    )`;
+
   if (dryRun) {
     const toSemantic = (db.prepare(
-      "SELECT COUNT(*) as c FROM memories WHERE tier = 'episodic' AND is_active = 1 AND useful_count >= 2"
+      `SELECT COUNT(*) as c FROM memories WHERE ${SEMANTIC_WHERE}`
     ).get() as { c: number }).c;
     const toProcedural = (db.prepare(
       `SELECT COUNT(*) as c FROM memories WHERE tier = 'episodic' AND is_active = 1
@@ -719,7 +730,7 @@ export function promoteMemoryTiers(
   }
 
   const r1 = db.prepare(
-    "UPDATE memories SET tier = 'semantic', updated_at = ? WHERE tier = 'episodic' AND is_active = 1 AND useful_count >= 2"
+    `UPDATE memories SET tier = 'semantic', updated_at = ? WHERE ${SEMANTIC_WHERE}`
   ).run(now) as { changes: number };
 
   const r2 = db.prepare(
