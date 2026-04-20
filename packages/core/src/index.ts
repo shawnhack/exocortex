@@ -50,6 +50,9 @@ export type { ChunkOptions } from "./memory/chunking.js";
 export { detectTemporalExpiry } from "./memory/temporal-expiry.js";
 export { rerankResults, isRerankEnabled, getRerankLimit } from "./memory/reranker.js";
 export type { RerankerProvider, RerankedResult } from "./memory/reranker.js";
+export { LocalReranker, getDefaultReranker } from "./memory/local-reranker.js";
+export { AnthropicHydeGenerator, isHydeEnabled, getDefaultHydeGenerator, generateWithCache } from "./memory/hyde.js";
+export type { HypotheticalGenerator } from "./memory/hyde.js";
 export {
   splitMarkdownSections,
   ingestMarkdownFile,

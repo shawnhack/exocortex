@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cosineSimilarity, getRRFConfig, searchFacts, getCachedProfiles, stripPrivateContent, validateStorageGate, deepContext, sanitizeContent, validateContent, redactSensitiveData, classifyTrust, detectInfluence, detectTemporalExpiry } from "@exocortex/core";
+import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cosineSimilarity, getRRFConfig, searchFacts, getCachedProfiles, stripPrivateContent, validateStorageGate, deepContext, sanitizeContent, validateContent, redactSensitiveData, classifyTrust, detectInfluence, detectTemporalExpiry, isRerankEnabled, getDefaultReranker, isHydeEnabled, getDefaultHydeGenerator, generateWithCache } from "@exocortex/core";
+import type { RerankerProvider } from "@exocortex/core";
 import type { SearchResult } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "../utils.js";
 import { expandViaLinks, buildFactsSection, buildEntityProfileSection } from "./helpers.js";
@@ -313,10 +314,37 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
 
         const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 10);
 
+        // When reranking is enabled, over-fetch candidates so the cross-encoder
+        // has a larger pool to re-order. Hybrid retrieval's top-N isn't always
+        // correctly ranked — the reranker's precision gains depend on seeing
+        // the long tail.
+        const rerankEnabled = isRerankEnabled(db);
+        const searchLimit = rerankEnabled ? Math.max(fetchLimit, 30) : fetchLimit;
+        const reranker: RerankerProvider | undefined = rerankEnabled
+          ? getDefaultReranker()
+          : undefined;
+
+        // HyDE: if enabled and the caller didn't supply an expanded_query,
+        // generate a hypothetical answer via Haiku and use it as the expansion.
+        // This boosts recall on vague queries by embedding corpus-vocabulary
+        // text instead of the literal query. Silent fallback on any failure —
+        // we never want HyDE problems to break retrieval.
+        let expandedQuery = args.expanded_query;
+        if (!expandedQuery && isHydeEnabled(db)) {
+          const hyde = getDefaultHydeGenerator(db);
+          if (hyde) {
+            try {
+              expandedQuery = await generateWithCache(hyde, args.query);
+            } catch {
+              // HyDE unavailable — fall through with original query only
+            }
+          }
+        }
+
         const results = await search.search({
           query: args.query,
-          expanded_query: args.expanded_query,
-          limit: fetchLimit,
+          expanded_query: expandedQuery,
+          limit: searchLimit,
           tags: args.tags,
           after: args.after,
           before: args.before,
@@ -326,7 +354,12 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           namespace: args.namespace,
           tier: args.tier,
           session_id: args.session_id,
-        });
+        }, reranker);
+
+        // Trim to requested limit post-rerank
+        if (rerankEnabled && results.length > fetchLimit) {
+          results.length = fetchLimit;
+        }
 
         if (results.length === 0) {
           return { content: [{ type: "text", text: "No memories found matching the query." }] };
@@ -467,11 +500,33 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           deepMeta = { iterations: deep.iterations, queries: deep.queries, gaps: deep.gaps };
         } else {
           const search = new MemorySearch(db);
+          const rerankEnabled = isRerankEnabled(db);
+          const searchLimit = rerankEnabled ? Math.max(fetchLimit, 30) : fetchLimit;
+          const reranker: RerankerProvider | undefined = rerankEnabled
+            ? getDefaultReranker()
+            : undefined;
+
+          let expandedQuery: string | undefined;
+          if (isHydeEnabled(db)) {
+            const hyde = getDefaultHydeGenerator(db);
+            if (hyde) {
+              try {
+                expandedQuery = await generateWithCache(hyde, args.topic);
+              } catch {
+                // fall through
+              }
+            }
+          }
+
           results = await search.search({
             query: args.topic,
-            limit: fetchLimit,
+            expanded_query: expandedQuery,
+            limit: searchLimit,
             namespace: args.namespace,
-          });
+          }, reranker);
+          if (rerankEnabled && results.length > fetchLimit) {
+            results.length = fetchLimit;
+          }
         }
 
         if (results.length === 0) {
