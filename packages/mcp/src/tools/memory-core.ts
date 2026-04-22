@@ -335,8 +335,12 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           if (hyde) {
             try {
               expandedQuery = await generateWithCache(hyde, args.query);
-            } catch {
-              // HyDE unavailable — fall through with original query only
+            } catch (err) {
+              // Silent retrieval fallback (so a misconfigured key doesn't break
+              // search), but log so the operator can diagnose persistent failures.
+              console.warn(
+                `HyDE expansion failed in memory_search, using literal query: ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
           }
         }
@@ -512,8 +516,10 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
             if (hyde) {
               try {
                 expandedQuery = await generateWithCache(hyde, args.topic);
-              } catch {
-                // fall through
+              } catch (err) {
+                console.warn(
+                  `HyDE expansion failed in memory_context, using literal topic: ${err instanceof Error ? err.message : String(err)}`,
+                );
               }
             }
           }

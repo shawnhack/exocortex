@@ -13,6 +13,7 @@ import {
   isHydeEnabled,
   getDefaultHydeGenerator,
   generateWithCache,
+  autoMarkTopUseful,
 } from "@exocortex/core";
 import type { RerankerProvider } from "@exocortex/core";
 import { notifyMemoryStored } from "../scheduler.js";
@@ -219,8 +220,10 @@ memories.post("/api/memories/search", async (c) => {
     if (hyde) {
       try {
         expandedQuery = await generateWithCache(hyde, parsed.data.query);
-      } catch {
-        // HyDE unavailable — proceed with original query
+      } catch (err) {
+        console.warn(
+          `HyDE expansion failed in HTTP search, using literal query: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
   }
@@ -230,6 +233,12 @@ memories.post("/api/memories/search", async (c) => {
   if (rerankEnabled && results.length > requestedLimit) {
     results.length = requestedLimit;
   }
+
+  // Mirror the MCP path: credit the top-3 results with a usefulness signal.
+  // This is what feeds tier promotion (commit 3f540b3) — without it, HTTP
+  // search clients (dashboard, REST API) never participate in the signal
+  // capture and the tier-promotion fix is partially defeated.
+  autoMarkTopUseful(db, results.map(r => r.memory.id));
 
   if (parsed.data.compact) {
     const compactResults = results.map((r) => ({

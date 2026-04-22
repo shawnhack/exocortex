@@ -596,8 +596,13 @@ export class MemorySearch {
         // Re-sort after blending
         scored.sort((a, b) => b.score - a.score || a.row.id.localeCompare(b.row.id));
         rerankApplied = true;
-      } catch {
-        // Re-ranking failure is non-critical — fall through to original order
+      } catch (err) {
+        // Re-ranking failure is non-critical — fall through to original order.
+        // Log so persistent failures (model load OOM, missing weights) are
+        // diagnosable rather than silently disabling rerank for every query.
+        console.warn(
+          `Reranker failed, falling back to hybrid score order: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
