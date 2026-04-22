@@ -23,3 +23,8 @@ benchmarks/results_*.json
 benchmarks/_bench*.db
 reports/
 wiki/
+
+# Local ad-hoc validation/benchmark artifacts (contain corpus-specific data)
+ab-results.json
+scripts/validate-reranker-hyde.mjs
+scripts/ab-test-reranker.mjs

@@ -8,7 +8,13 @@ import {
   getAllSettings,
   setSetting,
   exportData,
+  isRerankEnabled,
+  getDefaultReranker,
+  isHydeEnabled,
+  getDefaultHydeGenerator,
+  generateWithCache,
 } from "@exocortex/core";
+import type { RerankerProvider } from "@exocortex/core";
 import { notifyMemoryStored } from "../scheduler.js";
 import { parseIntQuery, stripEmbedding } from "../utils.js";
 
@@ -98,6 +104,7 @@ const searchSchema = z.object({
   compact: z.boolean().optional(),
   namespace: z.string().optional(),
   tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional(),
+  expanded_query: z.string().optional(),
 });
 
 const settingsPatchSchema = z.record(z.string(), z.string());
@@ -193,7 +200,36 @@ memories.post("/api/memories/search", async (c) => {
 
   const db = getDb();
   const search = new MemorySearch(db);
-  const results = await search.search(parsed.data);
+
+  // Mirror the MCP search path: when reranker is enabled, over-fetch
+  // candidates so the cross-encoder has a meaningful pool to re-order.
+  // When HyDE is enabled and the caller didn't supply expanded_query,
+  // generate a hypothetical answer for vector search expansion.
+  // Both fall through silently on misconfiguration / failure.
+  const rerankEnabled = isRerankEnabled(db);
+  const requestedLimit = parsed.data.limit ?? 20;
+  const fetchLimit = rerankEnabled ? Math.max(requestedLimit, 30) : requestedLimit;
+  const reranker: RerankerProvider | undefined = rerankEnabled
+    ? getDefaultReranker()
+    : undefined;
+
+  let expandedQuery = parsed.data.expanded_query;
+  if (!expandedQuery && isHydeEnabled(db)) {
+    const hyde = getDefaultHydeGenerator(db);
+    if (hyde) {
+      try {
+        expandedQuery = await generateWithCache(hyde, parsed.data.query);
+      } catch {
+        // HyDE unavailable — proceed with original query
+      }
+    }
+  }
+
+  const searchInput = { ...parsed.data, limit: fetchLimit, expanded_query: expandedQuery };
+  const results = await search.search(searchInput, reranker);
+  if (rerankEnabled && results.length > requestedLimit) {
+    results.length = requestedLimit;
+  }
 
   if (parsed.data.compact) {
     const compactResults = results.map((r) => ({
