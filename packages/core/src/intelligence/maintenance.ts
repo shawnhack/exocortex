@@ -704,14 +704,21 @@ export function promoteMemoryTiers(
   const now = new Date().toISOString().slice(0, 19).replace("T", " ");
 
   // Episodic -> Semantic: either explicit usefulness signal (useful_count >= 2)
-  // OR sustained retrieval pattern (access_count >= 5 AND age >= 7 days).
-  // The access-based path catches durable memories that weren't caught by the
-  // implicit search->get usefulness signal (e.g. surfaced via memory_context,
-  // memory_browse, or broad searches where the implicit signal doesn't credit).
+  // OR sustained retrieval pattern (access_count >= 5 AND age >= 7 days
+  // AND a quality floor — importance >= 0.3 OR at least one usefulness signal).
+  // The access-based path catches durable memories the implicit search->get
+  // signal missed (e.g. surfaced via memory_context, memory_browse, or broad
+  // searches). The quality floor prevents low-importance memories that just
+  // happened to appear in many candidate pools from being promoted to the
+  // permanent semantic tier.
   const SEMANTIC_WHERE = `tier = 'episodic' AND is_active = 1
     AND (
       useful_count >= 2
-      OR (access_count >= 5 AND datetime(created_at) <= datetime('now', '-7 days'))
+      OR (
+        access_count >= 5
+        AND datetime(created_at) <= datetime('now', '-7 days')
+        AND (importance >= 0.3 OR useful_count >= 1)
+      )
     )`;
 
   if (dryRun) {
