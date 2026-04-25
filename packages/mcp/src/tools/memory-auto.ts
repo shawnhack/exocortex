@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { MemoryStore, MemorySearch, stripPrivateContent, validateStorageGate } from "@exocortex/core";
 import { packByTokenBudget } from "../utils.js";
+import { resolveAttribution } from "./helpers.js";
 import type { ToolRegistrationContext } from "./types.js";
 
 type Intent = "store" | "search" | "context" | "forget" | "update";
@@ -68,10 +69,7 @@ export function registerMemoryAutoTool(ctx: ToolRegistrationContext): void {
               importance: args.importance ?? 0.5,
               tags: args.tags,
               namespace: args.namespace,
-              provider: args.provider ?? DEFAULT_ATTRIBUTION.provider ?? undefined,
-              model_id: args.model_id ?? DEFAULT_ATTRIBUTION.model_id ?? undefined,
-              model_name: args.model_name ?? DEFAULT_ATTRIBUTION.model_name ?? undefined,
-              agent: args.agent ?? DEFAULT_ATTRIBUTION.agent ?? undefined,
+              ...resolveAttribution(args, DEFAULT_ATTRIBUTION),
             });
 
             let msg = `Stored memory ${result.memory.id}`;

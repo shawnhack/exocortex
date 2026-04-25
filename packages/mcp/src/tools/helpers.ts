@@ -1,6 +1,65 @@
 import type { DatabaseSync } from "node:sqlite";
 import { MemoryStore, MemoryLinkStore, searchFacts, getCachedProfiles } from "@exocortex/core";
 
+// --- Attribution resolution ---
+
+interface Attribution {
+  provider?: string;
+  model_id?: string;
+  model_name?: string;
+  agent?: string;
+}
+
+/**
+ * Resolve memory attribution by combining caller-supplied args with env
+ * defaults, with one refinement over plain "args || defaults":
+ *
+ * When the agent self-reports a GENERIC model_id (no minor version, e.g.
+ * "gpt-5") and the env default is more SPECIFIC ("gpt-5.5") for the same
+ * base model family, prefer the env's precise value. This addresses agents
+ * like the codex CLI that self-attribute to the major version only, losing
+ * minor-version precision in stored memories.
+ *
+ * The env default acts as a "user-configured override" for the imprecise
+ * case, while still letting agents that DO know their precise version
+ * (e.g. "claude-opus-4-7") win over a stale env default.
+ */
+export function resolveAttribution(
+  args: Attribution,
+  defaults: Attribution,
+): Attribution {
+  const agentMid = args.model_id?.trim();
+  const envMid = defaults.model_id?.trim();
+
+  let resolvedMid = agentMid || envMid;
+  let resolvedMname = args.model_name || defaults.model_name;
+
+  if (agentMid && envMid && agentMid !== envMid) {
+    // Strip optional minor version + variant suffixes to get base family
+    const stripVersion = (s: string) =>
+      s
+        .replace(/\.\d+/g, "")
+        .replace(/-(codex|preview|alpha|beta|turbo|instant)\b.*$/, "")
+        .trim();
+    const agentBase = stripVersion(agentMid);
+    const envBase = stripVersion(envMid);
+    const envHasMinor = /\d+\.\d+/.test(envMid);
+    const agentHasMinor = /\d+\.\d+/.test(agentMid);
+
+    if (agentBase === envBase && envHasMinor && !agentHasMinor) {
+      resolvedMid = envMid;
+      resolvedMname = defaults.model_name || resolvedMname;
+    }
+  }
+
+  return {
+    provider: args.provider || defaults.provider,
+    model_id: resolvedMid,
+    model_name: resolvedMname,
+    agent: args.agent || defaults.agent,
+  };
+}
+
 // --- Per-session state: retrieval feedback tracking ---
 export const SEARCH_RESULT_TTL = 30 * 60 * 1000; // 30 minutes
 const SEARCH_USEFULNESS_COOLDOWN = 24 * 60 * 60 * 1000; // 24 hours per memory

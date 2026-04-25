@@ -3,7 +3,7 @@ import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cos
 import type { RerankerProvider } from "@exocortex/core";
 import type { SearchResult } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "../utils.js";
-import { expandViaLinks, buildFactsSection, buildEntityProfileSection } from "./helpers.js";
+import { expandViaLinks, buildFactsSection, buildEntityProfileSection, resolveAttribution } from "./helpers.js";
 import type { ToolRegistrationContext } from "./types.js";
 
 export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
@@ -102,10 +102,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           importance: args.importance,
           valence: args.valence,
           tags: args.tags,
-          provider: args.provider || DEFAULT_ATTRIBUTION.provider,
-          model_id: args.model_id || DEFAULT_ATTRIBUTION.model_id,
-          model_name: args.model_name || DEFAULT_ATTRIBUTION.model_name,
-          agent: args.agent || DEFAULT_ATTRIBUTION.agent,
+          ...resolveAttribution(args, DEFAULT_ATTRIBUTION),
           session_id: args.session_id,
           conversation_id: args.conversation_id,
           metadata: securityMeta,
