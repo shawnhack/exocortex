@@ -1,29 +1,46 @@
 import type { EmbeddingProvider } from "./types.js";
 
-// Pipeline from @huggingface/transformers — typed as `any` because the
-// FeatureExtractionPipeline union is too broad to narrow without importing
-// the full (heavy) module at parse time.
+// Pipelines from @huggingface/transformers — keyed by model name so that
+// multiple providers with different models can coexist in the same process
+// (needed for A/B tests, model migration scripts, and any future hybrid
+// embedding setup). Previously this was a single nullable singleton, which
+// silently returned the FIRST loaded model's output for any subsequent
+// provider regardless of what model was requested — a latent bug that
+// produced false A/B test results when swapping models in-process.
+//
+// Cache is keyed by model name. Each unique model loads once; subsequent
+// requests for the same model reuse the cached pipeline.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let pipeline: any = null;
+const pipelineCache = new Map<string, Promise<any>>();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getPipeline(model: string): Promise<any> {
-  if (pipeline) return pipeline;
+  const cached = pipelineCache.get(model);
+  if (cached) return cached;
 
-  const { pipeline: createPipeline, env } = await import(
-    "@huggingface/transformers"
-  );
+  const loadPromise = (async () => {
+    const { pipeline: createPipeline, env } = await import(
+      "@huggingface/transformers"
+    );
 
-  // Use local cache directory
-  const { homedir } = await import("node:os");
-  const { join } = await import("node:path");
-  env.cacheDir = process.env.EXOCORTEX_MODEL_DIR ?? join(homedir(), ".exocortex", "models");
+    // Use local cache directory
+    const { homedir } = await import("node:os");
+    const { join } = await import("node:path");
+    env.cacheDir = process.env.EXOCORTEX_MODEL_DIR ?? join(homedir(), ".exocortex", "models");
 
-  pipeline = await createPipeline("feature-extraction", model, {
-    dtype: "fp32",
-  });
+    return createPipeline("feature-extraction", model, {
+      dtype: "fp32",
+    });
+  })();
 
-  return pipeline;
+  pipelineCache.set(model, loadPromise);
+  try {
+    return await loadPromise;
+  } catch (err) {
+    // Don't cache failed loads — let next call retry from scratch
+    pipelineCache.delete(model);
+    throw err;
+  }
 }
 
 export class LocalEmbeddingProvider implements EmbeddingProvider {

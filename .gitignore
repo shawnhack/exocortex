@@ -25,6 +25,9 @@ reports/
 wiki/
 
 # Local ad-hoc validation/benchmark artifacts (contain corpus-specific data)
-ab-results.json
+ab-*.json
+ab-*.err
+ab-*.txt
 scripts/validate-reranker-hyde.mjs
 scripts/ab-test-reranker.mjs
+scripts/ab-test-embedder.mjs
