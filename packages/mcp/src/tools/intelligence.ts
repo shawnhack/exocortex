@@ -1,7 +1,8 @@
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradiction, autoDismissContradictions, recordJobOutcome, getJobHealth, getJobAlerts, runLint, refreshWiki, ingestUrl } from "@exocortex/core";
+import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradiction, autoDismissContradictions, recordJobOutcome, getJobHealth, getJobAlerts, runLint, refreshWiki, ingestUrl, buildReasoningBrief, formatReasoningBrief, isRerankEnabled, getDefaultReranker } from "@exocortex/core";
+import type { RerankerProvider } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
 export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
@@ -541,6 +542,69 @@ export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
         return { content: [{ type: "text", text: lines.join("\n") }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    }
+  );
+
+  // memory_reason — assemble a structured evidence package for the calling agent to synthesize an answer
+  server.tool(
+    "memory_reason",
+    "Assemble a structured reasoning brief from retrieved memories. Returns evidence + a synthesis rubric — the CALLING AGENT does the synthesis using its own intelligence (no nested LLM call). Use for questions like 'what's my best understanding of X', 'what should I do about Y given everything I know', 'what's the pattern in my decisions about Z'. Distinct from memory_search (gives candidates) and memory_context (gives free-form context dump): this returns a rubric-guided evidence package optimized for synthesis. After receiving the brief, follow the rubric to write a synthesis with [memory-id] inline citations and an explicit confidence calibration.",
+    {
+      question: z.string().min(1).describe("The question to reason about"),
+      retrievalLimit: z.number().int().min(1).max(50).optional().describe("How many memories to retrieve as evidence (default 15)"),
+      tags: z.array(z.string()).optional().describe("Filter retrieval by tags"),
+      after: z.string().optional().describe("Only memories after this date (YYYY-MM-DD)"),
+      before: z.string().optional().describe("Only memories before this date (YYYY-MM-DD)"),
+      tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Filter by knowledge tier"),
+      namespace: z.string().optional().describe("Filter to a specific project's memories"),
+      expanded_query: z.string().optional().describe("Optional rephrasing/expansion to improve recall"),
+      contentTruncate: z.number().int().min(100).max(4000).optional().describe("Truncate long memory content (default 800 chars)"),
+    },
+    async (args) => {
+      try {
+        const reranker: RerankerProvider | undefined = isRerankEnabled(db)
+          ? getDefaultReranker()
+          : undefined;
+        const brief = await buildReasoningBrief(db, args.question, {
+          retrievalLimit: args.retrievalLimit,
+          tags: args.tags,
+          after: args.after,
+          before: args.before,
+          tier: args.tier,
+          namespace: args.namespace,
+          expanded_query: args.expanded_query,
+          contentTruncate: args.contentTruncate,
+          reranker,
+        });
+
+        const text = formatReasoningBrief(brief);
+
+        // Implicit usefulness signal — the agent is about to reason over these memories.
+        if (brief.evidence.length > 0) {
+          checkAndSignalUsefulness(brief.evidence.slice(0, 3).map((e) => e.id), db);
+        }
+
+        return {
+          content: [{ type: "text", text }],
+          structured_content: {
+            question: brief.question,
+            evidenceCount: brief.evidenceCount,
+            evidence: brief.evidence.map((e) => ({
+              id: e.id,
+              rank: e.rank,
+              score: e.score,
+              tier: e.tier,
+              tags: e.tags,
+            })),
+            retrieval_ms: brief.retrieval_ms,
+          },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
       }
     }
   );

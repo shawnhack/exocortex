@@ -143,6 +143,8 @@ export type {
   AutoDismissResult,
 } from "./intelligence/contradictions.js";
 export { getTimeline, getTemporalStats, getMemoryLineage, getDecisionTimeline, getTemporalHierarchy } from "./intelligence/temporal.js";
+export { buildReasoningBrief, formatReasoningBrief } from "./intelligence/reasoning.js";
+export type { MemoryReasonOptions, MemoryReasonBrief, MemoryEvidence } from "./intelligence/reasoning.js";
 export type { TimelineEntry, TemporalStats, LineageEntry, DecisionTimelineEntry, HierarchyEpoch, HierarchyTheme, HierarchyEpisode, TemporalHierarchy, TemporalHierarchyOptions } from "./intelligence/temporal.js";
 export {
   getArchiveCandidates,
