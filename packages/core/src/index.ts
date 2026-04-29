@@ -145,6 +145,8 @@ export type {
 export { getTimeline, getTemporalStats, getMemoryLineage, getDecisionTimeline, getTemporalHierarchy } from "./intelligence/temporal.js";
 export { buildReasoningBrief, formatReasoningBrief } from "./intelligence/reasoning.js";
 export type { MemoryReasonOptions, MemoryReasonBrief, MemoryEvidence } from "./intelligence/reasoning.js";
+export { parseTemporalHint } from "./memory/temporal-hint.js";
+export type { TemporalHint } from "./memory/temporal-hint.js";
 export type { TimelineEntry, TemporalStats, LineageEntry, DecisionTimelineEntry, HierarchyEpoch, HierarchyTheme, HierarchyEpisode, TemporalHierarchy, TemporalHierarchyOptions } from "./intelligence/temporal.js";
 export {
   getArchiveCandidates,

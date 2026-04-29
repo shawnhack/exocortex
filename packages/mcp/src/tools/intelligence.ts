@@ -1,7 +1,7 @@
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradiction, autoDismissContradictions, recordJobOutcome, getJobHealth, getJobAlerts, runLint, refreshWiki, ingestUrl, buildReasoningBrief, formatReasoningBrief, isRerankEnabled, getDefaultReranker } from "@exocortex/core";
+import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradiction, autoDismissContradictions, recordJobOutcome, getJobHealth, getJobAlerts, runLint, refreshWiki, ingestUrl, buildReasoningBrief, formatReasoningBrief, isRerankEnabled, getDefaultReranker, parseTemporalHint } from "@exocortex/core";
 import type { RerankerProvider } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
@@ -546,6 +546,89 @@ export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
     }
   );
 
+  // memory_feedback — record retrieval-quality feedback (separate from content corrections)
+  server.tool(
+    "memory_feedback",
+    "Record explicit retrieval-quality feedback: a specific memory was perfectly relevant / wrongly retrieved / outdated / etc for a specific query. Distinct from memory_correct (which fixes content). Use this when a retrieved memory's CONTENT is fine but it was the wrong result for the query (or the right one). Feedback is stored as a tagged memory and gets read by sentinel:retrieval-remediation each Sunday alongside QA eval scorecards, feeding into autonomous remediation actions (retag, namespace fix, scoring nudge proposal, etc.).",
+    {
+      query: z.string().min(1).describe("The query that retrieved this memory"),
+      memory_id: z.string().min(1).describe("The memory ID being marked"),
+      signal: z.enum([
+        "perfect",
+        "useful",
+        "irrelevant",
+        "wrong-fit",
+        "outdated",
+        "metadata-noise",
+      ]).describe("The feedback signal: perfect=ideal hit, useful=helpful but not ideal, irrelevant=no relation to query, wrong-fit=related but wrong scope/time, outdated=was right but is now stale, metadata-noise=tag-digest noise outranked substantive content"),
+      note: z.string().optional().describe("Optional human-readable note explaining the signal"),
+    },
+    async (args) => {
+      try {
+        const store = new MemoryStore(db);
+
+        // Verify the memory exists
+        const target = await store.getById(args.memory_id);
+        if (!target) {
+          return {
+            content: [{ type: "text", text: `Memory ${args.memory_id} not found` }],
+            isError: true,
+          };
+        }
+
+        // Record feedback as a tagged memory. Importance scaled by signal:
+        // negative signals get higher importance because they drive remediation.
+        const negativeSignals = new Set(["irrelevant", "wrong-fit", "outdated", "metadata-noise"]);
+        const importance = negativeSignals.has(args.signal) ? 0.55 : 0.4;
+
+        const content = [
+          `Retrieval feedback: ${args.signal}`,
+          ``,
+          `Query: ${args.query}`,
+          `Memory: ${args.memory_id}`,
+          `Memory preview: ${target.content.slice(0, 200).replace(/\s+/g, " ")}`,
+          ...(args.note ? [``, `Note: ${args.note}`] : []),
+        ].join("\n");
+
+        const result = await store.create({
+          content,
+          content_type: "note",
+          source: "mcp",
+          importance,
+          tags: ["retrieval-feedback", `signal:${args.signal}`, "retrieval-remediation"],
+          metadata: {
+            feedback_query: args.query,
+            feedback_memory_id: args.memory_id,
+            feedback_signal: args.signal,
+          },
+          tier: "episodic",
+          // expires after 30 days — feedback is most useful when fresh; old
+          // feedback may not reflect current corpus state.
+          expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        });
+
+        // Adjust useful_count on the target memory based on signal
+        if (args.signal === "perfect" || args.signal === "useful") {
+          store.incrementUsefulCount(args.memory_id);
+        }
+        // Negative signals: don't decrement (we want monotonic counters), but
+        // the feedback memory is what the remediation sentinel will act on.
+
+        return {
+          content: [{
+            type: "text",
+            text: `Recorded ${args.signal} feedback for memory ${args.memory_id} (feedback_id: ${result.memory.id}). Will be read by sentinel:retrieval-remediation on the next Sunday cycle.`,
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
   // memory_reason — assemble a structured evidence package for the calling agent to synthesize an answer
   server.tool(
     "memory_reason",
@@ -566,11 +649,25 @@ export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
         const reranker: RerankerProvider | undefined = isRerankEnabled(db)
           ? getDefaultReranker()
           : undefined;
+
+        // Time-aware: auto-inject date window if question contains a temporal
+        // hint and caller didn't supply explicit filters. Same behavior as
+        // memory_search for consistency across the retrieval surface.
+        let afterFilter = args.after;
+        let beforeFilter = args.before;
+        if (!afterFilter && !beforeFilter) {
+          const hint = parseTemporalHint(args.question);
+          if (hint) {
+            afterFilter = hint.after;
+            beforeFilter = hint.before;
+          }
+        }
+
         const brief = await buildReasoningBrief(db, args.question, {
           retrievalLimit: args.retrievalLimit,
           tags: args.tags,
-          after: args.after,
-          before: args.before,
+          after: afterFilter,
+          before: beforeFilter,
           tier: args.tier,
           namespace: args.namespace,
           expanded_query: args.expanded_query,

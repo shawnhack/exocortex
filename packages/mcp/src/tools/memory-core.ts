@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cosineSimilarity, getRRFConfig, searchFacts, getCachedProfiles, stripPrivateContent, validateStorageGate, deepContext, sanitizeContent, validateContent, redactSensitiveData, classifyTrust, detectInfluence, detectTemporalExpiry, isRerankEnabled, getDefaultReranker, isHydeEnabled, getDefaultHydeGenerator, generateWithCache } from "@exocortex/core";
+import { MemoryStore, MemorySearch, MemoryLinkStore, GoalStore, EntityStore, cosineSimilarity, getRRFConfig, searchFacts, getCachedProfiles, stripPrivateContent, validateStorageGate, deepContext, sanitizeContent, validateContent, redactSensitiveData, classifyTrust, detectInfluence, detectTemporalExpiry, isRerankEnabled, getDefaultReranker, isHydeEnabled, getDefaultHydeGenerator, generateWithCache, parseTemporalHint } from "@exocortex/core";
 import type { RerankerProvider } from "@exocortex/core";
 import type { SearchResult } from "@exocortex/core";
 import { estimateTokens, packByTokenBudget, smartPreview } from "../utils.js";
@@ -342,13 +342,31 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           }
         }
 
+        // Time-aware retrieval: if the query contains a temporal hint
+        // ("yesterday", "this week", "in the past 3 days", etc.) AND the
+        // caller didn't supply explicit date filters, auto-inject the
+        // implied date window. Caller's explicit `after`/`before` always wins.
+        // Addresses QA-eval Q14-class failures where "yesterday's outcome"
+        // surfaced 2-month-old outcomes due to recency-blind scoring.
+        let afterFilter = args.after;
+        let beforeFilter = args.before;
+        let temporalMatched: string | undefined;
+        if (!afterFilter && !beforeFilter) {
+          const hint = parseTemporalHint(args.query);
+          if (hint) {
+            afterFilter = hint.after;
+            beforeFilter = hint.before;
+            temporalMatched = hint.matched;
+          }
+        }
+
         const results = await search.search({
           query: args.query,
           expanded_query: expandedQuery,
           limit: searchLimit,
           tags: args.tags,
-          after: args.after,
-          before: args.before,
+          after: afterFilter,
+          before: beforeFilter,
           content_type: args.content_type,
           min_score: args.min_score,
           include_metadata: args.include_metadata,
@@ -360,6 +378,28 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
         // Trim to requested limit post-rerank
         if (rerankEnabled && results.length > fetchLimit) {
           results.length = fetchLimit;
+        }
+
+        // Time-aware fallback: if the temporal hint produced zero results,
+        // retry without the date filter. Better to surface stale-but-related
+        // memories than to leave the user with nothing.
+        if (results.length === 0 && temporalMatched) {
+          const fallback = await search.search({
+            query: args.query,
+            expanded_query: expandedQuery,
+            limit: searchLimit,
+            tags: args.tags,
+            content_type: args.content_type,
+            min_score: args.min_score,
+            include_metadata: args.include_metadata,
+            namespace: args.namespace,
+            tier: args.tier,
+            session_id: args.session_id,
+          }, reranker);
+          if (rerankEnabled && fallback.length > fetchLimit) {
+            fallback.length = fetchLimit;
+          }
+          results.push(...fallback);
         }
 
         if (results.length === 0) {
