@@ -27,6 +27,7 @@ import {
   suggestTagMerges,
   applyTagMerge,
   recomputeQualityScores,
+  recordJobOutcome,
 } from "@exocortex/core";
 import type { RetrievalRegressionResult } from "@exocortex/core";
 
@@ -41,6 +42,27 @@ function recordJobError(jobName: string, err: unknown): void {
     lastError: msg.slice(0, 200),
     lastAt: new Date().toISOString(),
   });
+  try {
+    recordJobOutcome(getDb(), {
+      job_name: jobName,
+      success: false,
+      error: msg.slice(0, 2000),
+    });
+  } catch {
+    // Avoid recursive scheduler failures if the database is unavailable.
+  }
+}
+
+function recordJobSuccess(jobName: string, durationMs?: number): void {
+  try {
+    recordJobOutcome(getDb(), {
+      job_name: jobName,
+      success: true,
+      duration_ms: durationMs,
+    });
+  } catch {
+    // Non-critical observability write.
+  }
 }
 
 export function getJobErrors(): Map<string, { count: number; lastError: string; lastAt: string }> {
@@ -183,6 +205,7 @@ export function startScheduler(): void {
   // Database backup — every day at 1:30 AM (before nightly maintenance pipeline)
   schedule("30 1 * * *", () => {
     try {
+      const started = Date.now();
       console.log("[scheduler] Running database backup...");
       const db = getDb();
       const maxStr = getSetting(db, "backup.max_count");
@@ -192,6 +215,7 @@ export function startScheduler(): void {
       console.log(
         `[scheduler] Backup complete: ${result.path} (${sizeMB} MB)${result.pruned > 0 ? `, pruned ${result.pruned} old backups` : ""}`
       );
+      recordJobSuccess("backup", Date.now() - started);
 
       // Secondary copy handled externally by nexus backup-exocortex script
     } catch (err) {
@@ -204,6 +228,7 @@ export function startScheduler(): void {
   // Uses quality validation to prevent bad summaries from being persisted
   schedule("0 2 * * *", async () => {
     try {
+      const started = Date.now();
       console.log("[scheduler] Running nightly consolidation scan...");
       const db = getDb();
       const clusters = findClusters(db);
@@ -231,6 +256,7 @@ export function startScheduler(): void {
       }
 
       console.log(`[scheduler] Consolidation complete: ${consolidated}/${clusters.length} clusters consolidated${skipped > 0 ? `, ${skipped} skipped (quality check)` : ""}`);
+      recordJobSuccess("consolidation", Date.now() - started);
     } catch (err) {
       console.error("[scheduler] Consolidation error:", err);
       recordJobError("consolidation", err);
@@ -240,8 +266,10 @@ export function startScheduler(): void {
   // Contradiction detection — every day at 2:30 AM (disabled by default)
   schedule("30 2 * * *", () => {
     try {
+      const started = Date.now();
       const db = getDb();
       if (getSetting(db, "contradictions.auto_detect") !== "true") {
+        recordJobSuccess("contradiction_detection", Date.now() - started);
         return;
       }
       console.log("[scheduler] Running contradiction detection...");
@@ -260,6 +288,7 @@ export function startScheduler(): void {
           `[scheduler] Auto-dismissed ${autoDismissResult.dismissed} contradictions: ${JSON.stringify(autoDismissResult.reasons)}`
         );
       }
+      recordJobSuccess("contradiction_detection", Date.now() - started);
     } catch (err) {
       console.error("[scheduler] Contradiction detection error:", err);
       recordJobError("contradiction_detection", err);
@@ -269,12 +298,14 @@ export function startScheduler(): void {
   // Entity extraction + relationship backfill — every day at 3:00 AM
   schedule("0 3 * * *", () => {
     try {
+      const started = Date.now();
       console.log("[scheduler] Running entity backfill on unprocessed memories...");
       const db = getDb();
       const result = backfillEntities(db, { limit: 100 });
       console.log(
         `[scheduler] Entity backfill complete: ${result.memoriesProcessed} memories, ${result.entitiesCreated} entities created, ${result.entitiesLinked} links, ${result.relationshipsCreated} relationships`
       );
+      recordJobSuccess("entity_backfill", Date.now() - started);
     } catch (err) {
       console.error("[scheduler] Entity backfill error:", err);
       recordJobError("entity_backfill", err);
@@ -284,10 +315,12 @@ export function startScheduler(): void {
   // Importance auto-adjustment — every day at 3:30 AM
   schedule("30 3 * * *", () => {
     try {
+      const started = Date.now();
       const db = getDb();
       const enabled = getSetting(db, "importance.auto_adjust");
       if (enabled === "false") {
         console.log("[scheduler] Importance auto-adjust disabled, skipping");
+        recordJobSuccess("importance_adjustment", Date.now() - started);
         return;
       }
       console.log("[scheduler] Running importance auto-adjustment...");
@@ -299,6 +332,7 @@ export function startScheduler(): void {
       if (qResult.updated > 0) {
         console.log(`[scheduler] Quality scores recomputed: ${qResult.updated}/${qResult.total}`);
       }
+      recordJobSuccess("importance_adjustment", Date.now() - started);
     } catch (err) {
       console.error("[scheduler] Importance adjustment error:", err);
       recordJobError("importance_adjustment", err);
@@ -308,6 +342,7 @@ export function startScheduler(): void {
   // Stale memory archival + expired + sentinel report expiry — every day at 4:00 AM
   schedule("0 4 * * *", () => {
     try {
+      const started = Date.now();
       console.log("[scheduler] Running stale memory archival...");
       const db = getDb();
       const result = archiveStaleMemories(db);
@@ -339,6 +374,7 @@ export function startScheduler(): void {
       } catch (err) {
         console.error("[scheduler] Tag cleanup error:", err);
       }
+      recordJobSuccess("archival", Date.now() - started);
     } catch (err) {
       console.error("[scheduler] Archival error:", err);
       recordJobError("archival", err);
@@ -348,6 +384,7 @@ export function startScheduler(): void {
   // Orphan chunk cleanup + trash purge — every day at 4:30 AM
   schedule("30 4 * * *", () => {
     try {
+      const started = Date.now();
       // Deactivate active chunks whose parent has been trashed
       const db = getDb();
       const orphanResult = db.prepare(
@@ -367,6 +404,7 @@ export function startScheduler(): void {
         ? ` (+${result.cascaded} child rows via FK cascade = ${result.total_deleted} total)`
         : "";
       console.log(`[scheduler] Trash purge complete: ${result.purged} parent memories permanently deleted${cascadeNote}`);
+      recordJobSuccess("trash_purge", Date.now() - started);
     } catch (err) {
       console.error("[scheduler] Trash purge error:", err);
       recordJobError("trash_purge", err);
@@ -376,10 +414,12 @@ export function startScheduler(): void {
   // Graph densification — every day at 5:00 AM
   schedule("0 5 * * *", () => {
     try {
+      const started = Date.now();
       console.log("[scheduler] Running graph densification...");
       const db = getDb();
       const result = densifyEntityGraph(db, { minCoOccurrences: 2, limit: 500 });
       console.log(`[scheduler] Graph densification complete: ${result.pairsAnalyzed} pairs, ${result.relationshipsCreated} relationships created`);
+      recordJobSuccess("graph_densification", Date.now() - started);
     } catch (err) {
       console.error("[scheduler] Graph densification error:", err);
       recordJobError("graph_densification", err);
@@ -389,6 +429,7 @@ export function startScheduler(): void {
   // Co-retrieval link building + cleanup — every day at 5:30 AM
   schedule("30 5 * * *", () => {
     try {
+      const started = Date.now();
       console.log("[scheduler] Running co-retrieval link building...");
       const db = getDb();
       const result = buildCoRetrievalLinks(db);
@@ -405,6 +446,7 @@ export function startScheduler(): void {
       if (deleted.changes > 0) {
         console.log(`[scheduler] Cleaned up ${deleted.changes} old co-retrieval records`);
       }
+      recordJobSuccess("co_retrieval_links", Date.now() - started);
     } catch (err) {
       console.error("[scheduler] Co-retrieval link building error:", err);
       recordJobError("co_retrieval_links", err);
@@ -415,7 +457,9 @@ export function startScheduler(): void {
     getSetting(getDb(), "retrieval_regression.schedule") ?? "15 6 * * *";
   schedule(regressionSchedule, async () => {
     try {
+      const started = Date.now();
       await runScheduledRetrievalRegression();
+      recordJobSuccess("retrieval_regression", Date.now() - started);
     } catch (err) {
       console.error("[scheduler] Retrieval regression error:", err);
       recordJobError("retrieval_regression", err);

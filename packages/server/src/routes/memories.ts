@@ -14,6 +14,14 @@ import {
   getDefaultHydeGenerator,
   generateWithCache,
   autoMarkTopUseful,
+  stripPrivateContent,
+  validateStorageGate,
+  sanitizeContent,
+  validateContent,
+  redactSensitiveData,
+  classifyTrust,
+  detectInfluence,
+  detectTemporalExpiry,
 } from "@exocortex/core";
 import type { RerankerProvider } from "@exocortex/core";
 import { notifyMemoryStored } from "../scheduler.js";
@@ -53,6 +61,7 @@ const createSchema = z.object({
   benchmark: z.boolean().optional(),
   expires_at: z.string().optional(),
   namespace: z.string().optional(),
+  tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional(),
   deduplicate: z.boolean().optional(),
 });
 
@@ -130,6 +139,73 @@ function maskSensitiveSettings(settings: Record<string, string>): Record<string,
   return masked;
 }
 
+function hasTransientTag(tags: string[] | undefined): boolean {
+  if (!tags || tags.length === 0) return false;
+  const transient = new Set([
+    "run-summary",
+    "digest",
+    "sentinel",
+    "operations",
+    "session-digest",
+    "auto-digested",
+  ]);
+  return tags.some((tag) => transient.has(tag));
+}
+
+function prepareApiCreateInput(input: z.infer<typeof createSchema>): z.infer<typeof createSchema> {
+  const stripped = stripPrivateContent(input.content);
+  validateStorageGate(stripped, {
+    content_type: input.content_type,
+    is_metadata: input.is_metadata,
+    benchmark: input.benchmark,
+    tags: input.tags,
+  });
+
+  const sanitized = sanitizeContent(stripped);
+  const validation = validateContent(sanitized.content);
+  const finalContent = validation.safe
+    ? sanitized.content
+    : redactSensitiveData(sanitized.content);
+
+  const metadata: Record<string, unknown> = {
+    ...(input.metadata ?? {}),
+    trust_level: classifyTrust(
+      input.source ?? "api",
+      (input.metadata as Record<string, unknown> | undefined)?.source_url as string | undefined
+        ?? input.source_uri
+    ),
+  };
+
+  if (sanitized.threats.length > 0) {
+    metadata.threats_detected = sanitized.threats.length;
+    metadata.threat_types = [...new Set(sanitized.threats.map((t) => t.type))];
+  }
+  if (!validation.safe) {
+    metadata.redacted = true;
+  }
+
+  const influence = detectInfluence(finalContent);
+  if (influence.score > 0.1) {
+    metadata.influence_score = influence.score;
+    metadata.influence_verdict = influence.verdict;
+  }
+
+  let expiresAt = input.expires_at;
+  if (!expiresAt && hasTransientTag(input.tags)) {
+    expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+  }
+  if (!expiresAt) {
+    expiresAt = detectTemporalExpiry(finalContent) ?? undefined;
+  }
+
+  return {
+    ...input,
+    content: finalContent,
+    metadata,
+    expires_at: expiresAt,
+  };
+}
+
 // POST /api/memories — Create memory
 memories.post("/api/memories", async (c) => {
   const body = await c.req.json();
@@ -140,9 +216,15 @@ memories.post("/api/memories", async (c) => {
 
   const db = getDb();
   const store = new MemoryStore(db);
+  let prepared: z.infer<typeof createSchema>;
+  try {
+    prepared = prepareApiCreateInput(parsed.data);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+  }
   const result = await store.create({
-    ...parsed.data,
-    source: parsed.data.source ?? "api",
+    ...prepared,
+    source: prepared.source ?? "api",
   });
   if (result.dedup_action !== "skipped") {
     notifyMemoryStored();

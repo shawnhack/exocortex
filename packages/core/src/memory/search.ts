@@ -31,6 +31,11 @@ interface FtsMatch {
   rank: number;
 }
 
+function safeIntSetting(raw: string | null | undefined, fallback: number): number {
+  const parsed = parseInt(raw ?? String(fallback), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export interface SearchMissAggregate {
   query: string;
   count: number;
@@ -276,6 +281,16 @@ export class MemorySearch {
     } catch {
       // Fall back to FTS-only if embedding fails
       searchMode = "fts_only";
+    }
+
+    if (queryEmbedding) {
+      rows = this.addVectorBackfillRows({
+        rows,
+        queryEmbedding,
+        whereClause,
+        params,
+        candidateLimit,
+      });
     }
 
     // Configurable min_score threshold (query param overrides setting)
@@ -708,6 +723,70 @@ export class MemorySearch {
     }
 
     return false;
+  }
+
+  private addVectorBackfillRows(opts: {
+    rows: Array<MemoryRow & { _rowid: number }>;
+    queryEmbedding: Float32Array;
+    whereClause: string;
+    params: (string | number)[];
+    candidateLimit: number;
+  }): Array<MemoryRow & { _rowid: number }> {
+    const fullScanMax = safeIntSetting(
+      getSetting(this.db, "search.vector_full_scan_max"),
+      5000
+    );
+    const backfillLimit = safeIntSetting(
+      getSetting(this.db, "search.vector_backfill_limit"),
+      200
+    );
+    if (fullScanMax <= 0 || backfillLimit <= 0) return opts.rows;
+
+    const existingIds = new Set(opts.rows.map((r) => r.id));
+
+    try {
+      const countRow = this.db
+        .prepare(
+          `SELECT COUNT(*) as count FROM memories m WHERE ${opts.whereClause} AND m.embedding IS NOT NULL`
+        )
+        .get(...opts.params) as { count: number };
+      const totalEmbeddable = countRow.count ?? 0;
+      if (totalEmbeddable === 0) return opts.rows;
+      if (totalEmbeddable > fullScanMax) {
+        incrementCounter(this.db, "search.vector_backfill_skipped_large_pool");
+        return opts.rows;
+      }
+
+      const scanRows = this.db
+        .prepare(
+          `SELECT m.*, m.rowid as _rowid FROM memories m
+           WHERE ${opts.whereClause} AND m.embedding IS NOT NULL`
+        )
+        .all(...opts.params) as unknown as Array<MemoryRow & { _rowid: number }>;
+
+      const scoredRows: Array<{ row: MemoryRow & { _rowid: number }; score: number }> = [];
+      for (const row of scanRows) {
+        if (existingIds.has(row.id) || !row.embedding) continue;
+        const bytes = row.embedding as unknown as Uint8Array;
+        const memEmbedding = new Float32Array(new Uint8Array(bytes).buffer);
+        const score = cosineSimilarity(opts.queryEmbedding, memEmbedding);
+        if (score > 0) scoredRows.push({ row, score });
+      }
+
+      if (scoredRows.length === 0) return opts.rows;
+
+      scoredRows.sort((a, b) => b.score - a.score || a.row.id.localeCompare(b.row.id));
+      const maxAdd = Math.min(backfillLimit, Math.max(backfillLimit, opts.candidateLimit));
+      const additions = scoredRows.slice(0, maxAdd).map((s) => s.row);
+      if (additions.length > 0) {
+        incrementCounter(this.db, "search.vector_backfill_candidates", additions.length);
+      }
+      return [...opts.rows, ...additions];
+    } catch (err) {
+      console.warn("[search] Vector backfill failed:", (err as Error).message);
+      incrementCounter(this.db, "search.vector_backfill_failed");
+      return opts.rows;
+    }
   }
 
   private logSearchMiss(

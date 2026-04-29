@@ -241,6 +241,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "reinforcement.link_boost": "0.005",
   "search.score_gap_ratio": "0.15",
   "search.quality_floor": "0.08",
+  "search.vector_full_scan_max": "5000",
+  "search.vector_backfill_limit": "200",
 };
 
 function toNormalizedString(value: unknown): string | null {
