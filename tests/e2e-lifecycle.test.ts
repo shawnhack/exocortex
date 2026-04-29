@@ -116,7 +116,7 @@ describe("lifecycle e2e", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        content: `Initial lifecycle content ${token}`,
+        content: `Initial lifecycle content ${token} — full end-to-end test fixture exercising create, search, update, archive, restore, export, and import paths against the running server with realistic payload length.`,
         content_type: "note",
         source: "api",
         tags: ["e2e", "lifecycle"],

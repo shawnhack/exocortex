@@ -119,7 +119,7 @@ describe("server routes", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        content: "Regression handling in production system",
+        content: "Regression handling in production system — covers anomaly detection, alerting thresholds, dashboard wiring, and the rollback playbook used when retrieval quality drifts past acceptable bounds.",
         tags: ["search"],
       }),
     });
