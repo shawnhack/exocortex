@@ -118,6 +118,110 @@ export function registerWikiCompileTools(ctx: ToolRegistrationContext): void {
   );
 
   server.tool(
+    "wiki_append_article",
+    "Append or replace a dated section in a journal-style wiki article. " +
+    "Idempotent — calling with the same section_heading replaces that section " +
+    "rather than duplicating it. Use for monthly accumulation files like " +
+    "'Research/2026-05' or 'Decisions/2026-05'. Most-recent sections appear " +
+    "first in the file (reverse-chronological).",
+    {
+      slug: z.string().describe("Article slug, may contain subfolders (e.g. 'Research/2026-05')"),
+      section_heading: z.string().describe("Section heading starting with '## ' (e.g. '## 2026-05-07' or '## Week of 2026-05-10'). Used as the idempotence key — same heading replaces the existing section."),
+      content: z.string().describe("Section body content (markdown, without the heading itself)"),
+      wiki_path: z.string().optional().describe(`Wiki directory (default: ${DEFAULT_WIKI_PATH})`),
+      max_sections: z.number().min(1).optional().describe("Optional cap; if the file would exceed this many sections after the operation, oldest sections are trimmed"),
+    },
+    async (args) => {
+      try {
+        const wikiDir = args.wiki_path ?? DEFAULT_WIKI_PATH;
+        const filePath = path.resolve(wikiDir, `${args.slug}.md`);
+        const resolvedDir = path.resolve(wikiDir) + path.sep;
+
+        if (!filePath.startsWith(resolvedDir)) {
+          return { content: [{ type: "text", text: "Error: slug escapes wiki directory (use forward-slash subfolders only, no '..' segments)" }], isError: true };
+        }
+
+        if (!/^##\s+\S/.test(args.section_heading)) {
+          return { content: [{ type: "text", text: "Error: section_heading must start with '## ' followed by a label (e.g. '## 2026-05-07')" }], isError: true };
+        }
+
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+        const today = new Date().toISOString().slice(0, 10);
+        let frontmatter = "";
+        let title = "";
+        let body = "";
+
+        if (fs.existsSync(filePath)) {
+          const existing = fs.readFileSync(filePath, "utf-8");
+          const fmMatch = existing.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n+/);
+          if (fmMatch) {
+            frontmatter = fmMatch[0].replace(/(updated:\s*)[^\r\n]+/, `$1${today}`);
+            body = existing.slice(fmMatch[0].length);
+          } else {
+            body = existing;
+          }
+          const titleMatch = body.match(/^#\s+[^\r\n]+\r?\n+/);
+          if (titleMatch) {
+            title = titleMatch[0];
+            body = body.slice(titleMatch[0].length);
+          }
+        } else {
+          const baseName = args.slug.split('/').pop() ?? args.slug;
+          frontmatter = `---\ntype: journal\nupdated: ${today}\n---\n\n`;
+          title = `# ${baseName}\n\n`;
+          body = "";
+        }
+
+        // Locate the start index of every '## ' heading line in body using matchAll
+        const headingMatches = Array.from(body.matchAll(/^##\s+[^\r\n]*$/gm));
+        const sectionStarts: number[] = headingMatches.map((m) => m.index ?? 0);
+
+        type Section = { heading: string; content: string };
+        const sections: Section[] = [];
+        for (let i = 0; i < sectionStarts.length; i++) {
+          const start = sectionStarts[i];
+          const end = i + 1 < sectionStarts.length ? sectionStarts[i + 1] : body.length;
+          const chunk = body.slice(start, end);
+          const nl = chunk.indexOf('\n');
+          const heading = (nl === -1 ? chunk : chunk.slice(0, nl)).trim();
+          const content = (nl === -1 ? "" : chunk.slice(nl + 1)).replace(/\s+$/, '');
+          sections.push({ heading, content });
+        }
+
+        const newSection: Section = {
+          heading: args.section_heading.trim(),
+          content: args.content.replace(/\s+$/, ''),
+        };
+
+        const existingIdx = sections.findIndex((s) => s.heading === newSection.heading);
+        if (existingIdx >= 0) {
+          sections.splice(existingIdx, 1);
+        }
+        // Most-recent first (reverse-chronological journal)
+        sections.unshift(newSection);
+
+        if (args.max_sections && sections.length > args.max_sections) {
+          sections.length = args.max_sections;
+        }
+
+        const newBody = sections.map((s) => `${s.heading}\n${s.content}`).join('\n\n') + '\n';
+        const finalContent = frontmatter + title + newBody;
+        fs.writeFileSync(filePath, finalContent, "utf-8");
+
+        const replaced = existingIdx >= 0;
+        const wordCount = finalContent.split(/\s+/).length;
+        return {
+          content: [{ type: "text", text: `${replaced ? "Replaced" : "Appended"} section "${newSection.heading}" in ${args.slug}.md (${sections.length} sections, ${wordCount} words total)` }],
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text", text: `Append failed: ${msg}` }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
     "memory_security_audit",
     "Run a behavioral security audit on the memory store. " +
     "Detects: bulk external ingestion, high-influence external content, " +
