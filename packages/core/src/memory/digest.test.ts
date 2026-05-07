@@ -82,6 +82,19 @@ describe("digestTranscript", () => {
     expect(result.actions[1].summary).toBe("Edit /app/src/bar.ts");
   });
 
+  it("detects project from a single-file session", async () => {
+    // Regression: the LCP algorithm assumes paths.length >= 2. With one path
+    // the prefix would be the full file path and the last segment would be
+    // the filename ("index.ts") rather than the project directory.
+    const p = tmpFile([
+      assistantEntry([toolUse("Edit", { file_path: "/home/user/soloproject/src/index.ts", old_string: "a", new_string: "b" })]),
+    ]);
+    files.push(p);
+
+    const result = await digestTranscript(p);
+    expect(result.project).toBe("soloproject");
+  });
+
   it("detects project from file paths", async () => {
     const p = tmpFile([
       assistantEntry([toolUse("Edit", { file_path: "/home/user/myproject/src/a.ts", old_string: "a", new_string: "b" })]),
