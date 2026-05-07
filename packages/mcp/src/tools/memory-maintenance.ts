@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, getEmbeddingProvider, getArchiveCandidates, archiveStaleMemories, adjustImportance, findClusters, consolidateCluster, generateBasicSummary, validateSummary, autoConsolidate, applyCommunityAwareFiltering, runHealthChecks, getSearchMisses, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, recomputeEntityProfiles, recomputeQualityScores, promoteMemoryTiers } from "@exocortex/core";
+import { MemoryStore, MemorySearch, MemoryLinkStore, EntityStore, getEmbeddingProvider, getArchiveCandidates, archiveStaleMemories, adjustImportance, findClusters, consolidateCluster, generateBasicSummary, validateSummary, autoConsolidate, applyCommunityAwareFiltering, runHealthChecks, getSearchMisses, getSearchMissRepairSuggestions, reembedMissing, reembedAll, backfillEntities, recalibrateImportance, tuneWeights, getMemoryLineage, getDecisionTimeline, densifyEntityGraph, buildCoRetrievalLinks, suggestTagMerges, applyTagMerge, getSetting, getQualityDistribution, recomputeEntityProfiles, recomputeQualityScores, promoteMemoryTiers } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
 export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): void {
@@ -121,6 +121,20 @@ export function registerMemoryMaintenanceTools(ctx: ToolRegistrationContext): vo
             for (const m of misses) {
               const scoreStr = m.avg_max_score !== null ? `, avg max score: ${m.avg_max_score.toFixed(3)}` : "";
               parts.push(`  "${m.query}" — ${m.count} miss(es)${scoreStr}, last: ${m.last_seen}`);
+            }
+          }
+        } catch {
+          // Non-critical
+        }
+
+        try {
+          const repairs = getSearchMissRepairSuggestions(db, { limit: 5, sinceDays: 7 });
+          if (repairs.length > 0) {
+            parts.push(`\nSearch miss repair suggestions:`);
+            for (const repair of repairs) {
+              const first = repair.suggestions[0];
+              if (!first) continue;
+              parts.push(`  [${repair.severity}] "${repair.query}" — ${first.type}: ${first.rationale}`);
             }
           }
         } catch {

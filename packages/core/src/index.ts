@@ -26,8 +26,8 @@ export type {
   MemoryTier,
 } from "./memory/types.js";
 export { MemoryStore, stripPrivateContent, validateStorageGate } from "./memory/store.js";
-export { MemorySearch, getSearchMisses } from "./memory/search.js";
-export type { SearchMissAggregate } from "./memory/search.js";
+export { MemorySearch, getSearchMisses, getSearchMissRepairSuggestions } from "./memory/search.js";
+export type { SearchMissAggregate, SearchMissRepairSuggestion } from "./memory/search.js";
 export { autoGenerateTags } from "./memory/auto-tags.js";
 export { generateKeywords } from "./memory/keywords.js";
 export {

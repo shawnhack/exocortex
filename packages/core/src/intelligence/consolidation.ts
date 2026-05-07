@@ -74,6 +74,11 @@ export function findClusters(
       `SELECT id, content, embedding, created_at${bucketExpr} FROM memories
        WHERE is_active = 1 AND embedding IS NOT NULL AND parent_id IS NULL
          AND (metadata IS NULL OR json_extract(metadata, '$.immutable') IS NOT 1)
+         AND id NOT IN (
+           SELECT memory_id FROM memory_tags
+           WHERE tag LIKE 'run-token:%'
+              OR tag IN ('benchmark-artifact', 'golden-queries', 'retrieval-regression')
+         )
        ORDER BY created_at DESC LIMIT ?`
     )
     .all(maxMemories) as unknown as (MemoryRow & { bucket?: string })[];
@@ -351,6 +356,23 @@ export async function consolidateCluster(
   summaryContent: string,
   embeddingProvider?: EmbeddingProvider
 ): Promise<string> {
+  if (cluster.memberIds.length > 0) {
+    const placeholders = cluster.memberIds.map(() => "?").join(",");
+    const protectedRows = db
+      .prepare(
+        `SELECT DISTINCT tag FROM memory_tags
+         WHERE memory_id IN (${placeholders})
+           AND (tag LIKE 'run-token:%'
+                OR tag IN ('benchmark-artifact', 'golden-queries', 'retrieval-regression'))`
+      )
+      .all(...cluster.memberIds) as Array<{ tag: string }>;
+    if (protectedRows.length > 0) {
+      throw new Error(
+        `Refusing to consolidate cluster with protected tags: ${protectedRows.map((r) => r.tag).join(", ")}`
+      );
+    }
+  }
+
   const summaryId = ulid();
   const consolidationId = ulid();
   const now = new Date().toISOString().replace("T", " ").replace("Z", "");

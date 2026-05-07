@@ -345,9 +345,9 @@ describe("scoring", () => {
     });
 
     it("should approach saturation around count=8", () => {
-      // Formula: log(1+n)/log(1+16) — saturates at 16, not 8
-      // usefulnessScore(8) = log(9)/log(17) ≈ 0.776
-      expect(usefulnessScore(8)).toBeCloseTo(0.78, 1);
+      // Formula: log(1+n)/log(1+12) — saturates at 12, not 8
+      // usefulnessScore(8) = log(9)/log(13) ≈ 0.857
+      expect(usefulnessScore(8)).toBeCloseTo(0.86, 1);
     });
 
     it("should increase monotonically", () => {

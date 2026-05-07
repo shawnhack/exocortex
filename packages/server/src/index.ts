@@ -183,6 +183,14 @@ export function createApp(): Hono {
             ".ico": "image/x-icon",
             ".json": "application/json",
             ".webmanifest": "application/manifest+json",
+            ".html": "text/html; charset=UTF-8",
+            ".css": "text/css; charset=UTF-8",
+            ".js": "application/javascript; charset=UTF-8",
+            ".mjs": "application/javascript; charset=UTF-8",
+            ".map": "application/json",
+            ".txt": "text/plain; charset=UTF-8",
+            ".woff": "font/woff",
+            ".woff2": "font/woff2",
           };
           const contentType = mimeTypes[ext] || "application/octet-stream";
           const content = fs.readFileSync(filePath);
@@ -192,14 +200,27 @@ export function createApp(): Hono {
       await next();
     });
 
-    // SPA fallback: serve index.html for non-API routes (cached at startup)
+    // SPA fallback: serve index.html for non-API routes.
+    // Read from disk per-request rather than caching at startup — the entry
+    // HTML is the only file that knows the current content-hashed bundle
+    // names, and caching it forces a server restart after every dashboard
+    // rebuild (which silently breaks the UI: the cached HTML references
+    // bundles that no longer exist, the SPA fallback returns this same HTML
+    // with text/html MIME, and the browser refuses to execute it as JS).
+    // Cost: one ~1KB disk read per page load. Filesystem cache makes this
+    // essentially free.
     const indexPath = path.join(dashboardDist, "index.html");
-    const indexHtml = fs.existsSync(indexPath)
-      ? fs.readFileSync(indexPath, "utf-8")
-      : null;
     app.get("*", (c) => {
-      if (indexHtml) return c.html(indexHtml);
-      return c.text("Dashboard not built. Run: pnpm --filter @exocortex/dashboard build", 404);
+      if (!fs.existsSync(indexPath)) {
+        return c.text("Dashboard not built. Run: pnpm --filter @exocortex/dashboard build", 404);
+      }
+      const indexHtml = fs.readFileSync(indexPath, "utf-8");
+      // Force browsers to always revalidate the SPA entry. Bundle assets
+      // under /assets/* are content-hashed and stay aggressively cached;
+      // the entry HTML must stay fresh so it always points at the current
+      // bundle hashes after a rebuild.
+      c.header("Cache-Control", "no-store, must-revalidate");
+      return c.html(indexHtml);
     });
   }
 

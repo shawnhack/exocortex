@@ -13,6 +13,7 @@ import {
   suggestTagMerges,
   getTagAliasMap,
   getSearchMisses,
+  getSearchMissRepairSuggestions,
   getQueryOutcomes,
 } from "@exocortex/core";
 import { parseIntQuery } from "../utils.js";
@@ -135,6 +136,14 @@ analytics.get("/api/analytics/knowledge-gaps", (c) => {
       severity: m.count >= 10 ? "critical" : m.count >= 5 ? "warning" : "info",
     }));
   return c.json(gaps);
+});
+
+analytics.get("/api/analytics/search-miss-repairs", (c) => {
+  const minCount = parseIntQuery(c.req.query("min_count"), 3, 1, 100);
+  const days = parseIntQuery(c.req.query("days"), 7, 1, 90);
+  const limit = parseIntQuery(c.req.query("limit"), 10, 1, 100);
+  const db = getDb();
+  return c.json(getSearchMissRepairSuggestions(db, { limit, sinceDays: days, minCount }));
 });
 
 // Query outcome analytics

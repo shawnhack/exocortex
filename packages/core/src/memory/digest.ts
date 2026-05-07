@@ -52,6 +52,16 @@ interface ToolUseBlock {
   input: Record<string, unknown>;
 }
 
+interface CodexItem {
+  type?: string;
+  role?: string;
+  name?: string;
+  arguments?: string | Record<string, unknown>;
+  input?: Record<string, unknown>;
+  text?: string;
+  content?: Array<{ type?: string; text?: string }>;
+}
+
 function extractAction(block: ToolUseBlock): DigestAction | null {
   const name = block.name;
   const input = block.input ?? {};
@@ -104,6 +114,91 @@ function extractAction(block: ToolUseBlock): DigestAction | null {
   }
 }
 
+function parseToolArguments(raw: unknown): Record<string, unknown> {
+  if (!raw) return {};
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw !== "string") return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // fall through
+  }
+  return {};
+}
+
+function extractPatchPaths(patchText: string): string[] {
+  const paths = new Set<string>();
+  for (const line of patchText.split(/\r?\n/)) {
+    const match = line.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/);
+    if (match?.[1]) paths.add(match[1].trim());
+  }
+  return Array.from(paths);
+}
+
+function extractCodexAction(item: CodexItem): DigestAction | null {
+  const rawName = item.name ?? "";
+  if (!rawName) return null;
+  const name = rawName.replace(/^functions\./, "");
+  if (name.startsWith("mcp__exocortex__")) return null;
+
+  const input = parseToolArguments(item.arguments ?? item.input);
+
+  switch (name) {
+    case "shell_command":
+    case "exec_command": {
+      const cmd = String(input.command ?? input.cmd ?? "").substring(0, 150);
+      return cmd ? { tool: "Bash", summary: `Bash: ${cmd}` } : null;
+    }
+    case "apply_patch": {
+      const patchText = String(input.patch ?? input.input ?? item.arguments ?? "");
+      const paths = extractPatchPaths(patchText);
+      return {
+        tool: "Edit",
+        summary: paths.length > 0 ? `Apply patch: ${paths.join(", ")}` : "Apply patch",
+        file_path: paths[0],
+      };
+    }
+    case "write":
+    case "Write":
+      return {
+        tool: "Write",
+        summary: `Write ${input.file_path ?? input.path ?? "unknown"}`,
+        file_path: (input.file_path ?? input.path) as string | undefined,
+      };
+    case "edit":
+    case "Edit":
+      return {
+        tool: "Edit",
+        summary: `Edit ${input.file_path ?? input.path ?? "unknown"}`,
+        file_path: (input.file_path ?? input.path) as string | undefined,
+      };
+    case "web.run":
+    case "search_query":
+      return { tool: "WebSearch", summary: "Web search" };
+    default:
+      if (SKIP_TOOLS.has(name)) return null;
+      return { tool: name, summary: name };
+  }
+}
+
+function extractCodexAssistantText(item: CodexItem): string[] {
+  const texts: string[] = [];
+  if (item.text) texts.push(item.text);
+  if (Array.isArray(item.content)) {
+    for (const block of item.content) {
+      if ((block.type === "output_text" || block.type === "text") && block.text) {
+        texts.push(block.text);
+      }
+    }
+  }
+  return texts;
+}
+
 /** Text blocks that are just tool narration — skip for fact extraction */
 const NOISE_PATTERNS = [
   /^(let me|i'll|i will|now i|going to)\b.{0,80}$/i,           // tool intent announcements
@@ -142,8 +237,14 @@ function detectProject(actions: DigestAction[]): string | null {
   // Normalize to forward slashes
   const normalized = paths.map((p) => p.replace(/\\/g, "/"));
 
-  // Find longest common prefix
-  let prefix = normalized[0];
+  // Find longest common prefix.
+  // Special case: a single path has no "common prefix" beyond itself, so the
+  // LCP would be the full file path and the last segment would be the
+  // filename rather than the project. Use the file's parent directory as the
+  // prefix so the segment-extraction logic finds a real directory name.
+  let prefix = normalized.length === 1
+    ? normalized[0].substring(0, Math.max(0, normalized[0].lastIndexOf("/")))
+    : normalized[0];
   for (let i = 1; i < normalized.length; i++) {
     while (!normalized[i].startsWith(prefix)) {
       const slash = prefix.lastIndexOf("/");
@@ -260,10 +361,33 @@ export async function digestTranscript(
     let entry: {
       type: string;
       message?: { content?: unknown[] };
+      item?: CodexItem;
     };
     try {
       entry = JSON.parse(line);
     } catch {
+      continue;
+    }
+
+    if (entry.type === "response_item" || entry.type === "item.completed") {
+      const item = entry.item;
+      if (!item) continue;
+
+      if (
+        item.type === "function_call" ||
+        item.type === "tool_call" ||
+        item.type === "local_shell_call"
+      ) {
+        const action = extractCodexAction(item);
+        if (action) actions.push(action);
+      }
+
+      if (item.role === "assistant" || item.type === "message") {
+        for (const text of extractCodexAssistantText(item)) {
+          if (!isNoiseText(text)) assistantTexts.push(text);
+        }
+      }
+
       continue;
     }
 

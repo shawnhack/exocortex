@@ -243,6 +243,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   "search.quality_floor": "0.08",
   "search.vector_full_scan_max": "5000",
   "search.vector_backfill_limit": "200",
+  "search.miss_repair_min_count": "3",
 };
 
 function toNormalizedString(value: unknown): string | null {

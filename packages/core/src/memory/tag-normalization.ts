@@ -117,6 +117,16 @@ export interface TagMergeSuggestion {
   coOccurrence: number;
 }
 
+function isProtectedTag(tag: string): boolean {
+  return (
+    tag.startsWith("run-token:") ||
+    tag.startsWith("session:") ||
+    tag.startsWith("source:") ||
+    /^\d{4}-\d{2}-\d{2}/.test(tag) ||
+    tag === "openapi"
+  );
+}
+
 /**
  * Pairwise comparison of tags with count >= minCount.
  * Returns pairs with similarity >= threshold.
@@ -143,6 +153,7 @@ export function suggestTagMerges(
     for (let j = i + 1; j < tagRows.length; j++) {
       const a = tagRows[i];
       const b = tagRows[j];
+      if (isProtectedTag(a.tag) || isProtectedTag(b.tag)) continue;
       const sim = stringSimilarity(a.tag, b.tag);
       if (sim >= minSimilarity && sim < 1) {
         const [from, to] = a.cnt >= b.cnt ? [b, a] : [a, b];
@@ -183,6 +194,9 @@ export function applyTagMerge(
   const from = canonicalize(fromTag);
   const to = canonicalize(toTag);
   if (!from || !to || from === to) return { updated: 0 };
+  if (isProtectedTag(from) || isProtectedTag(to)) {
+    throw new Error(`Refusing to merge protected tag "${from}" into "${to}"`);
+  }
 
   db.exec("BEGIN");
   try {
@@ -271,4 +285,3 @@ export function canonicalizeTags(
 
   return { tags: out, unmapped };
 }
-

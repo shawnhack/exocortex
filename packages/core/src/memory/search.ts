@@ -20,7 +20,7 @@ import {
 import { EntityStore } from "../entities/store.js";
 import { GoalStore } from "../goals/store.js";
 import { MemoryLinkStore } from "./links.js";
-import { getTagAliasMap, normalizeTags } from "./tag-normalization.js";
+import { getTagAliasMap, normalizeTags, stringSimilarity } from "./tag-normalization.js";
 import { getMetadataTags } from "./metadata-classification.js";
 import { incrementCounter } from "../observability/counters.js";
 import type { RerankerProvider } from "./reranker.js";
@@ -41,6 +41,19 @@ export interface SearchMissAggregate {
   count: number;
   avg_max_score: number | null;
   last_seen: string;
+}
+
+export interface SearchMissRepairSuggestion {
+  query: string;
+  count: number;
+  last_seen: string;
+  severity: "info" | "warning" | "critical";
+  suggestions: Array<{
+    type: "tag_alias" | "bridge_memory" | "query_expansion";
+    confidence: number;
+    rationale: string;
+    data?: Record<string, unknown>;
+  }>;
 }
 
 export function getSearchMisses(
@@ -64,6 +77,103 @@ export function getSearchMisses(
        LIMIT ?`
     )
     .all(since, limit) as unknown as SearchMissAggregate[];
+}
+
+function normalizeMissToken(token: string): string {
+  return token
+    .toLowerCase()
+    .replace(/[^a-z0-9.+#-]+/g, "")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function getSearchMissRepairSuggestions(
+  db: DatabaseSync,
+  opts?: { limit?: number; sinceDays?: number; minCount?: number }
+): SearchMissRepairSuggestion[] {
+  const limit = opts?.limit ?? 10;
+  const sinceDays = opts?.sinceDays ?? 7;
+  const minCountSetting = parseInt(getSetting(db, "search.miss_repair_min_count") ?? "3", 10);
+  const minCount = opts?.minCount ?? (Number.isFinite(minCountSetting) ? minCountSetting : 3);
+  const misses = getSearchMisses(db, limit, sinceDays).filter((m) => m.count >= minCount);
+  if (misses.length === 0) return [];
+
+  const tagRows = db
+    .prepare(
+      `SELECT tag, COUNT(*) as count
+       FROM memory_tags
+       GROUP BY tag
+       HAVING COUNT(*) >= 2
+       ORDER BY count DESC
+       LIMIT 500`
+    )
+    .all() as Array<{ tag: string; count: number }>;
+
+  const stop = new Set([
+    "the", "and", "for", "with", "that", "this", "from", "into", "what",
+    "know", "about", "memory", "memories", "query", "search",
+  ]);
+
+  return misses.map((miss) => {
+    const tokens = miss.query
+      .split(/[\s/_]+/)
+      .map(normalizeMissToken)
+      .filter((t) => t.length >= 3 && !stop.has(t));
+
+    const suggestions: SearchMissRepairSuggestion["suggestions"] = [];
+    const aliasCandidates: Array<{ from: string; to: string; similarity: number; count: number }> = [];
+
+    for (const token of tokens) {
+      for (const tag of tagRows) {
+        if (token === tag.tag) continue;
+        const similarity = stringSimilarity(token, tag.tag);
+        const contains = tag.tag.includes(token) || token.includes(tag.tag);
+        if (similarity >= 0.82 || (contains && Math.min(token.length, tag.tag.length) >= 5)) {
+          aliasCandidates.push({
+            from: token,
+            to: tag.tag,
+            similarity: Math.round(similarity * 1000) / 1000,
+            count: tag.count,
+          });
+        }
+      }
+    }
+
+    aliasCandidates
+      .sort((a, b) => b.similarity - a.similarity || b.count - a.count)
+      .slice(0, 3)
+      .forEach((candidate) => {
+        suggestions.push({
+          type: "tag_alias",
+          confidence: candidate.similarity,
+          rationale: `Map query term "${candidate.from}" to existing tag "${candidate.to}".`,
+          data: candidate,
+        });
+      });
+
+    if (tokens.length >= 2) {
+      suggestions.push({
+        type: "bridge_memory",
+        confidence: miss.count >= 5 ? 0.75 : 0.55,
+        rationale: "Repeated misses suggest a bridge memory or wiki article should connect this wording to known project vocabulary.",
+        data: { tokens },
+      });
+    }
+
+    suggestions.push({
+      type: "query_expansion",
+      confidence: 0.45,
+      rationale: "Add this query to golden queries or query-expansion examples before changing scoring weights.",
+      data: { query: miss.query },
+    });
+
+    return {
+      query: miss.query,
+      count: miss.count,
+      last_seen: miss.last_seen,
+      severity: miss.count >= 10 ? "critical" : miss.count >= 5 ? "warning" : "info",
+      suggestions,
+    };
+  });
 }
 
 export class MemorySearch {
@@ -363,6 +473,7 @@ export class MemorySearch {
       usefulness: number;
       valence: number;
       quality: number;
+      qualityPersisted: boolean;
       goalRelevance: number;
     }> = [];
 
@@ -384,14 +495,15 @@ export class MemorySearch {
       const goalRelevance = goalRelevanceScore(memTags, goalKeywords, row.content);
       const persistedQuality = row.quality_score;
       let quality: number;
-      if (persistedQuality != null) {
-        quality = persistedQuality;
+      const qualityPersisted = persistedQuality != null;
+      if (qualityPersisted) {
+        quality = persistedQuality as number;
       } else {
         const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
         quality = qualityScore(row.importance, usefulCount, row.access_count, linkCountMap.get(row.id) ?? 0, ageDays);
       }
 
-      candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness, valence, quality, goalRelevance });
+      candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness, valence, quality, qualityPersisted, goalRelevance });
     }
 
     // Supersession demotion: memories with superseded_by set get heavily penalized
@@ -413,7 +525,7 @@ export class MemorySearch {
 
     // RRF or legacy scoring
     const rrfConfig = getRRFConfig(this.db);
-    let scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number; valence: number; quality: number; goalRelevance: number }> = [];
+    let scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number; valence: number; quality: number; qualityPersisted: boolean; goalRelevance: number }> = [];
     let penalizedMetadataCount = 0;
 
     if (rrfConfig.enabled) {
@@ -500,7 +612,7 @@ export class MemorySearch {
         }
 
         if (score >= rrfMinScore) {
-          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, quality: c.quality, goalRelevance: c.goalRelevance });
+          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, quality: c.quality, qualityPersisted: c.qualityPersisted, goalRelevance: c.goalRelevance });
         }
       }
     } else {
@@ -551,7 +663,7 @@ export class MemorySearch {
         }
 
         if (score >= minScore) {
-          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, quality: c.quality, goalRelevance: c.goalRelevance });
+          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, quality: c.quality, qualityPersisted: c.qualityPersisted, goalRelevance: c.goalRelevance });
         }
       }
     }
@@ -586,9 +698,17 @@ export class MemorySearch {
     const parsedQualityFloor = parseFloat(getSetting(this.db, "search.quality_floor") ?? "0.08");
     const qualityFloor = Number.isFinite(parsedQualityFloor) ? parsedQualityFloor : 0.08;
     const topScore = scored[0]?.score ?? 0;
+    // Capture pre-filter top score so search-miss logging can distinguish
+    // "no candidates scored" (topScore=0) from "candidates scored but all
+    // dropped by gap/quality filters" (topScore>0).
+    const preFilterTopScore = topScore;
     if (topScore > 0) {
       const minAllowed = topScore * gapRatio;
-      scored = scored.filter(s => s.score >= minAllowed && s.quality >= qualityFloor);
+      // Quality floor only applies to memories with a *persisted* quality_score.
+      // Newly-stored memories have null quality_score until the next maintenance
+      // recompute pass; exempting them avoids a cold-start bug where store→search
+      // returns nothing for the just-stored memory.
+      scored = scored.filter(s => s.score >= minAllowed && (!s.qualityPersisted || s.quality >= qualityFloor));
     }
 
     // Optional LLM re-ranking (qmd-inspired)
@@ -649,7 +769,10 @@ export class MemorySearch {
     // offset > scored.length — a paginated query that actually found results.
     // The sentinel friction signal degrades when polluted with these.)
     if (scored.length === 0) {
-      this.logSearchMiss(query.query, scored.length, null, query);
+      // Pass preFilterTopScore so analytics can distinguish "nothing matched"
+      // from "matched but filtered out by gap/quality threshold" — the latter
+      // is actionable signal for tuning the thresholds.
+      this.logSearchMiss(query.query, 0, preFilterTopScore > 0 ? preFilterTopScore : null, query);
     }
 
     // Track co-retrieval for link building
@@ -776,7 +899,7 @@ export class MemorySearch {
       if (scoredRows.length === 0) return opts.rows;
 
       scoredRows.sort((a, b) => b.score - a.score || a.row.id.localeCompare(b.row.id));
-      const maxAdd = Math.min(backfillLimit, Math.max(backfillLimit, opts.candidateLimit));
+      const maxAdd = Math.min(backfillLimit, scoredRows.length);
       const additions = scoredRows.slice(0, maxAdd).map((s) => s.row);
       if (additions.length > 0) {
         incrementCounter(this.db, "search.vector_backfill_candidates", additions.length);
