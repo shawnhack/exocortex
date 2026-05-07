@@ -1,0 +1,51 @@
+#!/usr/bin/env sh
+# pre-commit: validate lockfile when dep-related files are staged
+#
+# Runs `pnpm install --frozen-lockfile` only if any of these are in the
+# staged diff:
+#   - package.json (root or any workspace package)
+#   - pnpm-lock.yaml
+#   - .npmrc
+#
+# This catches the common bug where an override or dep was bumped in
+# package.json but pnpm-lock.yaml was forgotten — frozen-lockfile would
+# then fail in CI. Catching it locally is ~600ms; catching it in CI is
+# the next morning.
+#
+# Skips silently if pnpm isn't on PATH (avoids breaking commits from
+# environments without Node, e.g. content-only edits via a remote SSH).
+
+set -e
+
+# Find staged files that affect dep resolution
+staged_dep_files=$(git diff --cached --name-only --diff-filter=ACMR | \
+  grep -E '^(package\.json|pnpm-lock\.yaml|\.npmrc|packages/[^/]+/package\.json)$' || true)
+
+if [ -z "$staged_dep_files" ]; then
+  exit 0
+fi
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "[pre-commit] pnpm not on PATH — skipping lockfile validation"
+  exit 0
+fi
+
+echo "[pre-commit] Validating lockfile (staged: $(echo $staged_dep_files | tr '\n' ' '))..."
+
+if ! pnpm install --frozen-lockfile --silent >/dev/null 2>&1; then
+  echo ""
+  echo "[pre-commit] ✗ pnpm install --frozen-lockfile failed."
+  echo ""
+  echo "  This usually means package.json (or pnpm.overrides) changed but"
+  echo "  pnpm-lock.yaml is out of sync."
+  echo ""
+  echo "  Fix:"
+  echo "    pnpm install"
+  echo "    git add pnpm-lock.yaml"
+  echo "    # then re-run your commit"
+  echo ""
+  echo "  To bypass (NOT recommended): git commit --no-verify"
+  exit 1
+fi
+
+echo "[pre-commit] ✓ Lockfile is in sync"

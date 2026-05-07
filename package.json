@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
     "benchmark": "tsx scripts/run-benchmark.mts",
-    "release": "bash scripts/release.sh"
+    "release": "bash scripts/release.sh",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "engines": {
     "node": ">=20"
