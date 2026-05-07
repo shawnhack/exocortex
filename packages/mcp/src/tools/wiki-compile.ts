@@ -79,9 +79,11 @@ export function registerWikiCompileTools(ctx: ToolRegistrationContext): void {
   server.tool(
     "wiki_write_article",
     "Write or update a synthesized wiki article. Use after reading an extractive article " +
-    "and rewriting it into coherent prose. The content replaces the existing article file.",
+    "and rewriting it into coherent prose. The content replaces the existing article file. " +
+    "Slug may contain forward-slash subfolders (e.g. 'Briefings/Research-2026-05-07') — " +
+    "intermediate directories are created automatically.",
     {
-      slug: z.string().describe("Article slug (filename without .md, e.g. 'my-project', 'skills-and-techniques')"),
+      slug: z.string().describe("Article slug (filename without .md). Subfolders allowed via '/', e.g. 'my-project' or 'Briefings/Research-2026-05-07'"),
       content: z.string().describe("Full article content including frontmatter (---...---) and markdown body"),
       wiki_path: z.string().optional().describe(`Wiki directory (default: ${DEFAULT_WIKI_PATH})`),
     },
@@ -91,15 +93,16 @@ export function registerWikiCompileTools(ctx: ToolRegistrationContext): void {
         const filePath = path.resolve(wikiDir, `${args.slug}.md`);
         const resolvedDir = path.resolve(wikiDir) + path.sep;
 
-        // Validate the slug targets the wiki dir (trailing sep prevents sibling bypass)
+        // Traversal guard: filePath must stay inside wikiDir.
+        // Subfolders within wikiDir are allowed (e.g. 'Briefings/...'),
+        // but '..' escapes are rejected.
         if (!filePath.startsWith(resolvedDir)) {
-          return { content: [{ type: "text", text: "Error: slug must not contain path separators" }], isError: true };
+          return { content: [{ type: "text", text: "Error: slug escapes wiki directory (use forward-slash subfolders only, no '..' segments)" }], isError: true };
         }
 
-        // Ensure directory exists
-        if (!fs.existsSync(wikiDir)) {
-          fs.mkdirSync(wikiDir, { recursive: true });
-        }
+        // Ensure the target file's parent directory exists, including any
+        // subfolders introduced by slugs like 'Briefings/Foo'.
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
         fs.writeFileSync(filePath, args.content, "utf-8");
         const wordCount = args.content.split(/\s+/).length;
