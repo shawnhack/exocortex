@@ -1,7 +1,7 @@
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradiction, autoDismissContradictions, recordJobOutcome, getJobHealth, getJobAlerts, runLint, refreshWiki, ingestUrl, buildReasoningBrief, formatReasoningBrief, isRerankEnabled, getDefaultReranker, parseTemporalHint } from "@exocortex/core";
+import { MemoryStore, MemorySearch, GoalStore, getContradictions, updateContradiction, autoDismissContradictions, recordJobOutcome, getJobHealth, getJobAlerts, runLint, refreshWiki, ingestUrl, buildReasoningBrief, formatReasoningBrief, isRerankEnabled, getDefaultReranker, parseTemporalHint, unifiedSearch } from "@exocortex/core";
 import type { RerankerProvider } from "@exocortex/core";
 import type { ToolRegistrationContext } from "./types.js";
 
@@ -695,6 +695,108 @@ export function registerIntelligenceTools(ctx: ToolRegistrationContext): void {
               tags: e.tags,
             })),
             retrieval_ms: brief.retrieval_ms,
+          },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // unified_search — search across memories + predictions + contradictions + goals + tasks
+  server.tool(
+    "unified_search",
+    "Search across all retrievable surfaces in the exocortex DB at once: memories, predictions, contradictions, goals, and agent tasks. Returns grouped results so you can see matches in each surface — useful when you don't know whether a fact lives in the memory corpus, the predictions table, or somewhere else. Memories use the full hybrid search pipeline; structured surfaces use case-insensitive substring matching ranked by recency/priority.",
+    {
+      query: z.string().describe("Search query (natural language)"),
+      limit_per_surface: z.number().min(1).max(20).optional().describe("Max results per surface (default 5)"),
+      surfaces: z.array(z.enum(["memories", "predictions", "contradictions", "goals", "tasks"])).optional().describe("Restrict to specific surfaces. Default: all five."),
+      status_filter: z.array(z.string()).optional().describe("For predictions/goals/tasks/contradictions: only include matching status values (e.g. ['active', 'open', 'pending'])"),
+      namespace: z.string().optional().describe("Project namespace filter (forwarded to memory search only)"),
+    },
+    async (args) => {
+      try {
+        const reranker: RerankerProvider | undefined = isRerankEnabled(db)
+          ? getDefaultReranker()
+          : undefined;
+        const result = await unifiedSearch(db, args.query, {
+          limit_per_surface: args.limit_per_surface,
+          surfaces: args.surfaces,
+          status_filter: args.status_filter,
+          namespace: args.namespace,
+          reranker,
+        });
+
+        const lines: string[] = [
+          `Unified search for "${args.query}" — ${result.total_hits} hit(s) across ${result.surfaces_searched.length} surface(s)`,
+          "",
+        ];
+
+        if (result.memories.length > 0) {
+          lines.push(`## Memories (${result.memories.length})`);
+          for (const r of result.memories) {
+            const preview = r.memory.content.replace(/\s+/g, " ").slice(0, 110);
+            lines.push(`  [${r.memory.id}] (score ${r.score.toFixed(3)}) ${preview}`);
+          }
+          lines.push("");
+        }
+
+        if (result.predictions.length > 0) {
+          lines.push(`## Predictions (${result.predictions.length})`);
+          for (const p of result.predictions) {
+            const deadline = p.deadline ? ` deadline ${p.deadline.slice(0, 10)}` : "";
+            const resolved = p.resolution ? ` → ${p.resolution}` : "";
+            lines.push(`  [${p.id}] ${p.status} (conf ${p.confidence.toFixed(2)}${deadline}${resolved}) ${p.claim.slice(0, 100)}`);
+          }
+          lines.push("");
+        }
+
+        if (result.contradictions.length > 0) {
+          lines.push(`## Contradictions (${result.contradictions.length})`);
+          for (const c of result.contradictions) {
+            lines.push(`  [${c.id}] ${c.status} between ${c.memory_a_id.slice(0, 8)} ↔ ${c.memory_b_id.slice(0, 8)}: ${c.description.slice(0, 100)}`);
+          }
+          lines.push("");
+        }
+
+        if (result.goals.length > 0) {
+          lines.push(`## Goals (${result.goals.length})`);
+          for (const g of result.goals) {
+            const deadline = g.deadline ? ` due ${g.deadline.slice(0, 10)}` : "";
+            lines.push(`  [${g.id}] ${g.status} ${g.priority}${deadline}: ${g.title}`);
+          }
+          lines.push("");
+        }
+
+        if (result.tasks.length > 0) {
+          lines.push(`## Tasks (${result.tasks.length})`);
+          for (const t of result.tasks) {
+            const assignee = t.assignee ? ` @${t.assignee}` : "";
+            lines.push(`  [${t.id}] ${t.status}${assignee}: ${t.title}`);
+          }
+          lines.push("");
+        }
+
+        if (result.total_hits === 0) {
+          lines.push("(No matches in any surface.)");
+        }
+
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
+          structured_content: {
+            query: result.query,
+            total_hits: result.total_hits,
+            surfaces_searched: result.surfaces_searched,
+            counts: {
+              memories: result.memories.length,
+              predictions: result.predictions.length,
+              contradictions: result.contradictions.length,
+              goals: result.goals.length,
+              tasks: result.tasks.length,
+            },
           },
         };
       } catch (err) {
