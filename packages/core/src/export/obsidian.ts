@@ -124,12 +124,36 @@ function urlToTitle(url: string): string {
   }
 }
 
+/**
+ * Directories that cleanVault must NEVER delete. Any file/dir owned by
+ * something OTHER than obsidian-export needs to be listed here, otherwise
+ * the next sync will silently nuke it.
+ *
+ * Known owners:
+ * - `.obsidian` — Obsidian's own config / plugins / workspace state
+ * - `wiki` — legacy nexus/wiki path
+ * - `Research`, `Briefings` — sentinel jobs append to monthly journals here
+ *   (research-briefing, obsidian-briefing). Without this guard, the 6-hour
+ *   sync wipes those journals between runs.
+ *
+ * NOTE: this whole nuke-and-pave pattern is fragile by design. The proper
+ * fix is to track which files obsidian-export previously wrote (a registry
+ * persisted between runs) and only delete those — leaving everything else
+ * untouched. That is a larger refactor; this skip list is a stop-gap.
+ */
+const VAULT_PROTECTED_DIRS = new Set([
+  ".obsidian",
+  "wiki",
+  "Research",
+  "Briefings",
+]);
+
 function cleanVault(vaultPath: string): void {
   if (!fs.existsSync(vaultPath)) return;
   const entries = fs.readdirSync(vaultPath, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(vaultPath, entry.name);
-    if (entry.name === ".obsidian" || entry.name === "wiki") continue;
+    if (VAULT_PROTECTED_DIRS.has(entry.name)) continue;
     if (entry.isDirectory()) {
       fs.rmSync(fullPath, { recursive: true, force: true });
     } else if (entry.name.endsWith(".md") || entry.name.endsWith(".json")) {
@@ -762,7 +786,8 @@ function exportProjects(
       .prepare(
         `SELECT DISTINCT m.id, m.content, m.created_at, m.importance
          FROM memories m LEFT JOIN memory_tags mt ON m.id = mt.memory_id
-         WHERE m.is_active = 1 AND m.tier NOT IN ('reference', 'working')
+         WHERE m.is_active = 1 AND m.parent_id IS NULL
+           AND m.tier NOT IN ('reference', 'working')
            AND (m.namespace = ? OR mt.tag = ?)
          ORDER BY m.importance DESC, m.created_at DESC
          LIMIT 200`,
@@ -813,7 +838,7 @@ function exportDecisions(
     .prepare(
       `SELECT DISTINCT m.id, m.content, m.created_at, m.importance
        FROM memories m JOIN memory_tags mt ON m.id = mt.memory_id
-       WHERE mt.tag = 'decision' AND m.is_active = 1
+       WHERE mt.tag = 'decision' AND m.is_active = 1 AND m.parent_id IS NULL
        ORDER BY m.created_at DESC`,
     )
     .all() as unknown as MemoryRow[];
@@ -873,7 +898,7 @@ function exportTechniques(
     .prepare(
       `SELECT DISTINCT m.id, m.content, m.created_at, m.importance
        FROM memories m LEFT JOIN memory_tags mt ON m.id = mt.memory_id
-       WHERE m.is_active = 1
+       WHERE m.is_active = 1 AND m.parent_id IS NULL
          AND (m.tier = 'procedural' OR mt.tag IN ('technique', 'learning'))
        ORDER BY m.importance DESC, m.created_at DESC`,
     )
