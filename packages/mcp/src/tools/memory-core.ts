@@ -32,6 +32,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
       namespace: z.string().optional().describe("Project namespace — set to the current project name (e.g. 'exocortex', 'myapp'). Enables scoped retrieval so memories from different projects don't collide."),
       deduplicate: z.boolean().optional().describe("Set true when storing facts or knowledge that might already exist — prevents duplicates. Checks for >85% semantic similarity + >60% word overlap."),
       tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional().describe("Knowledge tier: working (24h scratch), episodic (default, events), semantic (permanent facts), procedural (permanent techniques), reference (permanent docs)"),
+      created_at: z.string().optional().describe("Override created_at timestamp (ISO-8601, e.g. '2026-05-07T12:00:00Z'). Use only for backfilling historical content (CLAUDE.md transcription, importing past decisions). For normal stores, leave undefined and the system stamps now. updated_at always reflects the actual write time, not this override."),
     },
     async (args) => {
       try {
@@ -112,6 +113,7 @@ export function registerMemoryCoreTools(ctx: ToolRegistrationContext): void {
           expires_at: expiresAt,
           namespace: args.namespace,
           deduplicate: args.deduplicate,
+          created_at: args.created_at,
         });
 
         const meta: string[] = [`id: ${result.memory.id}`];

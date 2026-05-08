@@ -226,12 +226,31 @@ function resolveUpdateAttribution(
   return updates;
 }
 
+/**
+ * Accepts an ISO-8601 datetime ("2026-05-07T12:00:00Z") or a SQLite-style
+ * datetime ("2026-05-07 12:00:00.000") and returns the SQLite form. Returns
+ * null for empty/invalid input so the caller can fall back to `now`.
+ */
+function normalizeCreatedAt(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return null;
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().replace("T", " ").replace("Z", "");
+}
+
 export class MemoryStore {
   constructor(private db: DatabaseSync) {}
 
   async create(input: CreateMemoryInput): Promise<CreateMemoryResult> {
     const id = ulid();
     const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+    // Caller may override created_at to backfill historical memories.
+    // updated_at always uses the actual current time so the audit trail
+    // distinguishes "when this was claimed to happen" from "when this row
+    // was actually written."
+    const createdAt = normalizeCreatedAt(input.created_at) ?? now;
     const aliasMap = getTagAliasMap(this.db);
     const skipInsertOnDedup = getSetting(this.db, "dedup.skip_insert_on_match") !== "false";
 
@@ -1007,6 +1026,10 @@ export class MemoryStore {
       throw new Error("Memory content is empty after stripping private blocks");
     }
     input = { ...input, content };
+    // Honor caller's created_at override for chunked stores too. Both
+    // parent and child chunks share the same backdated timestamp so the
+    // chunk supersession chain stays internally consistent.
+    const createdAt = normalizeCreatedAt(input.created_at) ?? now;
 
     const chunks = splitIntoChunks(input.content, { targetSize });
 
@@ -1105,7 +1128,7 @@ export class MemoryStore {
         input.tier ?? "episodic",
         input.expires_at ?? null,
         input.namespace ?? null,
-        now,
+        createdAt,
         now
       );
 
@@ -1140,7 +1163,7 @@ export class MemoryStore {
           input.tier ?? "episodic",
           input.expires_at ?? null,
           input.namespace ?? null,
-          now,
+          createdAt,
           now
         );
 

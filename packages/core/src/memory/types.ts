@@ -69,6 +69,14 @@ export interface CreateMemoryInput {
   expires_at?: string;
   namespace?: string;
   /**
+   * Override the memory's created_at timestamp. By default the store uses
+   * the current time. Use this only for backfilling historical content
+   * (importing CLAUDE.md, transcribing past decisions, etc.) — for normal
+   * stores, leave undefined and let the system stamp the actual creation
+   * moment. Format: "YYYY-MM-DD HH:MM:SS.SSS" (SQLite-compatible).
+   */
+  created_at?: string;
+  /**
    * Benchmark artifacts are stored with lower default importance and reduced indexing/chunking.
    * Use for evaluation snapshots, regression reports, and query benchmark metadata.
    */

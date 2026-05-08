@@ -63,6 +63,10 @@ const createSchema = z.object({
   namespace: z.string().optional(),
   tier: z.enum(["working", "episodic", "semantic", "procedural", "reference"]).optional(),
   deduplicate: z.boolean().optional(),
+  // Optional override for backfilling historical memories. Stored verbatim;
+  // updated_at always reflects the actual write time so the audit trail
+  // distinguishes claimed-creation from row-write moments.
+  created_at: z.string().optional(),
 });
 
 const updateSchema = z.object({
