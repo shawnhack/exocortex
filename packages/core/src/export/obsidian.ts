@@ -125,39 +125,98 @@ function urlToTitle(url: string): string {
 }
 
 /**
- * Directories that cleanVault must NEVER delete. Any file/dir owned by
- * something OTHER than obsidian-export needs to be listed here, otherwise
- * the next sync will silently nuke it.
+ * Persistent record of files this export wrote on its previous run.
+ * Lives at `${vaultPath}/.exocortex-manifest.json` — a hidden file so it
+ * doesn't appear in Obsidian's normal file browser.
  *
- * Known owners:
- * - `.obsidian` — Obsidian's own config / plugins / workspace state
- * - `wiki` — legacy nexus/wiki path
- * - `Research`, `Briefings` — sentinel jobs append to monthly journals here
- *   (research-briefing, obsidian-briefing). Without this guard, the 6-hour
- *   sync wipes those journals between runs.
- *
- * NOTE: this whole nuke-and-pave pattern is fragile by design. The proper
- * fix is to track which files obsidian-export previously wrote (a registry
- * persisted between runs) and only delete those — leaving everything else
- * untouched. That is a larger refactor; this skip list is a stop-gap.
+ * This is the basis of the registry-based cleanVault: rather than
+ * nuke-and-pave the whole vault, the export only deletes files that it
+ * previously wrote (and is no longer writing this run). User-authored
+ * files, files written by other systems (sentinel briefings, manual
+ * notes, plugins, drawings) are never touched.
  */
-const VAULT_PROTECTED_DIRS = new Set([
-  ".obsidian",
-  "wiki",
-  "Research",
-  "Briefings",
-]);
+const MANIFEST_FILE = ".exocortex-manifest.json";
 
+interface ExportManifest {
+  version: 1;
+  lastSync: string;
+  ownedFiles: string[];
+}
+
+function loadManifest(vaultPath: string): ExportManifest {
+  const p = path.join(vaultPath, MANIFEST_FILE);
+  if (!fs.existsSync(p)) {
+    return { version: 1, lastSync: "", ownedFiles: [] };
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as Partial<ExportManifest>;
+    if (raw.version === 1 && Array.isArray(raw.ownedFiles)) {
+      return {
+        version: 1,
+        lastSync: typeof raw.lastSync === "string" ? raw.lastSync : "",
+        ownedFiles: raw.ownedFiles.filter((s): s is string => typeof s === "string"),
+      };
+    }
+  } catch {
+    // Corrupted manifest — treat as empty (first-run path)
+  }
+  return { version: 1, lastSync: "", ownedFiles: [] };
+}
+
+function saveManifest(vaultPath: string, ownedFiles: Set<string>): void {
+  const manifest: ExportManifest = {
+    version: 1,
+    lastSync: new Date().toISOString(),
+    ownedFiles: [...ownedFiles].sort(),
+  };
+  fs.writeFileSync(
+    path.join(vaultPath, MANIFEST_FILE),
+    JSON.stringify(manifest, null, 2),
+    "utf-8",
+  );
+}
+
+/**
+ * Module-scoped tracker for files written during the current export run.
+ * Set at the start of `exportToObsidian` and cleared at the end. The
+ * `writeFile` helper appends to this set on every write so the manifest
+ * captures everything the export produced this cycle.
+ *
+ * Single-threaded by construction — `exportToObsidian` is one invocation
+ * per call, no concurrent runs in practice.
+ */
+let _currentVault: string | null = null;
+let _writtenThisRun: Set<string> | null = null;
+
+function trackWrite(filePath: string): void {
+  if (!_currentVault || !_writtenThisRun) return;
+  const rel = path.relative(_currentVault, filePath).replace(/\\/g, "/");
+  // Defensive: skip paths that escaped the vault (shouldn't happen but
+  // would store a manifest entry that cleanVault would mishandle)
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return;
+  _writtenThisRun.add(rel);
+}
+
+/**
+ * Delete files this export previously wrote (per the manifest), leaving
+ * everything else in the vault untouched. On the very first run after
+ * upgrading from the old nuke-and-pave behavior, the manifest is empty —
+ * we skip deletion entirely. The next run will have a manifest and work
+ * normally.
+ */
 function cleanVault(vaultPath: string): void {
   if (!fs.existsSync(vaultPath)) return;
-  const entries = fs.readdirSync(vaultPath, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(vaultPath, entry.name);
-    if (VAULT_PROTECTED_DIRS.has(entry.name)) continue;
-    if (entry.isDirectory()) {
-      fs.rmSync(fullPath, { recursive: true, force: true });
-    } else if (entry.name.endsWith(".md") || entry.name.endsWith(".json")) {
-      fs.unlinkSync(fullPath);
+  const manifest = loadManifest(vaultPath);
+  if (manifest.ownedFiles.length === 0) return;
+  for (const rel of manifest.ownedFiles) {
+    const full = path.join(vaultPath, rel);
+    try {
+      if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+        fs.unlinkSync(full);
+      }
+    } catch {
+      // Permission error or race — skip. The export will overwrite if it
+      // writes the same path this run anyway.
     }
   }
 }
@@ -165,6 +224,7 @@ function cleanVault(vaultPath: string): void {
 function writeFile(filePath: string, content: string): void {
   ensureDir(path.dirname(filePath));
   fs.writeFileSync(filePath, content, "utf-8");
+  trackWrite(filePath);
 }
 
 function frontmatter(fields: Record<string, string | string[]>): string {
@@ -1459,9 +1519,19 @@ function injectInlineWikilinks(vaultPath: string, registry: FileRegistry): void 
     applyInlineLinks(filePath, info.slug, linkMap);
   }
 
-  // Also process top-level files not in the registry
-  for (const f of fs.readdirSync(vaultPath).filter((f) => f.endsWith(".md"))) {
-    applyInlineLinks(path.join(vaultPath, f), f.replace(/\.md$/, "").toLowerCase().replace(/\s+/g, "-"), linkMap);
+  // Process root-level files we wrote this run (Soul.md, Identity.md,
+  // Goals.md, Predictions.md, etc — written by exportSoulIdentity /
+  // exportGoals / exportPredictions which don't populate the registry).
+  // Restricted to `_writtenThisRun` so user-authored .md files at the
+  // vault root are NOT modified.
+  if (_writtenThisRun) {
+    for (const rel of _writtenThisRun) {
+      if (rel.includes("/")) continue; // subdirs already handled via registry loop above
+      const filePath = path.join(vaultPath, rel);
+      if (!fs.existsSync(filePath)) continue;
+      const slug = rel.replace(/\.md$/, "").toLowerCase().replace(/\s+/g, "-");
+      applyInlineLinks(filePath, slug, linkMap);
+    }
   }
 }
 
@@ -1511,33 +1581,53 @@ export async function exportToObsidian(
 ): Promise<ObsidianExportResult> {
   const { vaultPath, clean } = opts;
 
-  if (clean) cleanVault(vaultPath);
-  ensureDir(vaultPath);
+  // Initialize per-run tracker so writeFile can capture everything we
+  // produce this cycle. Set BEFORE cleanVault so even a clean+rewrite
+  // sequence ends with an accurate manifest.
+  _currentVault = vaultPath;
+  _writtenThisRun = new Set();
 
-  const sections: Record<string, number> = {};
-  const registry: FileRegistry = { files: new Map(), memoryToFile: new Map() };
-  const exported = new Set<string>();
+  try {
+    if (clean) cleanVault(vaultPath);
+    ensureDir(vaultPath);
 
-  // Order: projects first (biggest catch), then specifics, notes last (catch-all)
-  exportSoulIdentity(db, vaultPath, sections, exported);
-  exportGoals(db, vaultPath, sections);
-  exportProjects(db, vaultPath, sections, registry, exported);
-  exportDecisions(db, vaultPath, sections, registry, exported);
-  exportTechniques(db, vaultPath, sections, registry, exported);
-  exportKnowledge(db, vaultPath, sections, registry, exported);
-  exportReference(db, vaultPath, sections, registry, exported);
-  exportNotes(db, vaultPath, sections, registry, exported);
-  exportPredictions(db, vaultPath, sections);
-  // Facts skipped — extracted triples are too low quality to be useful
+    const sections: Record<string, number> = {};
+    const registry: FileRegistry = { files: new Map(), memoryToFile: new Map() };
+    const exported = new Set<string>();
 
-  // Second pass: add cross-links now that all files exist
-  updateCrossLinks(db, vaultPath, registry);
+    // Order: projects first (biggest catch), then specifics, notes last (catch-all)
+    exportSoulIdentity(db, vaultPath, sections, exported);
+    exportGoals(db, vaultPath, sections);
+    exportProjects(db, vaultPath, sections, registry, exported);
+    exportDecisions(db, vaultPath, sections, registry, exported);
+    exportTechniques(db, vaultPath, sections, registry, exported);
+    exportKnowledge(db, vaultPath, sections, registry, exported);
+    exportReference(db, vaultPath, sections, registry, exported);
+    exportNotes(db, vaultPath, sections, registry, exported);
+    exportPredictions(db, vaultPath, sections);
+    // Facts skipped — extracted triples are too low quality to be useful
 
-  // Third pass: inject inline wikilinks for entity mentions in body text
-  injectInlineWikilinks(vaultPath, registry);
+    // Second pass: add cross-links now that all files exist
+    updateCrossLinks(db, vaultPath, registry);
 
-  writeDashboard(vaultPath, registry);
+    // Third pass: inject inline wikilinks for entity mentions in body text
+    injectInlineWikilinks(vaultPath, registry);
 
-  const files = Object.values(sections).reduce((a, b) => a + b, 0) + 1;
-  return { files, sections };
+    writeDashboard(vaultPath, registry);
+
+    // Persist the manifest of files this run wrote so the next cleanVault
+    // can target only export-owned files. Done before clearing the tracker
+    // so anything saveManifest writes is itself part of the next run's
+    // baseline (the manifest file itself is intentionally NOT tracked —
+    // it's metadata about the run, not a content artifact).
+    if (_writtenThisRun) {
+      saveManifest(vaultPath, _writtenThisRun);
+    }
+
+    const files = Object.values(sections).reduce((a, b) => a + b, 0) + 1;
+    return { files, sections };
+  } finally {
+    _currentVault = null;
+    _writtenThisRun = null;
+  }
 }
