@@ -86,7 +86,7 @@ export function frequencyScore(
 
 /**
  * Usefulness score based on confirmed-useful retrievals.
- * Uses absolute scale: saturates at 12 useful signals → score 1.0.
+ * Uses absolute scale: saturates at 14 useful signals → score 1.0.
  * Memories with 0 useful_count score 0 (no penalty, just no boost).
  */
 export function usefulnessScore(usefulCount: number): number {
@@ -94,7 +94,7 @@ export function usefulnessScore(usefulCount: number): number {
   // Feedback coverage is still sparse, so avoid maxing out usefulness on just a
   // few confirmations, but still let the top end of the current distribution
   // reach full boost without needing feedback counts the live DB never sees.
-  return Math.min(1.0, Math.log(1 + usefulCount) / Math.log(1 + 12));
+  return Math.min(1.0, Math.log(1 + usefulCount) / Math.log(1 + 14));
 }
 
 /**
