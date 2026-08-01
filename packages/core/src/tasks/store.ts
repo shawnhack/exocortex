@@ -214,32 +214,64 @@ export class AgentTaskStore {
   }
 
   /**
+   * How long a task may sit in `in_progress` before claim() treats it as
+   * abandoned and lets it be picked up again.
+   *
+   * Claiming flips a task to `in_progress`, and an agent that never calls
+   * complete() or fail() therefore strands it: the claim query used to match
+   * only `pending` and `assigned`, so nothing could ever pick it back up.
+   * Observed 2026-08-01 — an agent claimed a task, moved on to a different
+   * one, and left the first invisible to every subsequent run.
+   *
+   * 6 hours is far longer than any scheduled job's timeout (the longest is 15
+   * minutes), so a task this old cannot still be running; it can only be the
+   * residue of a crash, a timeout, or an agent that forgot to close it out.
+   */
+  private static readonly STALE_CLAIM_HOURS = 6;
+
+  /**
    * Claim the next available task for an agent.
    * Atomic SELECT+UPDATE in a transaction to prevent two agents claiming the same task.
+   *
+   * Also reclaims tasks abandoned in `in_progress` for longer than
+   * STALE_CLAIM_HOURS — see the constant above for why that is safe.
    */
   claim(assignee: string): AgentTask | null {
     let claimedId: string | null = null;
+    const staleCutoff = `-${AgentTaskStore.STALE_CLAIM_HOURS} hours`;
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const row = this.db
         .prepare(
           `SELECT id FROM agent_tasks
-           WHERE assignee = ? AND status IN ('pending', 'assigned')
+           WHERE assignee = ?
+             AND (
+               status IN ('pending', 'assigned')
+               OR (status = 'in_progress'
+                   AND started_at IS NOT NULL
+                   AND started_at < datetime('now', ?))
+             )
            ORDER BY
              CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END,
              created_at ASC
            LIMIT 1`
         )
-        .get(assignee) as { id: string } | undefined;
+        .get(assignee, staleCutoff) as { id: string } | undefined;
 
       if (row) {
         const ts = now();
         this.db
           .prepare(
             `UPDATE agent_tasks SET status = 'in_progress', started_at = ?, updated_at = ?
-             WHERE id = ? AND status IN ('pending', 'assigned')`
+             WHERE id = ?
+               AND (
+                 status IN ('pending', 'assigned')
+                 OR (status = 'in_progress'
+                     AND started_at IS NOT NULL
+                     AND started_at < datetime('now', ?))
+               )`
           )
-          .run(ts, ts, row.id);
+          .run(ts, ts, row.id, staleCutoff);
         claimedId = row.id;
       }
       this.db.exec("COMMIT");
