@@ -345,9 +345,32 @@ describe("scoring", () => {
     });
 
     it("should approach saturation around count=8", () => {
-      // Formula: log(1+n)/log(1+12) — saturates at 12, not 8
-      // usefulnessScore(8) = log(9)/log(13) ≈ 0.857
-      expect(usefulnessScore(8)).toBeCloseTo(0.86, 1);
+      // Piecewise formula (sentinel:scoring-evolve, 2026-07):
+      //   n <= 8 : log(1+n)/log(1+14)
+      //   n >  8 : interpolates in log space from that value up to 1.0 at n=30
+      // usefulnessScore(8) = log(9)/log(15) ≈ 0.8114 — the branch boundary,
+      // where both halves agree (continuity check).
+      expect(usefulnessScore(8)).toBeCloseTo(0.8114, 3);
+    });
+
+    it("should be continuous at the piecewise boundary", () => {
+      // Regression guard: scoring-evolve rewrote this into two branches that
+      // meet at n=8. A discontinuity here would make retrieval ranking jump
+      // for memories that cross the boundary, so pin it explicitly rather
+      // than relying on the loose tolerance of the assertion above.
+      const below = usefulnessScore(8);
+      const above = usefulnessScore(9);
+      expect(above).toBeGreaterThan(below);
+      expect(above - below).toBeLessThan(0.05);
+    });
+
+    it("should saturate at count=30, not before", () => {
+      // Pins the saturation point so a future formula change that moves it
+      // fails loudly instead of silently re-weighting every high-usefulness
+      // memory in the corpus.
+      expect(usefulnessScore(12)).toBeLessThan(1.0);
+      expect(usefulnessScore(30)).toBeCloseTo(1.0, 5);
+      expect(usefulnessScore(50)).toBe(1.0);
     });
 
     it("should increase monotonically", () => {
