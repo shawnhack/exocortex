@@ -3,3 +3,37 @@ packages:
 
 # Security: block packages published less than 3 days ago
 minimumReleaseAge: 4320
+
+# ---------------------------------------------------------------------------
+# Migrated from package.json "pnpm.*" on 2026-08-01.
+#
+# pnpm v11 NO LONGER READS pnpm.overrides / pnpm.onlyBuiltDependencies from
+# package.json — it only warns. Since the v10 -> v11 upgrade both blocks below
+# have been silently inert. This repo kept working only because its
+# node_modules predates the upgrade; the next `pnpm install` would have
+# rebuilt without them.
+#
+# The onnxruntime-node entry is the important one: it is the embedding engine,
+# and pnpm v11 blocks postinstall scripts by default. Without an explicit
+# allowBuilds entry, a reinstall produces a tree with no native binary and
+# embeddings fail at runtime.
+#
+# This same latent failure has already taken a sibling service offline for an
+# extended period, so it is worth fixing before it fires rather than after.
+# ---------------------------------------------------------------------------
+
+# Security floors — audited 2026-05-08, each anchored to a specific advisory.
+overrides:
+  "tar": ">=7.4.3"
+  "express-rate-limit": ">=8.2.2"
+  "hono": ">=4.12.16"
+  "path-to-regexp": ">=8.4.0"
+  "picomatch": ">=4.0.4"
+  "protobufjs": ">=7.5.5"
+
+# v10 called this "onlyBuiltDependencies"; v11 uses "allowBuilds".
+allowBuilds:
+  esbuild: true
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true
