@@ -117,12 +117,74 @@ export interface TagMergeSuggestion {
   coOccurrence: number;
 }
 
-function isProtectedTag(tag: string): boolean {
+/**
+ * Bare job-identity tags — the name of the scheduled job that produced a
+ * memory, written without the `sentinel:` prefix.
+ *
+ * These are PROVENANCE, not topic. Collapsing them into a topic bucket
+ * destroys the only way to ask "what did job X find?", which is exactly how
+ * digest and briefing jobs assemble their inputs.
+ *
+ * This is not hypothetical. The canonical map contained `watchlist ->
+ * operations`, so every watchlist finding was stored with its identity
+ * stripped. The producing job was correct, the agent complied with its
+ * prompt, and the consuming job searched the right tag — but the storage
+ * layer rewrote the tag in between, silently, and the daily briefing
+ * rendered an empty Watchlist section for months. The failure was first
+ * noticed 2026-04-23 and only root-caused 2026-08-02.
+ *
+ * Add new job names here when new scheduled jobs are introduced.
+ */
+const JOB_IDENTITY_TAGS = new Set([
+  "watchlist",
+  "health-check",
+  "memory-gardening",
+  "gardening",
+  "state-reconciliation",
+  "friction-bridging",
+  "reweave",
+  "retrieval-tuning",
+  "retrieval-remediation",
+  "retrieval-qa-eval",
+  "dependency-audit",
+  "session-cleanup",
+  "config-backup",
+  "frequency-review",
+  "knowledge-ingestion",
+  "crypto-alpha",
+  "github-scout",
+  "proactive-insights",
+  "goal-worker",
+  "dispatcher",
+  "research-briefing",
+  "obsidian-briefing",
+  "obsidian-export",
+  "epoch-digest",
+  "metrics",
+  "self-audit",
+  "security-audit",
+  "contradiction-sweep",
+  "code-evolve",
+  "scoring-evolve",
+  "prompt-evolve",
+]);
+
+/**
+ * Tags that must survive normalization untouched.
+ *
+ * Two categories: correlation handles (run tokens, sessions, sources, dates)
+ * and job-identity tags. Both are used as exact-match retrieval filters, so
+ * rewriting them does not merely lose precision — it makes the memory
+ * unfindable by the only query that would look for it.
+ */
+export function isProtectedTag(tag: string): boolean {
   return (
     tag.startsWith("run-token:") ||
     tag.startsWith("session:") ||
     tag.startsWith("source:") ||
+    tag.startsWith("sentinel:") ||
     /^\d{4}-\d{2}-\d{2}/.test(tag) ||
+    JOB_IDENTITY_TAGS.has(tag) ||
     tag === "openapi"
   );
 }
@@ -231,6 +293,13 @@ export function applyTagMerge(
 /**
  * Parse a canonical map JSON string from settings.
  * Returns empty object if null/invalid.
+ *
+ * Entries whose KEY is a protected tag are dropped. The canonical map is
+ * editable at runtime (the gardening job's tag-cleanup writes to it), so a
+ * rule that erases provenance can be introduced long after the code is
+ * reviewed. Filtering here means the guard holds no matter how the map got
+ * its contents, and it neutralizes bad entries already persisted in settings
+ * without needing a migration.
  */
 export function parseCanonicalMap(raw?: string | null): Record<string, string> {
   if (!raw) return {};
@@ -239,9 +308,11 @@ export function parseCanonicalMap(raw?: string | null): Record<string, string> {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(parsed)) {
-      if (typeof v === "string") {
-        out[k.toLowerCase()] = v.toLowerCase();
-      }
+      if (typeof v !== "string") continue;
+      const key = k.toLowerCase();
+      // Never let the map rewrite a tag that retrieval filters on exactly.
+      if (isProtectedTag(key)) continue;
+      out[key] = v.toLowerCase();
     }
     return out;
   } catch {
