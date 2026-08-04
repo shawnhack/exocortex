@@ -295,6 +295,7 @@ export class MemoryStore {
       explicit: input.is_metadata,
       benchmark: isBenchmark,
       tags: input.tags,
+      tier: input.tier ?? (input.parent_id ? "reference" : "episodic"),
       metadata: input.metadata,
       metadataTags,
     });
@@ -1561,6 +1562,7 @@ export class MemoryStore {
       const inferredMetadata = inferIsMetadata({
         explicit: input.is_metadata,
         tags: normalizedTagUpdate ?? existing.tags ?? [],
+        tier: input.tier ?? existing.tier,
         metadata: mergedMetadata,
         metadataTags,
       });

@@ -31,6 +31,54 @@ interface FtsMatch {
   rank: number;
 }
 
+/**
+ * Window during which a memory's history-derived signals (frequency,
+ * usefulness, quality) are treated as average rather than absent.
+ * See the cold-start block in the candidate loop for the reasoning.
+ */
+const COLD_START_GRACE_DAYS = 14;
+const COLD_START_NEUTRAL = 0.5;
+
+/**
+ * Additive boost for a memory that explicitly declares the query as one of
+ * its retrieval aliases.
+ *
+ * Remediation runs write answer-bearing memories carrying a literal
+ * "Exact retrieval aliases: <query>" line, precisely so a known-failing
+ * query has something to land on. That only helps if declaring the alias
+ * actually beats the incumbent. Sized to clear the largest observed
+ * behavioural gap (~0.9) with margin, so a declared exact answer wins
+ * without needing a hard sort override.
+ */
+const ALIAS_EXACT_BOOST = 1.0;
+
+/** Normalize for alias comparison: lowercase, strip punctuation, collapse space. */
+function normalizeForAlias(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * True when the memory declares this query verbatim as a retrieval alias.
+ *
+ * Matches the convention used by remediation runs:
+ *   "Exact retrieval aliases: how does X work; what is Y"
+ * Aliases are separated by ';' or '|'. Comparison is punctuation- and
+ * case-insensitive so "pm2 dump.pm2 file" matches "pm2 dump pm2 file".
+ */
+export function hasExactRetrievalAlias(content: string, query: string): boolean {
+  const marker = /exact retrieval alias(?:es)?\s*:(.*)$/im;
+  const m = content.match(marker);
+  if (!m) return false;
+  const needle = normalizeForAlias(query);
+  if (!needle) return false;
+  // Only the alias line itself, not the rest of the memory.
+  const aliasLine = m[1].split(/\r?\n/)[0];
+  return aliasLine
+    .split(/[;|]/)
+    .map(normalizeForAlias)
+    .some((a) => a.length > 0 && a === needle);
+}
+
 function safeIntSetting(raw: string | null | undefined, fallback: number): number {
   const parsed = parseInt(raw ?? String(fallback), 10);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -474,6 +522,7 @@ export class MemorySearch {
       valence: number;
       quality: number;
       qualityPersisted: boolean;
+      aliasMatch: boolean;
       goalRelevance: number;
     }> = [];
 
@@ -487,23 +536,47 @@ export class MemorySearch {
 
       const ftsScore = ftsMatches.get(String(row._rowid)) ?? 0;
       const recency = recencyScore(row.created_at, weights.recencyDecay, row.importance, row.quality_score ?? undefined);
-      const freq = frequencyScore(row.access_count, maxAccessCount);
       const usefulCount = row.useful_count ?? 0;
-      const usefulness = usefulnessScore(usefulCount);
       const valence = valenceScore(row.valence ?? 0);
       const memTags = candidateTagMap.get(row.id) ?? [];
       const goalRelevance = goalRelevanceScore(memTags, goalKeywords, row.content);
+      const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
+
       const persistedQuality = row.quality_score;
-      let quality: number;
       const qualityPersisted = persistedQuality != null;
-      if (qualityPersisted) {
-        quality = persistedQuality as number;
-      } else {
-        const ageDays = (now - new Date(row.created_at + "Z").getTime()) / (1000 * 60 * 60 * 24);
-        quality = qualityScore(row.importance, usefulCount, row.access_count, linkCountMap.get(row.id) ?? 0, ageDays);
+      let quality = qualityPersisted
+        ? (persistedQuality as number)
+        : qualityScore(row.importance, usefulCount, row.access_count, linkCountMap.get(row.id) ?? 0, ageDays);
+      let freq = frequencyScore(row.access_count, maxAccessCount);
+      let usefulness = usefulnessScore(usefulCount);
+
+      // Cold-start grace. frequency, usefulness and quality are all derived
+      // from retrieval history, so a memory that has never been retrieved
+      // scores near zero on all three — including quality, which folds
+      // access and useful counts into its own formula. That is a
+      // rich-get-richer trap: a broad, frequently-matched summary compounds
+      // its advantage on every hit, while a freshly written, precise answer
+      // starts at the bottom and can only climb by being retrieved, which is
+      // exactly what its low score prevents.
+      //
+      // Measured 2026-08-02 on the query "exocortex five knowledge tiers and
+      // their purpose": a purpose-built 482-char answer scored a 1.63 boost
+      // against 2.24 for an off-topic 3,900-char summary, and did not appear
+      // in the top 5 for its own text.
+      //
+      // During the grace window these signals are treated as average rather
+      // than worst — "not yet known to be useful", not "known to be useless".
+      // max() is deliberate: a new memory that does earn real engagement
+      // keeps the higher measured value.
+      if (ageDays <= COLD_START_GRACE_DAYS) {
+        freq = Math.max(freq, COLD_START_NEUTRAL);
+        usefulness = Math.max(usefulness, COLD_START_NEUTRAL);
+        quality = Math.max(quality, COLD_START_NEUTRAL);
       }
 
-      candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness, valence, quality, qualityPersisted, goalRelevance });
+      const aliasMatch = hasExactRetrievalAlias(row.content, query.query);
+
+      candidates.push({ row, vectorScore, ftsScore, recency, freq, usefulness, valence, quality, qualityPersisted, goalRelevance, aliasMatch });
     }
 
     // Supersession demotion: memories with superseded_by set get heavily penalized
@@ -525,7 +598,7 @@ export class MemorySearch {
 
     // RRF or legacy scoring
     const rrfConfig = getRRFConfig(this.db);
-    let scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number; valence: number; quality: number; qualityPersisted: boolean; goalRelevance: number }> = [];
+    let scored: Array<{ row: MemoryRow & { _rowid: number }; score: number; vectorScore: number; ftsScore: number; recency: number; freq: number; usefulness: number; valence: number; quality: number; qualityPersisted: boolean; aliasMatch: boolean; goalRelevance: number }> = [];
     let penalizedMetadataCount = 0;
 
     if (rrfConfig.enabled) {
@@ -587,7 +660,7 @@ export class MemorySearch {
 
         // Post-RRF multiplicative boost from recency + frequency + usefulness + valence + quality + importance + tier
         const memTier = c.row.tier ?? "episodic";
-        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.quality * c.quality + weights.goalGated * c.goalRelevance + weights.importance * c.row.importance + tierBoost(memTier);
+        const boostMultiplier = 1 + weights.recency * c.recency + weights.frequency * c.freq + weights.usefulness * c.usefulness + weights.valence * c.valence + weights.quality * c.quality + weights.goalGated * c.goalRelevance + weights.importance * c.row.importance + tierBoost(memTier) + (c.aliasMatch ? ALIAS_EXACT_BOOST : 0);
         let score = baseRrf * boostMultiplier;
 
         // Superseded memories get 80% demotion (before tag boost so tags can't undo it)
@@ -612,7 +685,7 @@ export class MemorySearch {
         }
 
         if (score >= rrfMinScore) {
-          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, quality: c.quality, qualityPersisted: c.qualityPersisted, goalRelevance: c.goalRelevance });
+          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, quality: c.quality, qualityPersisted: c.qualityPersisted, aliasMatch: c.aliasMatch, goalRelevance: c.goalRelevance });
         }
       }
     } else {
@@ -631,6 +704,7 @@ export class MemorySearch {
         score += weights.valence * c.valence;
         score += weights.quality * c.quality;
         score += weights.importance * c.row.importance;
+        if (c.aliasMatch) score += ALIAS_EXACT_BOOST;
         score += weights.goalGated * c.goalRelevance;
         const memTierLegacy = c.row.tier ?? "episodic";
         score *= (1 + tierBoost(memTierLegacy));
@@ -663,7 +737,7 @@ export class MemorySearch {
         }
 
         if (score >= minScore) {
-          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, quality: c.quality, qualityPersisted: c.qualityPersisted, goalRelevance: c.goalRelevance });
+          scored.push({ row: c.row, score, vectorScore: c.vectorScore, ftsScore: c.ftsScore, recency: c.recency, freq: c.freq, usefulness: c.usefulness, valence: c.valence, quality: c.quality, qualityPersisted: c.qualityPersisted, aliasMatch: c.aliasMatch, goalRelevance: c.goalRelevance });
         }
       }
     }

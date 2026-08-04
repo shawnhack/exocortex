@@ -561,7 +561,7 @@ export function backfillMemoryCanonicalization(
 
   const rows = db
     .prepare(
-      `SELECT id, content, content_hash, is_metadata, metadata
+      `SELECT id, content, content_hash, is_metadata, metadata, tier
        FROM memories
        ORDER BY created_at DESC
        LIMIT ?`
@@ -572,6 +572,7 @@ export function backfillMemoryCanonicalization(
     content_hash: string | null;
     is_metadata: number;
     metadata: string | null;
+    tier: string | null;
   }>;
 
   if (rows.length === 0) {
@@ -642,6 +643,7 @@ export function backfillMemoryCanonicalization(
       }
       const inferredMetadata = inferIsMetadata({
         tags: normalizedTags,
+        tier: row.tier,
         metadata: parsedMetadata,
         metadataTags,
       });
