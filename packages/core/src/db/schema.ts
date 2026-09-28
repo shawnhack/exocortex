@@ -425,77 +425,6 @@ export function initializeSchema(db: DatabaseSync): void {
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('migrations.attribution_backfill_done', '1');
   }
 
-  // Backfill metadata flag for known system/benchmark classes.
-  //
-  // This runs on every database open, so it must agree with inferIsMetadata()
-  // or it silently overwrites that function's decisions. It previously flagged
-  // anything carrying a metadata tag, which meant a durable fact stored while
-  // working a goal was reclassified as bookkeeping minutes after being written
-  // correctly — and made any corrective backfill revert on the next open.
-  //
-  // Tags naming a provenance (why a memory was written) therefore only
-  // classify when nothing marks the memory as substantive: a permanent tier,
-  // or an explicit content marker. Keep in sync with inferIsMetadata().
-  const PROVENANCE_ONLY_TAGS = new Set(["goal-progress", "goal-progress-implicit"]);
-  const SUBSTANTIVE_CLAUSE = `(
-    memories.tier IN ('semantic', 'procedural', 'reference')
-    OR EXISTS (
-      SELECT 1 FROM memory_tags mt
-      WHERE mt.memory_id = memories.id AND mt.tag IN ('answer-bearing')
-    )
-  )`;
-
-  const metadataTagList = (
-    getSetting(db, "search.metadata_tags") ??
-    DEFAULT_SETTINGS["search.metadata_tags"]
-  )
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-
-  const contentKindTags = metadataTagList.filter((t) => !PROVENANCE_ONLY_TAGS.has(t));
-  const provenanceTags = metadataTagList.filter((t) => PROVENANCE_ONLY_TAGS.has(t));
-
-  // Content-kind tags describe what the memory is — they classify on sight.
-  if (contentKindTags.length > 0) {
-    const placeholders = contentKindTags.map(() => "?").join(", ");
-    db.prepare(
-      `UPDATE memories
-       SET is_metadata = 1
-       WHERE is_metadata = 0
-         AND id IN (
-           SELECT memory_id FROM memory_tags WHERE tag IN (${placeholders})
-         )`
-    ).run(...contentKindTags);
-  }
-
-  // Provenance tags classify only in the absence of a substantive signal.
-  if (provenanceTags.length > 0) {
-    const placeholders = provenanceTags.map(() => "?").join(", ");
-    db.prepare(
-      `UPDATE memories
-       SET is_metadata = 1
-       WHERE is_metadata = 0
-         AND id IN (
-           SELECT memory_id FROM memory_tags WHERE tag IN (${placeholders})
-         )
-         AND NOT ${SUBSTANTIVE_CLAUSE}`
-    ).run(...provenanceTags);
-  }
-
-  db.exec(
-    `UPDATE memories
-     SET is_metadata = 1
-     WHERE is_metadata = 0
-       AND metadata IS NOT NULL
-       AND (
-         metadata LIKE '%"mode":"benchmark"%'
-         OR metadata LIKE '%retrieval-regression%'
-         OR metadata LIKE '%benchmark%'
-         OR (metadata LIKE '%goal-progress%' AND NOT ${SUBSTANTIVE_CLAUSE})
-       )`
-  );
-
   // Canonicalize active hash duplicates before enabling uniqueness.
   db.exec(`
     WITH ranked AS (
@@ -835,6 +764,80 @@ export function initializeSchema(db: DatabaseSync): void {
       throw err;
     }
   }
+
+  // Runs after the tier column exists AND its backfill has classified existing rows:
+  // the provenance rule below reads `tier`, and on a database being upgraded every
+  // row is 'episodic' until that backfill completes.
+  // Backfill metadata flag for known system/benchmark classes.
+  //
+  // This runs on every database open, so it must agree with inferIsMetadata()
+  // or it silently overwrites that function's decisions. It previously flagged
+  // anything carrying a metadata tag, which meant a durable fact stored while
+  // working a goal was reclassified as bookkeeping minutes after being written
+  // correctly — and made any corrective backfill revert on the next open.
+  //
+  // Tags naming a provenance (why a memory was written) therefore only
+  // classify when nothing marks the memory as substantive: a permanent tier,
+  // or an explicit content marker. Keep in sync with inferIsMetadata().
+  const PROVENANCE_ONLY_TAGS = new Set(["goal-progress", "goal-progress-implicit"]);
+  const SUBSTANTIVE_CLAUSE = `(
+    memories.tier IN ('semantic', 'procedural', 'reference')
+    OR EXISTS (
+      SELECT 1 FROM memory_tags mt
+      WHERE mt.memory_id = memories.id AND mt.tag IN ('answer-bearing')
+    )
+  )`;
+
+  const metadataTagList = (
+    getSetting(db, "search.metadata_tags") ??
+    DEFAULT_SETTINGS["search.metadata_tags"]
+  )
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  const contentKindTags = metadataTagList.filter((t) => !PROVENANCE_ONLY_TAGS.has(t));
+  const provenanceTags = metadataTagList.filter((t) => PROVENANCE_ONLY_TAGS.has(t));
+
+  // Content-kind tags describe what the memory is — they classify on sight.
+  if (contentKindTags.length > 0) {
+    const placeholders = contentKindTags.map(() => "?").join(", ");
+    db.prepare(
+      `UPDATE memories
+       SET is_metadata = 1
+       WHERE is_metadata = 0
+         AND id IN (
+           SELECT memory_id FROM memory_tags WHERE tag IN (${placeholders})
+         )`
+    ).run(...contentKindTags);
+  }
+
+  // Provenance tags classify only in the absence of a substantive signal.
+  if (provenanceTags.length > 0) {
+    const placeholders = provenanceTags.map(() => "?").join(", ");
+    db.prepare(
+      `UPDATE memories
+       SET is_metadata = 1
+       WHERE is_metadata = 0
+         AND id IN (
+           SELECT memory_id FROM memory_tags WHERE tag IN (${placeholders})
+         )
+         AND NOT ${SUBSTANTIVE_CLAUSE}`
+    ).run(...provenanceTags);
+  }
+
+  db.exec(
+    `UPDATE memories
+     SET is_metadata = 1
+     WHERE is_metadata = 0
+       AND metadata IS NOT NULL
+       AND (
+         metadata LIKE '%"mode":"benchmark"%'
+         OR metadata LIKE '%retrieval-regression%'
+         OR metadata LIKE '%benchmark%'
+         OR (metadata LIKE '%goal-progress%' AND NOT ${SUBSTANTIVE_CLAUSE})
+       )`
+  );
 
   // Backfill content_hash with proper SHA-256 when column is newly added.
   if (needsHashBackfill) {
